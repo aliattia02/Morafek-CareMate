@@ -126,14 +126,14 @@ export default function LoginScreen() {
         >
           {/* Logo */}
           <View style={styles.logoSection}>
-            <Text style={styles.logo}>DiaTwin</Text>
-            <Text style={styles.subtitle}>Personalised insulin dosing support for Type 1 Diabetes</Text>
+            <Text style={styles.logo}>Morafek</Text>
+            <Text style={styles.subtitle}>Your personal health companion</Text>
           </View>
 
           {/* Form */}
           <Card variant="elevated" padding="large" style={styles.card}>
             <Text style={styles.title}>Welcome Back</Text>
-            <Text style={styles.description}>Sign in to continue managing your health</Text>
+            <Text style={styles.description}>Sign in to your account</Text>
 
             {/* User type toggle */}
             <View style={styles.userTypeSection}>

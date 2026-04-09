@@ -147,7 +147,7 @@ export default function RegisterScreen() {
         >
           <Card variant="elevated" padding="large" style={styles.card}>
             <Text style={styles.title}>Create Account</Text>
-            <Text style={styles.description}>Join NATIVE to manage your diabetes effectively</Text>
+            <Text style={styles.description}>Create your Morafek account</Text>
 
             {/* User Type Selection */}
             <View style={styles.userTypeSection}>
