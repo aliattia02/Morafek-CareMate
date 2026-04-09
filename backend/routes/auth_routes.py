@@ -134,21 +134,13 @@ def register():
 
         # Add patient-specific fields
         if data['user_type'] == 'patient':
-            # Add default patient constants from Constants class
-            try:
-                from constants import Constants
-                default_constants = Constants.DEFAULT_PATIENT_CONSTANTS
-                # Update user data with default constants (excluding nested dicts like meal_absorption_profiles)
-                for key, value in default_constants.items():
-                    if key != 'meal_absorption_profiles':  # Skip non-patient-modifiable constants
-                        user_data[key] = value
-                logger.debug(
-                    f"Added default constants including daily_reset_hour={default_constants.get('daily_reset_hour', 7)}")
-            except Exception as e:
-                logger.warning(f"Could not load default constants: {str(e)}")
-
-            # Initialize authorized doctors list (empty by default)
             user_data['authorized_doctors'] = []
+            user_data['ehr_profile'] = {
+                'blood_type': '',
+                'allergies': [],
+                'chronic_conditions': [],
+                'emergency_contact': ''
+            }
 
         # Insert user
         user_id = users.insert_one(user_data).inserted_id

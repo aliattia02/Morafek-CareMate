@@ -1,11 +1,7 @@
 # main.py
-# Updated to include LibreLinkUp CGM integration (libre_bp)
-# + background auto-sync scheduler that also keeps Render free tier alive
 from flask import Flask, request, jsonify
 import logging
-import os
 from config import create_app_config, mongo
-from constants import Constants
 
 
 def create_app():
@@ -19,19 +15,6 @@ def create_app():
 
     # Initialize app with config
     app, _, logger = create_app_config(app)
-
-    # Initialize Constants
-    constants = Constants()
-    app.constants = constants
-
-    # Attempt local file export (works on dev only).
-    # Skipped on Render because the monorepo contains mobile/constants/ which
-    # DOES exist on the deployed filesystem — writing to it triggers Render's
-    # file-watcher, causing an infinite redeploy loop that kills the server.
-    # In production both apps fetch constants via GET /api/constants/shared
-    # on every sign-in, so stale files are never a problem.
-    if not os.environ.get('RENDER'):
-        Constants.export_all_constants_safe()
 
     # ── Health check endpoint ─────────────────────────────────────────────
     # Used by:
@@ -81,36 +64,14 @@ def create_app():
 
     try:
         # Import blueprints
-        from routes.food_routes import food_routes
         from routes.auth_routes import auth_routes
         from routes.doctor_routes import doctor_routes
         from routes.patient_routes import patient_routes
-        from routes.test_routes import test_routes
-        from meal_insulin import meal_insulin_bp
-        from activity import activity_bp
-        from blood_sugar import blood_sugar_bp
-        from routes.medication_routes import medication_routes
-        from routes.meal_routes import meal_bp
-        from routes.import_routes import import_routes
-        from routes.cumulative_effects_routes import cumulative_bp
-        from routes.libre_routes import libre_bp
-        from routes.food_scan_routes import food_scan_routes as food_scan_bp
 
         blueprints = [
-            (food_routes, ''),
             (auth_routes, ''),
             (doctor_routes, ''),
             (patient_routes, ''),
-            (test_routes, ''),
-            (meal_insulin_bp, ''),
-            (activity_bp, ''),
-            (blood_sugar_bp, ''),
-            (medication_routes, ''),
-            (import_routes, ''),
-            (meal_bp, ''),
-            (cumulative_bp, ''),
-            (libre_bp, ''),
-            (food_scan_bp, ''),
         ]
 
         for blueprint, url_prefix in blueprints:
@@ -120,14 +81,6 @@ def create_app():
     except Exception as e:
         logger.error(f"Error registering blueprints: {str(e)}")
         raise
-
-    # ── Start LibreLinkUp background auto-sync scheduler ──────────────────
-    try:
-        from libre_scheduler import start_libre_scheduler
-        start_libre_scheduler(app)
-    except Exception as e:
-        logger.error(f"Failed to start Libre scheduler: {e}")
-    # ──────────────────────────────────────────────────────────────────────
 
     return app
 
