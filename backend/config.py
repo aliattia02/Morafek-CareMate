@@ -65,12 +65,9 @@ ALLOWED_ORIGINS = [
     "http://192.168.0.104:5000",
     "http://192.168.0.104:8081",
     # Render backend
-    "https://native-3y3j.onrender.com",
+    "https://morafek-api.onrender.com",
     # Vercel PWA deployments
-    "https://diatwin-phi.vercel.app",
-    "https://dia-twin.vercel.app",
-    "https://diatwin.vercel.app",
-    "https://diatwin-khgy6tusc-aliattia2de-6489s-projects.vercel.app",
+    "https://morafek.vercel.app",
 ]
 
 
