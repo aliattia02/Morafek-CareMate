@@ -6,6 +6,7 @@ from utils.auth import token_required
 from utils.error_handler import api_error_handler
 from routes.doctor_routes import check_doctor_patient_access
 from config import mongo
+import cloudinary.uploader
 import logging
 
 logger = logging.getLogger(__name__)
@@ -549,3 +550,168 @@ def get_visits(current_user, patient_id):
         })
 
     return jsonify(result), 200
+
+
+# ─── Documents (ehr_documents) ────────────────────────────────────────────────
+
+# Permitted MIME types for document uploads
+DOCUMENT_ALLOWED_MIME_TYPES = {
+    'image/jpeg', 'image/png', 'image/webp',
+    'application/pdf',
+}
+DOCUMENT_MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _serialize_document(doc):
+    """Convert a MongoDB document dict into a JSON-serialisable response."""
+    return {
+        'id': str(doc['_id']),
+        'category': doc.get('category', 'other'),
+        'description': doc.get('description', ''),
+        'url': doc.get('url', ''),
+        'created_at': doc.get('created_at', ''),
+    }
+
+
+@ehr_routes.route('/api/patient/documents', methods=['GET'])
+@token_required
+@api_error_handler
+def get_own_documents(current_user):
+    """GET /api/patient/documents — patient retrieves their own documents."""
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    patient_id = str(current_user['_id'])
+    docs = list(
+        mongo.db.ehr_documents
+        .find({'patient_id': patient_id})
+        .sort('created_at', -1)
+    )
+    return jsonify([_serialize_document(d) for d in docs]), 200
+
+
+@ehr_routes.route('/api/patient/documents', methods=['POST'])
+@token_required
+@api_error_handler
+def upload_own_document(current_user):
+    """POST /api/patient/documents — patient uploads a document (image or PDF).
+
+    Expects a multipart/form-data request with:
+      file        — the file to upload (image or PDF, max 10 MB)
+      category    — one of: lab_report, imaging, prescription, other
+      description — short text description (required)
+    """
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file provided. Send the file as the "file" field.'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    if file.mimetype not in DOCUMENT_ALLOWED_MIME_TYPES:
+        return jsonify({
+            'error': f'Unsupported file type: {file.mimetype}. '
+                     'Allowed types: JPEG, PNG, WebP, PDF'
+        }), 400
+
+    file_bytes = file.read()
+    if len(file_bytes) > DOCUMENT_MAX_FILE_BYTES:
+        return jsonify({'error': 'File too large. Maximum allowed size is 10 MB.'}), 400
+
+    category = request.form.get('category', 'other')
+    valid_categories = {'lab_report', 'imaging', 'prescription', 'other'}
+    if category not in valid_categories:
+        category = 'other'
+
+    description = request.form.get('description', '').strip()
+    if not description:
+        return jsonify({'error': 'Description is required.'}), 400
+
+    patient_id = str(current_user['_id'])
+    doc_uuid = str(uuid4())
+
+    resource_type = 'image' if file.mimetype.startswith('image/') else 'raw'
+    upload_result = cloudinary.uploader.upload(
+        file_bytes,
+        folder='morafek/documents',
+        public_id=f'patient_{patient_id}_{doc_uuid}',
+        overwrite=False,
+        resource_type=resource_type,
+    )
+
+    url = upload_result.get('secure_url')
+    if not url:
+        logger.error('Cloudinary document upload succeeded but returned no secure_url')
+        return jsonify({'error': 'Upload failed: no URL returned'}), 500
+
+    created_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    document = {
+        'patient_id': patient_id,
+        'category': category,
+        'description': description,
+        'url': url,
+        'cloudinary_public_id': upload_result.get('public_id', ''),
+        'created_at': created_at,
+    }
+
+    result = mongo.db.ehr_documents.insert_one(document)
+    logger.info('Document uploaded successfully')
+
+    document['_id'] = result.inserted_id
+    return jsonify(_serialize_document(document)), 201
+
+
+@ehr_routes.route('/api/patient/documents/<document_id>', methods=['DELETE'])
+@token_required
+@api_error_handler
+def delete_own_document(current_user, document_id):
+    """DELETE /api/patient/documents/<document_id> — patient deletes one of their documents."""
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    patient_id = str(current_user['_id'])
+
+    try:
+        doc = mongo.db.ehr_documents.find_one({
+            '_id': ObjectId(document_id),
+            'patient_id': patient_id,
+        })
+    except Exception:
+        return jsonify({'error': 'Invalid document ID'}), 400
+
+    if not doc:
+        return jsonify({'error': 'Document not found'}), 404
+
+    # Remove from Cloudinary
+    public_id = doc.get('cloudinary_public_id')
+    if public_id:
+        try:
+            ext = doc.get('url', '').rsplit('.', 1)[-1].lower()
+            resource_type = 'image' if ext in ('jpg', 'jpeg', 'png', 'webp', 'gif') else 'raw'
+            cloudinary.uploader.destroy(public_id, resource_type=resource_type)
+        except Exception as e:
+            logger.warning(f'Cloudinary deletion failed for {public_id}: {e}')
+
+    mongo.db.ehr_documents.delete_one({'_id': ObjectId(document_id)})
+    logger.info('Document deleted successfully')
+    return jsonify({'message': 'Document deleted'}), 200
+
+
+@ehr_routes.route('/api/doctor/patient/<patient_id>/documents', methods=['GET'])
+@token_required
+@api_error_handler
+def get_patient_documents(current_user, patient_id):
+    """GET /api/doctor/patient/<patient_id>/documents — doctor views a patient's documents."""
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err), code
+
+    docs = list(
+        mongo.db.ehr_documents
+        .find({'patient_id': patient_id})
+        .sort('created_at', -1)
+    )
+    return jsonify([_serialize_document(d) for d in docs]), 200
