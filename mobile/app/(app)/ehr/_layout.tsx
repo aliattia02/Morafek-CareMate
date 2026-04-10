@@ -9,6 +9,7 @@ export default function EhrLayout() {
       <Stack.Screen name="messages" options={{ title: 'Messages', headerShown: true }} />
       <Stack.Screen name="exercises" options={{ title: 'My Exercises', headerShown: true }} />
       <Stack.Screen name="visit-form" options={{ title: 'New Visit', headerShown: true }} />
+      <Stack.Screen name="patient-profile" options={{ title: 'Medical Profile', headerShown: true }} />
     </Stack>
   );
 }
