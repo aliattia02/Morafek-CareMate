@@ -14,6 +14,8 @@ import {
   ActivityIndicator,
   RefreshControl,
   TextInput,
+  Linking,
+  Alert,
   StyleSheet,
 } from 'react-native';
 
@@ -23,10 +25,12 @@ import {
   getDoctorPatientVitals,
   getDoctorPatientVisits,
   getMessageThread,
+  getDoctorPatientDocuments,
   sendMessage,
   type VitalResponse,
   type VisitResponse,
   type MessageResponse,
+  type DocumentResponse,
 } from '@/services/api/ehr';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 import type { DoctorPatient } from '@/services/api/doctor';
@@ -35,7 +39,7 @@ import type { DoctorPatient } from '@/services/api/doctor';
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TabType = 'overview' | 'visits' | 'vitals' | 'messages';
+type TabType = 'overview' | 'visits' | 'vitals' | 'messages' | 'documents';
 
 interface PatientDataViewProps {
   patient: DoctorPatient;
@@ -68,6 +72,12 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
   const [messagesRefreshing, setMessagesRefreshing] = useState(false);
   const [messageInput, setMessageInput] = useState('');
   const [messageSending, setMessageSending] = useState(false);
+
+  const [documents, setDocuments] = useState<DocumentResponse[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentsLoaded, setDocumentsLoaded] = useState(false);
+  const [documentsError, setDocumentsError] = useState<string | null>(null);
+  const [documentsRefreshing, setDocumentsRefreshing] = useState(false);
 
   const loadVitals = useCallback(async () => {
     try {
@@ -111,6 +121,20 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     }
   }, [patient.id]);
 
+  const loadDocuments = useCallback(async () => {
+    try {
+      setDocumentsError(null);
+      const data = await getDoctorPatientDocuments(patient.id);
+      setDocuments(data);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to load documents';
+      setDocumentsError(message);
+    } finally {
+      setDocumentsLoading(false);
+      setDocumentsLoaded(true);
+    }
+  }, [patient.id]);
+
   useEffect(() => {
     if (activeTab === 'vitals' && !vitalsLoaded && !vitalsLoading) {
       setVitalsLoading(true);
@@ -132,6 +156,13 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     }
   }, [activeTab, loadMessages]);
 
+  useEffect(() => {
+    if (activeTab === 'documents' && !documentsLoaded && !documentsLoading) {
+      setDocumentsLoading(true);
+      loadDocuments();
+    }
+  }, [activeTab, loadDocuments]);
+
   const onRefreshVitals = useCallback(async () => {
     setVitalsRefreshing(true);
     await loadVitals();
@@ -149,6 +180,12 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     await loadMessages();
     setMessagesRefreshing(false);
   }, [loadMessages]);
+
+  const onRefreshDocuments = useCallback(async () => {
+    setDocumentsRefreshing(true);
+    await loadDocuments();
+    setDocumentsRefreshing(false);
+  }, [loadDocuments]);
 
   const handleSendMessage = useCallback(async () => {
     const body = messageInput.trim();
@@ -171,6 +208,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     { key: 'visits', label: 'Visits' },
     { key: 'vitals', label: 'Vitals' },
     { key: 'messages', label: 'Messages' },
+    { key: 'documents', label: 'Documents' },
   ];
 
   return (
@@ -366,6 +404,59 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
           </View>
         </View>
       )}
+
+      {/* Documents Tab */}
+      {activeTab === 'documents' && (
+        <ScrollView
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={documentsRefreshing}
+              onRefresh={onRefreshDocuments}
+              colors={[colors.primary]}
+            />
+          }
+        >
+          {documentsLoading ? (
+            <ActivityIndicator color={colors.primary} style={styles.loader} />
+          ) : documentsError ? (
+            <Text style={styles.errorText}>⚠️ {documentsError}</Text>
+          ) : documents.length === 0 ? (
+            <Text style={styles.emptyText}>No documents found.</Text>
+          ) : (
+            documents.map((doc, index) => {
+              const icons: Record<string, string> = {
+                lab_report: '🧪',
+                imaging: '🩻',
+                prescription: '💊',
+                other: '📄',
+              };
+              const icon = icons[doc.category] ?? '📄';
+              return (
+                <Card key={doc.id ?? index} variant="outlined" padding="medium" style={styles.card}>
+                  <View style={styles.docHeader}>
+                    <Text style={styles.docIcon}>{icon}</Text>
+                    <View style={styles.docInfo}>
+                      <Text style={styles.fieldValue}>{doc.description || '(No description)'}</Text>
+                      <Text style={styles.fieldLabel}>{doc.created_at}</Text>
+                    </View>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.viewDocButton}
+                    onPress={() =>
+                      Linking.openURL(doc.url).catch(() =>
+                        Alert.alert('Error', 'Unable to open document.')
+                      )
+                    }
+                  >
+                    <Text style={styles.viewDocButtonText}>View</Text>
+                  </TouchableOpacity>
+                </Card>
+              );
+            })
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -539,6 +630,31 @@ const styles = StyleSheet.create({
   },
   sendButtonText: {
     ...typography.body,
+    color: colors.surface,
+    fontWeight: '600',
+  },
+  // Documents tab
+  docHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: spacing.sm,
+  },
+  docIcon: {
+    fontSize: 22,
+    marginRight: spacing.sm,
+  },
+  docInfo: {
+    flex: 1,
+  },
+  viewDocButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    alignSelf: 'flex-start',
+  },
+  viewDocButtonText: {
+    ...typography.small,
     color: colors.surface,
     fontWeight: '600',
   },

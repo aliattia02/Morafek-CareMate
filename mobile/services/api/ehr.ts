@@ -44,6 +44,16 @@ export interface MessageResponse {
   created_at: string;
 }
 
+export type DocumentCategory = 'lab_report' | 'imaging' | 'prescription' | 'other';
+
+export interface DocumentResponse {
+  id: string;
+  category: DocumentCategory;
+  description: string;
+  url: string;
+  created_at: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Vitals
 // ─────────────────────────────────────────────────────────────────────────────
@@ -133,6 +143,42 @@ export const getDoctorPatientVitals = getPatientVitals;
 export const getDoctorPatientVisits = getPatientVisits;
 export const getMessageThread = getPatientMessages;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Documents
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function getMyDocuments(): Promise<DocumentResponse[]> {
+  const response = await apiClient.get<DocumentResponse[]>(API.EHR.DOCUMENTS);
+  return response.data;
+}
+
+export async function getDoctorPatientDocuments(patientId: string): Promise<DocumentResponse[]> {
+  const response = await apiClient.get<DocumentResponse[]>(
+    API.EHR.PATIENT_DOCUMENTS(patientId)
+  );
+  return response.data;
+}
+
+export async function uploadDocument(
+  file: { uri: string; name: string; type: string },
+  category: DocumentCategory,
+  description: string
+): Promise<DocumentResponse> {
+  const formData = new FormData();
+  formData.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+  formData.append('category', category);
+  formData.append('description', description);
+
+  const response = await apiClient.post<DocumentResponse>(API.EHR.DOCUMENTS, formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+  return response.data;
+}
+
+export async function deleteDocument(documentId: string): Promise<void> {
+  await apiClient.delete(API.EHR.DOCUMENT(documentId));
+}
+
 export default {
   submitVital,
   getMyVitals,
@@ -143,4 +189,8 @@ export default {
   getPatientVitals,
   getPatientVisits,
   getPatientMessages,
+  getMyDocuments,
+  getDoctorPatientDocuments,
+  uploadDocument,
+  deleteDocument,
 };

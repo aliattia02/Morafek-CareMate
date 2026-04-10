@@ -21,6 +21,7 @@ import { useAuthStore } from '@/store/auth.store';
 import { Card } from '@/components/ui';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 import { getMyVitals, getMyVisits, type VitalResponse, type VisitResponse } from '@/services/api/ehr';
+import { initDB, cacheVitals, getCachedVitals } from '@/services/offline/db';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -46,6 +47,7 @@ export default function PatientHomeScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [usingCache, setUsingCache] = useState(false);
 
   // Redirect doctors immediately
   useEffect(() => {
@@ -54,6 +56,11 @@ export default function PatientHomeScreen() {
     }
   }, [user?.user_type]);
 
+  // Initialise local DB once
+  useEffect(() => {
+    initDB();
+  }, []);
+
   if (user?.user_type === 'doctor' || user?.user_type === 'admin') {
     return <View style={{ flex: 1, backgroundColor: colors.background }} />;
   }
@@ -61,12 +68,24 @@ export default function PatientHomeScreen() {
   const loadData = useCallback(async () => {
     try {
       setError(null);
+      setUsingCache(false);
       const [vitals, visits] = await Promise.all([getMyVitals(1), getMyVisits()]);
       setVital(vitals[0] ?? null);
       setVisit(visits[0] ?? null);
+      // Cache the latest vitals for offline use
+      if (vitals.length > 0) {
+        cacheVitals(vitals);
+      }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load data';
-      setError(message);
+      // Fall back to cached data when network is unavailable
+      const cached = getCachedVitals();
+      if (cached.length > 0) {
+        setVital(cached[0]);
+        setUsingCache(true);
+      } else {
+        const message = err instanceof Error ? err.message : 'Failed to load data';
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -105,6 +124,13 @@ export default function PatientHomeScreen() {
         {error && (
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>⚠️ {error}</Text>
+          </View>
+        )}
+
+        {/* Cached data banner */}
+        {usingCache && (
+          <View style={styles.cacheContainer}>
+            <Text style={styles.cacheText}>⚠️ Showing cached data</Text>
           </View>
         )}
 
@@ -174,6 +200,12 @@ export default function PatientHomeScreen() {
           >
             <Text style={styles.actionButtonText}>💬 Messages</Text>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => router.push('/(app)/ehr/documents')}
+          >
+            <Text style={styles.actionButtonText}>📁 Documents</Text>
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -220,6 +252,18 @@ const styles = StyleSheet.create({
   errorText: {
     ...typography.body,
     color: colors.danger,
+  },
+  cacheContainer: {
+    margin: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.warning + '20',
+    borderRadius: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.warning,
+  },
+  cacheText: {
+    ...typography.body,
+    color: colors.warning,
   },
   card: {
     marginHorizontal: spacing.md,
