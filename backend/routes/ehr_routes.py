@@ -15,7 +15,7 @@ ehr_routes = Blueprint('ehr_routes', __name__)
 
 # ─── Vitals (ehr_vitals) ─────────────────────────────────────────────────────
 
-@ehr_routes.route('/api/ehr/vitals/<patient_id>', methods=['POST'])
+@ehr_routes.route('/api/doctor/patient/<patient_id>/vitals', methods=['POST'])
 @token_required
 @api_error_handler
 def create_vitals(current_user, patient_id):
@@ -121,7 +121,7 @@ def create_vitals(current_user, patient_id):
     }), 201
 
 
-@ehr_routes.route('/api/ehr/vitals/<patient_id>', methods=['GET'])
+@ehr_routes.route('/api/doctor/patient/<patient_id>/vitals', methods=['GET'])
 @token_required
 @api_error_handler
 def get_vitals(current_user, patient_id):
@@ -169,7 +169,7 @@ def get_vitals(current_user, patient_id):
 
 # ─── Visits (ehr_visits + ehr_conditions) ────────────────────────────────────
 
-@ehr_routes.route('/api/ehr/visits/<patient_id>', methods=['POST'])
+@ehr_routes.route('/api/doctor/patient/<patient_id>/visits', methods=['POST'])
 @token_required
 @api_error_handler
 def create_visit(current_user, patient_id):
@@ -288,7 +288,7 @@ def create_visit(current_user, patient_id):
     }), 201
 
 
-@ehr_routes.route('/api/ehr/visits/<patient_id>', methods=['GET'])
+@ehr_routes.route('/api/doctor/patient/<patient_id>/visits', methods=['GET'])
 @token_required
 @api_error_handler
 def get_visits(current_user, patient_id):
