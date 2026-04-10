@@ -1,0 +1,62 @@
+export const E = {
+  fontSize: {
+    tiny:    14,
+    small:   16,
+    body:    20,
+    h3:      22,
+    h2:      26,
+    h1:      32,
+    display: 44,   // for BP numbers
+  },
+  tap:     64,     // minimum height for any interactive element
+  tapXL:   76,     // primary action buttons
+  pad:     20,     // standard card padding
+  radius:  16,
+  colors: {
+    bg:           '#FFFFFF',
+    surface:      '#F7F7F7',
+    surfaceAlt:   '#EEF4FF',
+    primary:      '#005A9E',
+    primaryDark:  '#003F6E',
+    danger:       '#C0392B',
+    dangerLight:  '#FDECEA',
+    success:      '#1A6E35',
+    successLight: '#E8F5E9',
+    warning:      '#B7500A',
+    warningLight: '#FFF3E0',
+    textPrimary:  '#1A1A1A',
+    textSecondary:'#4A4A4A',
+    textInverse:  '#FFFFFF',
+    border:       '#767676',
+    divider:      '#E0E0E0',
+    urgent:       '#C0392B',
+    urgentLight:  '#FDECEA',
+  },
+};
+
+export const ET = {
+  display: { fontSize: E.fontSize.display, fontWeight: '800' as const,
+             color: E.colors.textPrimary, letterSpacing: -1 },
+  h1:      { fontSize: E.fontSize.h1,   fontWeight: '700' as const,
+             color: E.colors.textPrimary, lineHeight: 42 },
+  h2:      { fontSize: E.fontSize.h2,   fontWeight: '700' as const,
+             color: E.colors.textPrimary, lineHeight: 34 },
+  h3:      { fontSize: E.fontSize.h3,   fontWeight: '600' as const,
+             color: E.colors.textPrimary, lineHeight: 30 },
+  body:    { fontSize: E.fontSize.body,  fontWeight: '400' as const,
+             color: E.colors.textPrimary, lineHeight: 30 },
+  bodyBold:{ fontSize: E.fontSize.body,  fontWeight: '600' as const,
+             color: E.colors.textPrimary, lineHeight: 30 },
+  small:   { fontSize: E.fontSize.small, fontWeight: '400' as const,
+             color: E.colors.textSecondary, lineHeight: 22 },
+  label:   { fontSize: E.fontSize.body,  fontWeight: '600' as const,
+             color: E.colors.textPrimary },
+  unit:    { fontSize: E.fontSize.h3,    fontWeight: '400' as const,
+             color: E.colors.textSecondary },
+  btnPrimary: { fontSize: E.fontSize.h3, fontWeight: '700' as const,
+                color: E.colors.textInverse },
+  btnSecondary: { fontSize: E.fontSize.body, fontWeight: '600' as const,
+                  color: E.colors.primary },
+  badge:   { fontSize: E.fontSize.body,  fontWeight: '700' as const,
+             color: E.colors.textInverse },
+};

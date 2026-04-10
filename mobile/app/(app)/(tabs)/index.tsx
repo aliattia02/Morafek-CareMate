@@ -14,12 +14,12 @@ import {
   RefreshControl,
   TouchableOpacity,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/store/auth.store';
-import { Card } from '@/components/ui';
-import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+import { E, ET } from '@/constants/elderlyTheme';
 import { getMyVitals, getMyVisits, type VitalResponse, type VisitResponse } from '@/services/api/ehr';
 import { initDB, cacheVitals, getCachedVitals } from '@/services/offline/db';
 
@@ -62,7 +62,7 @@ export default function PatientHomeScreen() {
   }, []);
 
   if (user?.user_type === 'doctor' || user?.user_type === 'admin') {
-    return <View style={{ flex: 1, backgroundColor: colors.background }} />;
+    return <View style={{ flex: 1, backgroundColor: E.colors.bg }} />;
   }
 
   const loadData = useCallback(async () => {
@@ -103,6 +103,21 @@ export default function PatientHomeScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
+      {/* ── HEADER BAR ── */}
+      <View style={styles.header}>
+        <View style={styles.headerLeft}>
+          <Text style={styles.headerGreeting}>{greeting()}, {user?.firstName || 'Patient'}</Text>
+          <Text style={styles.headerName}>{user?.firstName || 'Patient'}</Text>
+        </View>
+        <TouchableOpacity
+          style={styles.sosButton}
+          onPress={() => Linking.openURL('tel:112')}
+          accessibilityLabel="SOS emergency call"
+        >
+          <Text style={styles.sosText}>🆘 SOS</Text>
+        </TouchableOpacity>
+      </View>
+
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.content}
@@ -110,70 +125,95 @@ export default function PatientHomeScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={[colors.primary]}
+            colors={[E.colors.primary]}
           />
         }
       >
-        {/* Welcome Section */}
-        <View style={styles.welcomeSection}>
-          <Text style={styles.greetingText}>{greeting()}</Text>
-          <Text style={styles.userName}>{user?.firstName || 'Patient'}</Text>
-        </View>
-
         {/* Error */}
         {error && (
-          <View style={styles.errorContainer}>
-            <Text style={styles.errorText}>⚠️ {error}</Text>
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>⚠️ {error}</Text>
           </View>
         )}
 
         {/* Cached data banner */}
         {usingCache && (
-          <View style={styles.cacheContainer}>
-            <Text style={styles.cacheText}>⚠️ Showing cached data</Text>
+          <View style={styles.cacheBanner}>
+            <Text style={styles.cacheBannerText}>⚠️ Showing cached data</Text>
           </View>
         )}
 
-        {/* Last Vital Card */}
-        <Card variant="outlined" padding="medium" style={styles.card}>
-          <Text style={styles.cardTitle}>💓 Last Blood Pressure Reading</Text>
+        {/* ── BLOOD PRESSURE CARD ── */}
+        <View style={styles.card}>
+          {/* Row 1: title + timestamp */}
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>💓 Blood Pressure</Text>
+            {vital && (
+              <Text style={styles.cardTimestamp}>{vital.timestamp}</Text>
+            )}
+          </View>
+
           {loading ? (
-            <ActivityIndicator color={colors.primary} style={styles.loader} />
+            <ActivityIndicator color={E.colors.primary} style={{ marginVertical: 12 }} />
           ) : vital ? (
             <>
-              <View style={styles.vitalRow}>
-                <Text style={styles.vitalValue}>
-                  {vital.systolic}/{vital.diastolic}
-                  <Text style={styles.vitalUnit}> mmHg</Text>
-                </Text>
-                <Text style={styles.vitalValue}>
-                  {vital.pulse}
-                  <Text style={styles.vitalUnit}> bpm</Text>
-                </Text>
-                {vital.urgent && (
-                  <View style={styles.crisisBadge}>
-                    <Text style={styles.crisisBadgeText}>⚠️ Crisis</Text>
-                  </View>
-                )}
+              {/* Row 2: BP values */}
+              <View style={styles.bpRow}>
+                <View style={styles.bpLeft}>
+                  <Text style={styles.bpDisplay}>{vital.systolic}/{vital.diastolic}</Text>
+                  <Text style={styles.bpUnit}>mmHg</Text>
+                </View>
+                <View style={styles.bpRight}>
+                  <Text style={styles.bpPulse}>{vital.pulse}</Text>
+                  <Text style={styles.bpUnit}>/min</Text>
+                </View>
               </View>
-              <Text style={styles.vitalTimestamp}>{vital.timestamp}</Text>
+
+              {/* Row 3: BP status badge */}
+              {(() => {
+                const sys = vital.systolic ?? 0;
+                const dia = vital.diastolic ?? 0;
+                let bg: string, fg: string, label: string;
+                if (sys >= 180 || dia >= 120) {
+                  bg = E.colors.dangerLight; fg = E.colors.danger;
+                  label = '⚠️ Crisis — Contact Doctor Now';
+                } else if (sys >= 130 || dia > 80) {
+                  bg = E.colors.dangerLight; fg = E.colors.danger;
+                  label = '🔴 High Blood Pressure';
+                } else if (sys >= 120) {
+                  bg = E.colors.warningLight; fg = E.colors.warning;
+                  label = '🟠 Elevated';
+                } else {
+                  bg = E.colors.successLight; fg = E.colors.success;
+                  label = '🟢 Normal';
+                }
+                return (
+                  <View style={[styles.statusBadge, { backgroundColor: bg }]}>
+                    <Text style={[styles.statusBadgeText, { color: fg }]}>{label}</Text>
+                  </View>
+                );
+              })()}
             </>
           ) : (
-            <Text style={styles.emptyText}>No readings yet.</Text>
+            <Text style={styles.emptyText}>No readings yet</Text>
           )}
+
+          {/* Row 4: Add Reading button */}
           <TouchableOpacity
-            style={styles.button}
+            style={styles.primaryButton}
             onPress={() => router.push('/(app)/log/vitals')}
           >
-            <Text style={styles.buttonText}>+ Add Reading</Text>
+            <Text style={styles.primaryButtonText}>➕  Add Reading</Text>
           </TouchableOpacity>
-        </Card>
+        </View>
 
-        {/* Last Visit Card */}
-        <Card variant="outlined" padding="medium" style={styles.card}>
-          <Text style={styles.cardTitle}>🏥 Last Visit</Text>
+        {/* ── LAST VISIT CARD ── */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>🏥 Last Visit</Text>
+          </View>
           {loading ? (
-            <ActivityIndicator color={colors.primary} style={styles.loader} />
+            <ActivityIndicator color={E.colors.primary} style={{ marginVertical: 12 }} />
           ) : visit ? (
             <>
               <Text style={styles.visitDate}>{visit.visit_date}</Text>
@@ -182,30 +222,35 @@ export default function PatientHomeScreen() {
               ) : null}
             </>
           ) : (
-            <Text style={styles.emptyText}>No visits recorded.</Text>
+            <Text style={styles.emptyTextSecondary}>No visits recorded</Text>
           )}
-        </Card>
+        </View>
 
-        {/* Quick Actions */}
-        <View style={styles.quickActions}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => router.push('/(app)/ehr/visits')}
-          >
-            <Text style={styles.actionButtonText}>📋 My Visits</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => router.push('/(app)/ehr/messages')}
-          >
-            <Text style={styles.actionButtonText}>💬 Messages</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => router.push('/(app)/ehr/documents')}
-          >
-            <Text style={styles.actionButtonText}>📁 Documents</Text>
-          </TouchableOpacity>
+        {/* ── ACTION TILES ── */}
+        <View style={styles.tilesContainer}>
+          {[
+            { icon: '📋', title: 'My Visits',    route: '/(app)/ehr/visits'    },
+            { icon: '💬', title: 'Messages',     route: '/(app)/ehr/messages'  },
+            { icon: '📁', title: 'My Documents', route: '/(app)/ehr/documents' },
+            { icon: '🏋️', title: 'My Exercises', route: '/(app)/ehr/exercises' },
+          ].map((tile) => (
+            <TouchableOpacity
+              key={tile.route}
+              style={styles.tile}
+              onPress={() => router.push(tile.route as any)}
+            >
+              <Text style={styles.tileIcon}>{tile.icon}</Text>
+              <Text style={styles.tileTitle}>{tile.title}</Text>
+              <Text style={styles.tileChevron}>›</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        {/* ── SENSORS CARD (placeholder) ── */}
+        <View style={styles.sensorsCard}>
+          <Text style={styles.cardTitle}>📡  Connected Sensors</Text>
+          <Text style={styles.emptyTextSecondary}>No sensors connected</Text>
+          <Text style={styles.sensorsSmall}>Heart rate monitor, CGM, and SpO₂ coming soon</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -219,141 +264,191 @@ export default function PatientHomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: E.colors.bg,
   },
-  container: {
-    flex: 1,
-  },
-  content: {
-    paddingBottom: spacing.xl,
-  },
-  welcomeSection: {
-    padding: spacing.md,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  greetingText: {
-    ...typography.body,
-    color: colors.text.secondary,
-  },
-  userName: {
-    ...typography.h1,
-    color: colors.text.primary,
-  },
-  errorContainer: {
-    margin: spacing.md,
-    padding: spacing.md,
-    backgroundColor: colors.danger + '10',
-    borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.danger,
-  },
-  errorText: {
-    ...typography.body,
-    color: colors.danger,
-  },
-  cacheContainer: {
-    margin: spacing.md,
-    padding: spacing.md,
-    backgroundColor: colors.warning + '20',
-    borderRadius: 8,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.warning,
-  },
-  cacheText: {
-    ...typography.body,
-    color: colors.warning,
-  },
-  card: {
-    marginHorizontal: spacing.md,
-    marginTop: spacing.md,
-  },
-  cardTitle: {
-    ...typography.h3,
-    color: colors.text.primary,
-    marginBottom: spacing.sm,
-  },
-  loader: {
-    marginVertical: spacing.sm,
-  },
-  vitalRow: {
+  // Header
+  header: {
+    height: 80,
+    backgroundColor: E.colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: spacing.md,
-    marginBottom: spacing.xs,
+    justifyContent: 'space-between',
+    paddingHorizontal: E.pad,
   },
-  vitalValue: {
-    ...typography.h2,
-    color: colors.text.primary,
+  headerLeft: {
+    flex: 1,
   },
-  vitalUnit: {
-    ...typography.body,
-    color: colors.text.secondary,
+  headerGreeting: {
+    ...ET.body,
+    color: E.colors.textInverse,
   },
-  vitalTimestamp: {
-    ...typography.small,
-    color: colors.text.secondary,
-    marginBottom: spacing.sm,
-  },
-  crisisBadge: {
-    backgroundColor: colors.danger,
-    borderRadius: borderRadius.sm,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-  },
-  crisisBadgeText: {
-    ...typography.small,
-    color: '#fff',
+  headerName: {
+    ...ET.h2,
+    color: E.colors.textInverse,
     fontWeight: '700',
   },
-  emptyText: {
-    ...typography.body,
-    color: colors.text.secondary,
-    marginBottom: spacing.sm,
-  },
-  button: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
+  sosButton: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: E.colors.danger,
     alignItems: 'center',
-    marginTop: spacing.xs,
+    justifyContent: 'center',
   },
-  buttonText: {
-    ...typography.body,
-    color: '#fff',
-    fontWeight: '600',
+  sosText: {
+    ...ET.bodyBold,
+    color: E.colors.textInverse,
   },
+  // Scroll
+  container: {
+    flex: 1,
+    backgroundColor: E.colors.bg,
+  },
+  content: {
+    paddingBottom: 32,
+  },
+  // Banners
+  errorBanner: {
+    margin: 16,
+    padding: E.pad,
+    backgroundColor: E.colors.dangerLight,
+    borderRadius: E.radius,
+  },
+  errorBannerText: {
+    ...ET.bodyBold,
+    color: E.colors.danger,
+  },
+  cacheBanner: {
+    margin: 16,
+    padding: E.pad,
+    backgroundColor: E.colors.warningLight,
+    borderRadius: E.radius,
+  },
+  cacheBannerText: {
+    ...ET.bodyBold,
+    color: E.colors.warning,
+  },
+  // Cards
+  card: {
+    backgroundColor: E.colors.bg,
+    borderRadius: E.radius,
+    margin: 16,
+    padding: E.pad,
+    borderWidth: 2,
+    borderColor: E.colors.border,
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  cardTitle: {
+    ...ET.h3,
+  },
+  cardTimestamp: {
+    ...ET.small,
+  },
+  // BP values
+  bpRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  bpLeft: {
+    flex: 1,
+  },
+  bpRight: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  bpDisplay: {
+    ...ET.display,
+  },
+  bpPulse: {
+    ...ET.h2,
+  },
+  bpUnit: {
+    ...ET.unit,
+  },
+  // Status badge
+  statusBadge: {
+    height: 56,
+    borderRadius: E.radius,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  statusBadgeText: {
+    ...ET.bodyBold,
+  },
+  // Primary button
+  primaryButton: {
+    height: E.tapXL,
+    backgroundColor: E.colors.primary,
+    borderRadius: E.radius,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primaryButtonText: {
+    ...ET.btnPrimary,
+  },
+  // Visit card
   visitDate: {
-    ...typography.body,
-    color: colors.text.primary,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
+    ...ET.bodyBold,
+    marginBottom: 4,
   },
   visitDiagnosis: {
-    ...typography.body,
-    color: colors.text.secondary,
+    ...ET.body,
   },
-  quickActions: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    marginHorizontal: spacing.md,
-    marginTop: spacing.md,
+  // Empty states
+  emptyText: {
+    ...ET.body,
+    textAlign: 'center',
+    marginBottom: 12,
   },
-  actionButton: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
+  emptyTextSecondary: {
+    ...ET.body,
+    color: E.colors.textSecondary,
+  },
+  // Action tiles
+  tilesContainer: {
+    marginHorizontal: 16,
+  },
+  tile: {
+    height: E.tap,
+    backgroundColor: E.colors.surfaceAlt,
+    borderRadius: E.radius,
     borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.md,
+    borderColor: E.colors.border,
+    marginBottom: 12,
+    paddingHorizontal: E.pad,
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  actionButtonText: {
-    ...typography.body,
-    color: colors.primary,
-    fontWeight: '600',
+  tileIcon: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  tileTitle: {
+    ...ET.bodyBold,
+    flex: 1,
+  },
+  tileChevron: {
+    ...ET.h2,
+    color: E.colors.textSecondary,
+  },
+  // Sensors card
+  sensorsCard: {
+    backgroundColor: E.colors.surfaceAlt,
+    borderRadius: E.radius,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: E.colors.border,
+    margin: 16,
+    padding: E.pad,
+  },
+  sensorsSmall: {
+    ...ET.small,
+    marginTop: 4,
   },
 });
