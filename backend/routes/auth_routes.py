@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.security import generate_password_hash, check_password_hash
 import jwt
+import random
 from datetime import datetime, timedelta, timezone
 from bson.objectid import ObjectId
 from utils.auth import token_required, generate_token
@@ -297,3 +298,91 @@ def revoke_doctor(current_user):
     except Exception as e:
         logger.error(f"Error revoking doctor access: {str(e)}")
         return jsonify({"error": "Failed to revoke doctor access"}), 500
+
+
+@auth_routes.route('/api/auth/forgot-password', methods=['POST'])
+def forgot_password():
+    """POST /api/auth/forgot-password — request a password-reset code.
+
+    Security: always returns 200 regardless of whether the email exists,
+    to prevent user-enumeration attacks.
+    """
+    try:
+        logger = current_app.logger
+        users = current_app.mongo.db.users
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Missing request data"}), 400
+
+        email = data.get('email', '').strip().lower()
+        if not email:
+            return jsonify({"error": "Email is required"}), 400
+
+        user = users.find_one({"email": email})
+
+        if user:
+            code = str(random.randint(100000, 999999))
+            expires = datetime.now(timezone.utc) + timedelta(minutes=15)
+            users.update_one(
+                {"_id": user['_id']},
+                {"$set": {"reset_code": code, "reset_code_expires": expires}}
+            )
+            # No email server yet — log for development
+            logger.info(f"Password reset code for {email}: {code}")
+
+        return jsonify({"message": "If this email is registered, a reset link has been sent."}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Forgot-password error: {str(e)}")
+        return jsonify({"error": "Request failed"}), 500
+
+
+@auth_routes.route('/api/auth/reset-password', methods=['POST'])
+def reset_password():
+    """POST /api/auth/reset-password — verify code and set a new password."""
+    try:
+        logger = current_app.logger
+        users = current_app.mongo.db.users
+
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Missing request data"}), 400
+
+        email = data.get('email', '').strip().lower()
+        code = data.get('code', '').strip()
+        new_password = data.get('new_password', '')
+
+        if not all([email, code, new_password]):
+            return jsonify({"error": "email, code, and new_password are required"}), 400
+
+        user = users.find_one({"email": email})
+
+        if not user:
+            return jsonify({"error": "Invalid or expired code"}), 400
+
+        stored_code = user.get('reset_code')
+        stored_expires = user.get('reset_code_expires')
+
+        if (
+            not stored_code
+            or stored_code != code
+            or not stored_expires
+            or stored_expires < datetime.now(timezone.utc)
+        ):
+            return jsonify({"error": "Invalid or expired code"}), 400
+
+        users.update_one(
+            {"_id": user['_id']},
+            {
+                "$set": {"password": generate_password_hash(new_password)},
+                "$unset": {"reset_code": "", "reset_code_expires": ""},
+            }
+        )
+
+        logger.info(f"Password reset successfully for {email}")
+        return jsonify({"message": "Password updated successfully"}), 200
+
+    except Exception as e:
+        current_app.logger.error(f"Reset-password error: {str(e)}")
+        return jsonify({"error": "Request failed"}), 500

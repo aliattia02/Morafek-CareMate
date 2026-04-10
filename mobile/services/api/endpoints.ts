@@ -50,6 +50,8 @@ const API = {
     LOGIN: '/login',
     REGISTER: '/register',
     LOGOUT: '/logout',
+    FORGOT_PASSWORD: '/api/auth/forgot-password',
+    RESET_PASSWORD:  '/api/auth/reset-password',
   },
   PATIENT: {
     PROFILE: v('/api/patient/profile'),
