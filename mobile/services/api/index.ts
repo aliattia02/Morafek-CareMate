@@ -17,3 +17,4 @@ export * from './patient';
 export * from './mob';
 export * from './activities';
 export * from './libre';           // LibreLinkUp CGM integration
+export * from './ehr';
