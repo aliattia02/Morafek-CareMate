@@ -79,15 +79,15 @@ export default function RegisterScreen() {
 
     // Username
     const usernameResult = validateUsername(formData.username);
-    if (!usernameResult.isValid) newErrors.username = usernameResult.error || '';
+    if (!usernameResult.isValid) newErrors.username = usernameResult.errors[0] || '';
 
     // Email
     const emailResult = validateEmail(formData.email);
-    if (!emailResult.isValid) newErrors.email = emailResult.error || '';
+    if (!emailResult.isValid) newErrors.email = emailResult.errors[0] || '';
 
     // Password
     const passwordResult = validatePassword(formData.password);
-    if (!passwordResult.isValid) newErrors.password = passwordResult.error || '';
+    if (!passwordResult.isValid) newErrors.password = passwordResult.errors[0] || '';
 
     // Confirm password
     if (formData.password !== formData.confirmPassword) {
@@ -96,15 +96,15 @@ export default function RegisterScreen() {
 
     // First name
     const firstNameResult = validateRequired(formData.firstName, 'First name');
-    if (!firstNameResult.isValid) newErrors.firstName = firstNameResult.error || '';
+    if (!firstNameResult.isValid) newErrors.firstName = firstNameResult.errors[0] || '';
 
     // Last name
     const lastNameResult = validateRequired(formData.lastName, 'Last name');
-    if (!lastNameResult.isValid) newErrors.lastName = lastNameResult.error || '';
+    if (!lastNameResult.isValid) newErrors.lastName = lastNameResult.errors[0] || '';
 
     // Date of birth
     const dobResult = validateDateOfBirth(formData.dateOfBirth);
-    if (!dobResult.isValid) newErrors.dateOfBirth = dobResult.error || '';
+    if (!dobResult.isValid) newErrors.dateOfBirth = dobResult.errors[0] || '';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
