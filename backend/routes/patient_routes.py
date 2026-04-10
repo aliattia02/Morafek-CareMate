@@ -26,6 +26,7 @@ def get_patient_profile(current_user):
         'first_name': user.get('first_name', ''),
         'last_name': user.get('last_name', ''),
         'email': user.get('email', ''),
+        'profile_picture_url': user.get('profile_picture_url', ''),
         'ehr_profile': user.get('ehr_profile', {
             'blood_type': '',
             'allergies': [],

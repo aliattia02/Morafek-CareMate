@@ -57,6 +57,7 @@ interface User {
   user_type?: 'patient' | 'doctor' | 'admin';
   firstName?: string;
   lastName?: string;
+  profile_picture_url?: string;
 }
 
 interface AuthState {
@@ -70,6 +71,7 @@ interface AuthState {
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
   clearError: () => void;
+  updateProfilePicture: (url: string) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -90,6 +92,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           firstName: userData.firstName,
           lastName: userData.lastName,
           user_type: userData.userType as 'patient' | 'doctor' | 'admin',
+          profile_picture_url: userData.profile_picture_url,
         },
         token: userData.token,
         isAuthenticated: true,
@@ -137,6 +140,7 @@ export const useAuthStore = create<AuthState>((set) => ({
             firstName: userData.firstName,
             lastName: userData.lastName,
             user_type: userData.userType as 'patient' | 'doctor' | 'admin',
+            profile_picture_url: userData.profile_picture_url,
           } : null,
           token,
           isAuthenticated: true,
@@ -166,6 +170,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   clearError: () => set({ error: null }),
+
+  updateProfilePicture: (url: string) =>
+    set((state) => ({
+      user: state.user ? { ...state.user, profile_picture_url: url } : state.user,
+    })),
 }));
 
 export default useAuthStore;

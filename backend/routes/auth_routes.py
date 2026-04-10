@@ -68,6 +68,7 @@ def login():
                 "user_type": user['user_type'],
                 "firstName": user.get('first_name', ''),
                 "lastName": user.get('last_name', ''),
+                "profile_picture_url": user.get('profile_picture_url', ''),
                 "shared_constants": shared_constants,
             }
 

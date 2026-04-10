@@ -1,11 +1,13 @@
 
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Image, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as ImagePicker from 'expo-image-picker';
 import { Card, Button } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
-import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+import { colors, spacing, typography } from '@/constants/theme';
+import { uploadAvatar } from '@/services/api/profile';
 
 const showAlert = (title: string, message: string) => {
   if (Platform.OS === 'web') { window.alert(`${title}\n\n${message}`); }
@@ -14,8 +16,9 @@ const showAlert = (title: string, message: string) => {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout } = useAuth();
+  const { user, logout, updateProfilePicture } = useAuth();
   const isDoctor = user?.user_type === 'doctor' || user?.user_type === 'admin';
+  const [isUploading, setIsUploading] = useState(false);
 
   const handleLogout = () => {
     if (Platform.OS === 'web') {
@@ -28,15 +31,61 @@ export default function ProfileScreen() {
     }
   };
 
+  const handleAvatarPress = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      showAlert('Permission required', 'Please allow access to your photo library to change your profile picture.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+
+    if (result.canceled || !result.assets?.length) return;
+
+    const asset = result.assets[0];
+    setIsUploading(true);
+    try {
+      const { profile_picture_url } = await uploadAvatar(
+        asset.uri,
+        asset.mimeType ?? 'image/jpeg'
+      );
+      updateProfilePicture(profile_picture_url);
+    } catch (err) {
+      showAlert('Upload failed', 'Could not update your profile picture. Please try again.');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
 
         {/* User card */}
         <Card variant="elevated" padding="large" style={styles.userCard}>
-          <View style={[styles.avatar, isDoctor && styles.avatarDoctor]}>
-            <Text style={styles.avatarText}>{user?.firstName?.[0] || 'U'}</Text>
-          </View>
+          <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8} style={styles.avatarWrapper}>
+            {user?.profile_picture_url ? (
+              <Image source={{ uri: user.profile_picture_url }} style={[styles.avatar, isDoctor && styles.avatarDoctor]} />
+            ) : (
+              <View style={[styles.avatar, styles.avatarPlaceholder, isDoctor && styles.avatarDoctor]}>
+                <Text style={styles.avatarText}>{user?.firstName?.[0] || 'U'}</Text>
+              </View>
+            )}
+            {isUploading ? (
+              <View style={styles.avatarOverlay}>
+                <ActivityIndicator color={colors.text.inverse} />
+              </View>
+            ) : (
+              <View style={styles.avatarOverlay}>
+                <Text style={styles.avatarEditIcon}>✎</Text>
+              </View>
+            )}
+          </TouchableOpacity>
           <Text style={styles.name}>
             {isDoctor ? 'Dr. ' : ''}{user?.firstName} {user?.lastName}
           </Text>
@@ -118,12 +167,22 @@ const styles = StyleSheet.create({
   safe:       { flex: 1, backgroundColor: colors.background },
   content:    { padding: spacing.md, paddingBottom: spacing.xl },
   userCard:   { alignItems: 'center', marginBottom: spacing.md },
+  avatarWrapper: { position: 'relative', marginBottom: spacing.md },
   avatar: {
     width: 80, height: 80, borderRadius: 40,
-    backgroundColor: colors.primary,
-    alignItems: 'center', justifyContent: 'center', marginBottom: spacing.md,
   },
-  avatarDoctor: { backgroundColor: colors.secondary ?? colors.primary },
+  avatarPlaceholder: {
+    backgroundColor: colors.primary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarDoctor: { borderColor: colors.secondary ?? colors.primary, borderWidth: 2 },
+  avatarOverlay: {
+    position: 'absolute', bottom: 0, right: 0,
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  avatarEditIcon: { color: '#fff', fontSize: 14 },
   avatarText: { fontSize: 32, fontWeight: 'bold', color: colors.text.inverse },
   name:       { ...typography.h2, color: colors.text.primary },
   role:       { ...typography.body, color: colors.text.secondary, marginTop: spacing.xs },

@@ -3,6 +3,7 @@ from flask_pymongo import PyMongo
 from flask_cors import CORS
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
+import cloudinary
 import logging
 from datetime import timezone, timedelta
 from dotenv import load_dotenv
@@ -83,6 +84,15 @@ def create_app_config(app):
     secret_key = os.environ.get('SECRET_KEY')
     if not secret_key:
         raise ValueError("SECRET_KEY not set in environment variables. Check your .env file or Render environment settings.")
+
+    # Cloudinary configuration — credentials come from environment variables.
+    # Required: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET
+    cloudinary.config(
+        cloud_name=os.environ.get('CLOUDINARY_CLOUD_NAME', 'dlh94ryon'),
+        api_key=os.environ.get('CLOUDINARY_API_KEY', ''),
+        api_secret=os.environ.get('CLOUDINARY_API_SECRET', ''),
+        secure=True,
+    )
 
     # Configuration - MUST be set BEFORE CORS initialization
     app.config.update(

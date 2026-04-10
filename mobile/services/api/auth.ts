@@ -28,6 +28,7 @@ export interface UserData {
   userType: 'patient' | 'doctor' | 'admin';
   firstName: string;
   lastName: string;
+  profile_picture_url?: string;
 }
 
 interface LoginResponse {
@@ -36,6 +37,7 @@ interface LoginResponse {
   user_type: string;
   firstName: string;
   lastName: string;
+  profile_picture_url?: string;
   shared_constants?: Record<string, any>;
 }
 
@@ -96,6 +98,7 @@ export const login = async (credentials: LoginCredentials): Promise<UserData> =>
     userType: response.data.user_type as 'patient' | 'doctor' | 'admin',
     firstName: response.data.firstName,
     lastName: response.data.lastName,
+    profile_picture_url: response.data.profile_picture_url,
   };
 
   // Store token and user data securely
