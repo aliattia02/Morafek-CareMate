@@ -821,7 +821,7 @@ def _serialize_document(doc):
         'description': doc.get('description', ''),
         'url': attachment.get('url', ''),
         'title': attachment.get('title', ''),
-        'date': doc.get('date', ''),
+        'created_at': doc.get('created_at', ''),
     }
 
 
