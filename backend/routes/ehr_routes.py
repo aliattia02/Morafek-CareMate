@@ -414,6 +414,9 @@ def create_visit(current_user, patient_id):
     chief_complaint = data['chief_complaint']
     diagnosis_icd10 = data.get('diagnosis_icd10', '') or ''   # optional, default ''
     diagnosis_text = data['diagnosis_text']
+
+    if diagnosis_icd10 and len(diagnosis_icd10.strip()) < 3:
+        return jsonify({'error': 'ICD-10 code must be at least 3 characters (e.g. I10)'}), 400
     notes = data.get('notes', '')
     doctor_id = str(current_user['_id'])
 
@@ -475,7 +478,7 @@ def create_visit(current_user, patient_id):
                         'code': 'active'}]
         },
         'code': {
-            'coding': [{
+            'coding': [] if not diagnosis_icd10 else [{
                 'system': 'http://fhir.de/CodeSystem/bfarm/icd-10-gm',
                 'code': diagnosis_icd10,
                 'display': diagnosis_text
@@ -882,6 +885,11 @@ def upload_own_document(current_user):
         'id': doc_uuid,
         'patient_id': patient_id,
         'uploaded_by': str(current_user['_id']),
+        'author': (
+            [{'reference': f"Practitioner/{str(current_user['_id'])}"}]
+            if current_user.get('user_type') == 'doctor'
+            else [{'reference': f"Patient/{str(current_user['_id'])}"}]
+        ),
         'status': 'current',
         'type': {
             'coding': [{
