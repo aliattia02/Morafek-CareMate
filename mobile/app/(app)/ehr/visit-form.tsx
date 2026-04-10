@@ -74,9 +74,9 @@ export default function VisitFormScreen() {
         diagnosis_icd10: diagnosisIcd10.trim() || undefined,
         diagnosis_text: diagnosisText.trim(),
         notes: notes.trim() || undefined,
-        visit_date: visitDate.trim() || undefined,
+        visit_date: visitDate.trim() || todayISO(),
       });
-      Alert.alert('Visit saved');
+      Alert.alert('Visit saved', patient_name ? `Visit for ${patient_name} has been recorded.` : undefined);
       router.back();
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to save visit';

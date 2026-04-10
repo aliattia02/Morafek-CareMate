@@ -25,7 +25,11 @@ import { Stack, useLocalSearchParams } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { getMessageThread, sendMessage, type MessageResponse } from '@/services/api/ehr';
+import { useAuthStore } from '@/store/auth.store';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+
+// Delay (ms) before scrolling to bottom after a new message is rendered
+const SCROLL_DELAY_MS = 100;
 
 export default function MessagesScreen() {
   const { other_user_id, other_user_name } = useLocalSearchParams<{
@@ -33,14 +37,14 @@ export default function MessagesScreen() {
     other_user_name?: string;
   }>();
 
-  const [messages, setMessages] = useState<MessageResponse[]>([]);
+  const scrollViewRef = useRef<ScrollView>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
 
-  const scrollViewRef = useRef<ScrollView>(null);
+  const { user } = useAuthStore();
 
   const loadThread = useCallback(async () => {
     if (!other_user_id) return;
@@ -77,7 +81,7 @@ export default function MessagesScreen() {
       await sendMessage(other_user_id, body);
       setInput('');
       await loadThread();
-      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
+      setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), SCROLL_DELAY_MS);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to send message';
       setError(message);
@@ -128,7 +132,7 @@ export default function MessagesScreen() {
             <Text style={styles.emptyText}>No messages yet. Say hello!</Text>
           ) : (
             messages.map((msg, index) => {
-              const isSelf = msg.sender_type === 'doctor';
+              const isSelf = !!user?._id && msg.sender_id === user._id;
               return (
                 <View
                   key={msg.id ?? index}
