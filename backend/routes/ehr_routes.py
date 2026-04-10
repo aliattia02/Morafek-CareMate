@@ -894,15 +894,15 @@ def update_exercise(current_user, patient_id, exercise_id):
             return jsonify({'error': 'duration_minutes must be a positive integer'}), 400
         updates['duration_minutes'] = data['duration_minutes']
     if 'repetitions' in data:
-        rep = data['repetitions']
-        if rep is not None and (not isinstance(rep, int) or rep <= 0):
+        repetitions = data['repetitions']
+        if repetitions is not None and (not isinstance(repetitions, int) or repetitions <= 0):
             return jsonify({'error': 'repetitions must be a positive integer'}), 400
-        updates['repetitions'] = rep
+        updates['repetitions'] = repetitions
     if 'sets' in data:
-        s = data['sets']
-        if s is not None and (not isinstance(s, int) or s <= 0):
+        sets_value = data['sets']
+        if sets_value is not None and (not isinstance(sets_value, int) or sets_value <= 0):
             return jsonify({'error': 'sets must be a positive integer'}), 400
-        updates['sets'] = s
+        updates['sets'] = sets_value
     if 'video_url' in data:
         updates['video_url'] = data['video_url']
     if 'image_url' in data:
