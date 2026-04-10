@@ -150,15 +150,28 @@ export default function DocumentsScreen() {
   };
 
   const handlePickImage = async () => {
+    // FIX 1: MediaTypeOptions (not MediaType) — works on all Expo SDK versions
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaType.Images,
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.85,
     });
+
     if (!result.canceled && result.assets.length > 0) {
       const asset = result.assets[0];
       const name = asset.fileName ?? `photo_${Date.now()}.jpg`;
       const type = asset.mimeType ?? 'image/jpeg';
-      setPickedFile({ uri: asset.uri, name, type });
+
+      // FIX 2: On web, expo-image-picker returns a base64 data URI.
+      // We convert it to an object URL here so that uploadDocument (ehr.ts)
+      // can later fetch() it into a real Blob for FormData.
+      let uri = asset.uri;
+      if (Platform.OS === 'web' && uri.startsWith('data:')) {
+        const fetchResponse = await fetch(uri);
+        const blob = await fetchResponse.blob();
+        uri = URL.createObjectURL(blob);
+      }
+
+      setPickedFile({ uri, name, type });
     }
   };
 
@@ -196,6 +209,17 @@ export default function DocumentsScreen() {
     } finally {
       setUploading(false);
     }
+  };
+
+  // Clean up any object URLs we created on web to avoid memory leaks
+  const resetUploadPanel = () => {
+    if (Platform.OS === 'web' && pickedFile?.uri.startsWith('blob:')) {
+      URL.revokeObjectURL(pickedFile.uri);
+    }
+    setShowUpload(false);
+    setPickedFile(null);
+    setUploadDescription('');
+    setUploadCategory('other');
   };
 
   const grouped = groupByCategory(documents);
@@ -326,12 +350,7 @@ export default function DocumentsScreen() {
               <View style={styles.uploadActions}>
                 <TouchableOpacity
                   style={styles.cancelButton}
-                  onPress={() => {
-                    setShowUpload(false);
-                    setPickedFile(null);
-                    setUploadDescription('');
-                    setUploadCategory('other');
-                  }}
+                  onPress={resetUploadPanel}
                   disabled={uploading}
                 >
                   <Text style={styles.cancelButtonText}>Cancel</Text>

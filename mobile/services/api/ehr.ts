@@ -8,6 +8,7 @@
  *                 getPatientVitals, getPatientVisits, getPatientMessages
  */
 
+import { Platform } from 'react-native';
 import apiClient from './client';
 import { API } from './endpoints';
 
@@ -165,7 +166,19 @@ export async function uploadDocument(
   description: string
 ): Promise<DocumentResponse> {
   const formData = new FormData();
-  formData.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+
+  if (Platform.OS === 'web') {
+    // On web, the uri is a base64 data URI or an object URL.
+    // FormData does not accept the native { uri, name, type } shape on web —
+    // we must fetch the actual bytes and append a real Blob.
+    const fetchResponse = await fetch(file.uri);
+    const blob = await fetchResponse.blob();
+    formData.append('file', blob, file.name);
+  } else {
+    // On iOS / Android, React Native's FormData accepts this object shape.
+    formData.append('file', { uri: file.uri, name: file.name, type: file.type } as unknown as Blob);
+  }
+
   formData.append('category', category);
   formData.append('description', description);
 
