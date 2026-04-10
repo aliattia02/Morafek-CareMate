@@ -36,7 +36,6 @@ export default function RootLayout() {
   // Check authentication status on app start
   useEffect(() => {
     checkAuth();
-    loadQueue();
   }, []);
 
   // Show loading screen while checking auth

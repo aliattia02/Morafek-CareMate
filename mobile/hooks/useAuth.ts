@@ -100,6 +100,22 @@ export const useAuth = () => {
 
   // ── register ────────────────────────────────────────────────────────────────
   const register = useCallback(async (data: RegisterData) => {
+    // Wake the server before submitting registration (same as login)
+    const isLocal =
+      (process.env.EXPO_PUBLIC_API_URL ?? '').includes('localhost') ||
+      (process.env.EXPO_PUBLIC_API_URL ?? '').includes('127.0.0.1') ||
+      !(process.env.EXPO_PUBLIC_API_URL ?? '');
+
+    if (!isLocal) {
+      const serverReady = await wakeUpServer();
+      if (!serverReady) {
+        throw new Error(
+          'The server did not respond in time.\n' +
+          'Please check your connection and try again.'
+        );
+      }
+    }
+
     return apiRegister(data);
   }, []);
 
