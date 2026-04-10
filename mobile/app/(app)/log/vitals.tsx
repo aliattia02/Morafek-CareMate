@@ -6,24 +6,25 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  TouchableOpacity,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Card, Input, Button } from '@/components/ui';
+import { Input } from '@/components/ui';
 import apiClient from '@/services/api/client';
 import API from '@/services/api/endpoints';
-import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+import { E, ET } from '@/constants/elderlyTheme';
 import { queueVital, getPendingVitals, deletePendingVital } from '@/services/offline/db';
 import { submitVital } from '@/services/api/ehr';
 
 function getBPCategory(sys: number, dia: number) {
   if (sys >= 180 || dia >= 120)
-    return { label: '⚠️ Crisis — seek help immediately', color: colors.danger };
+    return { label: '⚠️ Crisis — Contact Doctor Now', bg: E.colors.dangerLight, fg: E.colors.danger };
   if (sys >= 130 || dia > 80)
-    return { label: '🔴 High Blood Pressure', color: colors.danger };
+    return { label: '🔴 High Blood Pressure', bg: E.colors.dangerLight, fg: E.colors.danger };
   if (sys >= 120)
-    return { label: '🟠 Elevated', color: colors.warning };
-  return { label: '🟢 Normal', color: colors.success };
+    return { label: '🟠 Elevated', bg: E.colors.warningLight, fg: E.colors.warning };
+  return { label: '🟢 Normal', bg: E.colors.successLight, fg: E.colors.success };
 }
 
 export default function VitalsScreen() {
@@ -92,10 +93,10 @@ export default function VitalsScreen() {
 
       if (response?.data?.urgent) {
         setSubmitStatus('urgent');
-        setSubmitMessage('⚠️ Blood pressure is critically high. Please contact your doctor immediately.');
+        setSubmitMessage('⚠️ Critical reading — please contact your doctor');
       } else {
         setSubmitStatus('success');
-        setSubmitMessage('✅ Reading saved successfully.');
+        setSubmitMessage('✅ Reading saved successfully');
         // Navigate back after a short delay so the user sees the confirmation
         setTimeout(() => router.back(), 1500);
       }
@@ -122,86 +123,108 @@ export default function VitalsScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <Stack.Screen options={{ title: 'Record Blood Pressure' }} />
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
 
-          <Card variant="outlined" padding="medium" style={styles.card}>
-            <Text style={styles.sectionTitle}>Blood Pressure</Text>
+          {/* ── INSTRUCTION CARD ── */}
+          <View style={styles.instructionCard}>
+            <Text style={styles.sectionTitle}>📋 Before you measure:</Text>
+            <Text style={styles.instructionLine}>1. Sit quietly for 5 minutes</Text>
+            <Text style={styles.instructionLine}>2. Place the cuff on your left arm</Text>
+            <Text style={styles.instructionLine}>3. Do not talk while measuring</Text>
+          </View>
 
-            <View style={styles.row}>
-              <View style={styles.half}>
-                <Input
-                  label="Systolic"
-                  value={systolic}
-                  onChangeText={(v) => { setSystolic(v); setErrors(p => ({...p, systolic: ''})); }}
-                  keyboardType="numeric"
-                  placeholder="120"
-                  error={errors.systolic}
-                  style={styles.bigInput}
-                />
-              </View>
-              <View style={styles.halfLast}>
-                <Input
-                  label="Diastolic"
-                  value={diastolic}
-                  onChangeText={(v) => { setDiastolic(v); setErrors(p => ({...p, diastolic: ''})); }}
-                  keyboardType="numeric"
-                  placeholder="80"
-                  error={errors.diastolic}
-                  style={styles.bigInput}
-                />
-              </View>
-            </View>
+          {/* ── BP INPUTS CARD ── */}
+          <View style={styles.card}>
+            <Text style={styles.inputLabel}>Systolic (Upper Number)</Text>
+            <Input
+              value={systolic}
+              onChangeText={(v) => { setSystolic(v); setErrors(p => ({...p, systolic: ''})); }}
+              keyboardType="number-pad"
+              placeholder="120"
+              error={errors.systolic}
+              containerStyle={styles.inputContainer}
+              inputStyle={styles.bigInputText}
+            />
 
+            <Text style={styles.inputLabel}>Diastolic (Lower Number)</Text>
+            <Input
+              value={diastolic}
+              onChangeText={(v) => { setDiastolic(v); setErrors(p => ({...p, diastolic: ''})); }}
+              keyboardType="number-pad"
+              placeholder="80"
+              error={errors.diastolic}
+              containerStyle={styles.inputContainer}
+              inputStyle={styles.bigInputText}
+            />
+
+            {/* Live BP status badge */}
             {category && (
-              <View style={[styles.badge, { borderColor: category.color }]}>
-                <Text style={[styles.badgeText, { color: category.color }]}>
-                  {category.label}
-                </Text>
+              <View style={[styles.liveBadge, { backgroundColor: category.bg }]}>
+                <Text style={[styles.liveBadgeText, { color: category.fg }]}>{category.label}</Text>
               </View>
             )}
-          </Card>
+          </View>
 
-          <Card variant="outlined" padding="medium" style={styles.card}>
+          {/* ── OTHER MEASUREMENTS CARD ── */}
+          <View style={styles.card}>
             <Text style={styles.sectionTitle}>Other Measurements</Text>
+
+            <Text style={styles.inputLabel}>Pulse (Heart Rate)</Text>
             <Input
-              label="Pulse (bpm)"
               value={pulse}
               onChangeText={(v) => { setPulse(v); setErrors(p => ({...p, pulse: ''})); }}
-              keyboardType="numeric"
+              keyboardType="number-pad"
               placeholder="72"
               error={errors.pulse}
+              containerStyle={styles.medInputContainer}
             />
+
+            <Text style={styles.inputLabel}>Weight (kg) — optional</Text>
             <Input
-              label="Weight (kg) — optional"
               value={weight}
               onChangeText={setWeight}
               keyboardType="decimal-pad"
               placeholder="70.5"
+              containerStyle={styles.medInputContainer}
             />
+
+            <Text style={styles.inputLabel}>Notes — optional</Text>
             <Input
-              label="Notes — optional"
               value={notes}
               onChangeText={setNotes}
               multiline
               numberOfLines={3}
               placeholder="How are you feeling?"
+              containerStyle={styles.notesContainer}
             />
-          </Card>
+          </View>
 
-          {submitStatus !== 'idle' ? (
-            <View style={[
-              styles.statusBanner,
-              submitStatus === 'success' ? styles.statusSuccess : null,
-              submitStatus === 'urgent'  ? styles.statusUrgent  : null,
-              submitStatus === 'error'   ? styles.statusError   : null,
-              submitStatus === 'queued'  ? styles.statusQueued  : null,
-            ]}>
-              <Text style={styles.statusText}>{submitMessage}</Text>
-            </View>
-          ) : null}
+          {/* ── STATUS BANNER ── */}
+          {submitStatus !== 'idle' && (() => {
+            const bannerStyles: Record<string, { bg: string; text: string }> = {
+              success: { bg: E.colors.successLight, text: E.colors.success },
+              urgent:  { bg: E.colors.dangerLight,  text: E.colors.danger  },
+              queued:  { bg: E.colors.warningLight,  text: E.colors.warning },
+              error:   { bg: E.colors.dangerLight,   text: E.colors.danger  },
+            };
+            const bs = bannerStyles[submitStatus] ?? bannerStyles.error;
+            return (
+              <View style={[styles.statusBanner, { backgroundColor: bs.bg }]}>
+                <Text style={[styles.statusBannerText, { color: bs.text }]}>{submitMessage}</Text>
+              </View>
+            );
+          })()}
 
-          <Button title="Save Reading" onPress={handleSubmit} loading={isLoading} fullWidth />
+          {/* ── SAVE BUTTON ── */}
+          <TouchableOpacity
+            style={[styles.saveButton, isLoading && styles.saveButtonDisabled]}
+            onPress={handleSubmit}
+            disabled={isLoading}
+          >
+            <Text style={styles.saveButtonText}>✅  Save Reading</Text>
+          </TouchableOpacity>
 
         </ScrollView>
       </KeyboardAvoidingView>
@@ -210,31 +233,93 @@ export default function VitalsScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe:         { flex: 1, backgroundColor: colors.background },
-  content:      { padding: spacing.md, paddingBottom: spacing.xl },
-  card:         { marginBottom: spacing.md },
-  sectionTitle: { ...typography.h3, color: colors.text.primary, marginBottom: spacing.md },
-  row:          { flexDirection: 'row' },
-  half:         { flex: 1, marginRight: spacing.md },
-  halfLast:     { flex: 1 },
-  bigInput:     { minHeight: 56 },
-  badge: {
-    borderWidth: 1,
-    borderRadius: borderRadius.md,
-    padding: spacing.sm,
-    marginTop: spacing.sm,
-    alignItems: 'center',
+  safe: { flex: 1, backgroundColor: E.colors.bg },
+  content: { paddingBottom: 32 },
+  // Instruction card
+  instructionCard: {
+    backgroundColor: E.colors.surfaceAlt,
+    borderRadius: E.radius,
+    padding: E.pad,
+    margin: 16,
+    marginBottom: 0,
   },
-  badgeText: { ...typography.body, fontWeight: '600' },
+  sectionTitle: {
+    ...ET.h3,
+    marginBottom: 10,
+  },
+  instructionLine: {
+    ...ET.body,
+    marginBottom: 6,
+  },
+  // Cards
+  card: {
+    backgroundColor: E.colors.bg,
+    borderRadius: E.radius,
+    borderWidth: 2,
+    borderColor: E.colors.border,
+    margin: 16,
+    marginBottom: 0,
+    padding: E.pad,
+  },
+  // Input labels
+  inputLabel: {
+    ...ET.label,
+    marginBottom: 6,
+  },
+  // Input containers with large height
+  inputContainer: {
+    marginBottom: 16,
+    minHeight: 72,
+  },
+  bigInputText: {
+    fontSize: 28,
+    minHeight: 72,
+  },
+  medInputContainer: {
+    marginBottom: 16,
+    minHeight: 64,
+  },
+  notesContainer: {
+    marginBottom: 4,
+    minHeight: 100,
+  },
+  // Live badge
+  liveBadge: {
+    height: 64,
+    borderRadius: E.radius,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 4,
+  },
+  liveBadgeText: {
+    ...ET.bodyBold,
+  },
+  // Status banner
   statusBanner: {
-    borderRadius: borderRadius.md,
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    height: 64,
+    borderRadius: E.radius,
     alignItems: 'center',
+    justifyContent: 'center',
+    margin: 16,
+    marginBottom: 0,
   },
-  statusSuccess: { backgroundColor: colors.success + '20' },
-  statusUrgent:  { backgroundColor: colors.danger  + '20' },
-  statusError:   { backgroundColor: colors.danger  + '15' },
-  statusQueued:  { backgroundColor: colors.warning + '20' },
-  statusText:    { ...typography.body, fontWeight: '600', textAlign: 'center' },
+  statusBannerText: {
+    ...ET.bodyBold,
+    textAlign: 'center',
+  },
+  // Save button
+  saveButton: {
+    height: E.tapXL,
+    backgroundColor: E.colors.primary,
+    borderRadius: E.radius,
+    alignItems: 'center',
+    justifyContent: 'center',
+    margin: 16,
+  },
+  saveButtonDisabled: {
+    opacity: 0.6,
+  },
+  saveButtonText: {
+    ...ET.btnPrimary,
+  },
 });
