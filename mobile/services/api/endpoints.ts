@@ -74,6 +74,9 @@ const API = {
     PATIENT_VISITS:   (id: string) => v(`/api/doctor/patient/${id}/visits`),
     PATIENT_VITALS:   (id: string) => v(`/api/doctor/patient/${id}/vitals`),
     PATIENT_MESSAGES: (id: string) => v(`/api/doctor/patient/${id}/messages`),
+    DOCUMENTS:        v('/api/patient/documents'),
+    DOCUMENT:         (id: string) => v(`/api/patient/documents/${id}`),
+    PATIENT_DOCUMENTS: (patientId: string) => v(`/api/doctor/patient/${patientId}/documents`),
   },
 } as const;
 

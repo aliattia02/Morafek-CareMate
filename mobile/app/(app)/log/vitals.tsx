@@ -13,6 +13,8 @@ import { Card, Input, Button } from '@/components/ui';
 import apiClient from '@/services/api/client';
 import API from '@/services/api/endpoints';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+import { queueVital, getPendingVitals, deletePendingVital } from '@/services/offline/db';
+import { submitVital } from '@/services/api/ehr';
 
 function getBPCategory(sys: number, dia: number) {
   if (sys >= 180 || dia >= 120)
@@ -27,7 +29,7 @@ function getBPCategory(sys: number, dia: number) {
 export default function VitalsScreen() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'urgent' | 'error'>('idle');
+  const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'urgent' | 'error' | 'queued'>('idle');
   const [submitMessage, setSubmitMessage] = useState('');
 
   const [systolic, setSystolic]   = useState('');
@@ -53,11 +55,32 @@ export default function VitalsScreen() {
     return Object.keys(e).length === 0;
   };
 
+  const syncPendingVitals = async () => {
+    const pending = getPendingVitals();
+    for (const pv of pending) {
+      try {
+        await submitVital({
+          systolic: pv.systolic,
+          diastolic: pv.diastolic,
+          pulse: pv.pulse,
+          weight_kg: pv.weight_kg ?? undefined,
+          notes: pv.notes ?? undefined,
+        });
+        deletePendingVital(pv.local_id);
+      } catch {
+        // Leave in queue to retry later
+      }
+    }
+  };
+
   const handleSubmit = async () => {
     if (!validate()) return;
     setIsLoading(true);
     setSubmitStatus('idle');
     try {
+      // Attempt to sync any previously queued vitals first
+      await syncPendingVitals();
+
       const response = await apiClient.post(API.EHR.VITALS, {
         systolic:  sys,
         diastolic: dia,
@@ -76,8 +99,21 @@ export default function VitalsScreen() {
         setTimeout(() => router.back(), 1500);
       }
     } catch (err: any) {
-      setSubmitStatus('error');
-      setSubmitMessage(err?.message || 'Failed to save reading.');
+      // Network failure — save locally and notify user
+      try {
+        queueVital({
+          systolic: sys,
+          diastolic: dia,
+          pulse: parseInt(pulse),
+          weight_kg: weight ? parseFloat(weight) : undefined,
+          notes: notes || undefined,
+        });
+        setSubmitStatus('queued');
+        setSubmitMessage('📥 Saved locally — will sync when online');
+      } catch {
+        setSubmitStatus('error');
+        setSubmitMessage(err?.message || 'Failed to save reading.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -158,6 +194,7 @@ export default function VitalsScreen() {
               submitStatus === 'success' ? styles.statusSuccess : null,
               submitStatus === 'urgent'  ? styles.statusUrgent  : null,
               submitStatus === 'error'   ? styles.statusError   : null,
+              submitStatus === 'queued'  ? styles.statusQueued  : null,
             ]}>
               <Text style={styles.statusText}>{submitMessage}</Text>
             </View>
@@ -197,5 +234,6 @@ const styles = StyleSheet.create({
   statusSuccess: { backgroundColor: colors.success + '20' },
   statusUrgent:  { backgroundColor: colors.danger  + '20' },
   statusError:   { backgroundColor: colors.danger  + '15' },
+  statusQueued:  { backgroundColor: colors.warning + '20' },
   statusText:    { ...typography.body, fontWeight: '600', textAlign: 'center' },
 });
