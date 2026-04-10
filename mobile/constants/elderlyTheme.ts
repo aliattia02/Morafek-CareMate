@@ -25,7 +25,7 @@ export const E = {
     warning:      '#B7500A',
     warningLight: '#FFF3E0',
     textPrimary:  '#1A1A1A',
-    textSecondary:'#4A4A4A',
+    textSecondary: '#4A4A4A',
     textInverse:  '#FFFFFF',
     border:       '#767676',
     divider:      '#E0E0E0',

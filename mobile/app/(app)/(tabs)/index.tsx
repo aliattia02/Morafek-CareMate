@@ -106,7 +106,7 @@ export default function PatientHomeScreen() {
       {/* ── HEADER BAR ── */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.headerGreeting}>{greeting()}, {user?.firstName || 'Patient'}</Text>
+          <Text style={styles.headerGreeting}>{greeting()}</Text>
           <Text style={styles.headerName}>{user?.firstName || 'Patient'}</Text>
         </View>
         <TouchableOpacity
@@ -250,7 +250,7 @@ export default function PatientHomeScreen() {
         <View style={styles.sensorsCard}>
           <Text style={styles.cardTitle}>📡  Connected Sensors</Text>
           <Text style={styles.emptyTextSecondary}>No sensors connected</Text>
-          <Text style={styles.sensorsSmall}>Heart rate monitor, CGM, and SpO₂ coming soon</Text>
+          <Text style={styles.sensorsSmall}>Heart rate monitor, CGM, and SpO2 coming soon</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
