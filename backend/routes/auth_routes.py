@@ -49,18 +49,7 @@ def login():
             # web clients get the standard 24 hours.
             token = generate_token(str(user['_id']), user['user_type'])
 
-            # Prepare response.
-            # shared_constants is embedded so both the React web app and
-            # React Native mobile app always receive the latest constants
-            # from the backend on every sign-in — replaces the file-write
-            # approach that silently fails on Render (no frontend/mobile
-            # directories exist on the server filesystem).
-            try:
-                from constants import Constants
-                shared_constants = Constants.get_shared_constants_json()
-            except Exception as _ce:
-                logger.warning(f"Could not load shared constants: {_ce}")
-                shared_constants = {}
+            shared_constants = {}
 
             response = {
                 "message": "Logged in successfully",

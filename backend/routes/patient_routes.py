@@ -15,6 +15,8 @@ patient_routes = Blueprint('patient_routes', __name__)
 @api_error_handler
 def get_patient_profile(current_user):
     """GET /api/patient/profile — returns the current patient's profile."""
+    if current_user.get('user_type') not in ['patient']:
+        return jsonify({'error': 'Patients only'}), 403
     user = mongo.db.users.find_one(
         {"_id": ObjectId(str(current_user['_id']))},
         {"password": 0}
