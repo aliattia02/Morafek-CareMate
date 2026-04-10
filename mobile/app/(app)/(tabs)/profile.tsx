@@ -113,6 +113,16 @@ export default function ProfileScreen() {
         {!isDoctor && (
           <Card variant="outlined" padding="none" style={styles.linksCard}>
             <TouchableOpacity style={styles.link}
+              onPress={() => router.push('/(app)/ehr/patient-profile')}>
+              <Text style={styles.linkIcon}>🩺</Text>
+              <View style={styles.linkBody}>
+                <Text style={styles.linkTitle}>My Medical Profile</Text>
+                <Text style={styles.linkSub}>Blood type, allergies &amp; conditions</Text>
+              </View>
+              <Text style={styles.arrow}>›</Text>
+            </TouchableOpacity>
+            <View style={styles.divider} />
+            <TouchableOpacity style={styles.link}
               onPress={() => router.push('/(app)/settings/doctors')}>
               <Text style={styles.linkIcon}>👨‍⚕️</Text>
               <View style={styles.linkBody}>
