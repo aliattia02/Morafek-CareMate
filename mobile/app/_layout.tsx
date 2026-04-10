@@ -26,14 +26,12 @@ import { FullScreenLoading } from '@/components/ui';
 
 // Store
 import { useAuthStore } from '@/store/auth.store';
-import { useOfflineStore } from '@/store/offline.store';
 
 // Constants
 import { colors } from '@/constants/theme';
 
 export default function RootLayout() {
   const { isLoading, checkAuth } = useAuthStore();
-  const { loadQueue } = useOfflineStore();
 
   // Check authentication status on app start
   useEffect(() => {

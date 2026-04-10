@@ -1,5 +1,3 @@
-Replace the entire contents of mobile/app/(app)/(tabs)/profile.tsx.
-Delete everything. Replace with this:
 
 import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
