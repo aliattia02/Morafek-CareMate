@@ -21,7 +21,6 @@ import {
 
 import { useRouter } from 'expo-router';
 import { Card } from '@/components/ui';
-import { getPatientConstants } from '@/services/api/doctor';
 import {
   getDoctorPatientVitals,
   getDoctorPatientVisits,

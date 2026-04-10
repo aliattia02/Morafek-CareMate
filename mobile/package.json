@@ -12,12 +12,11 @@
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
-    "@native/shared": "file:../shared",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-community/datetimepicker": "8.4.1",
     "@react-native-community/netinfo": "11.4.1",
     "@react-native-picker/picker": "2.11.0",
-    "axios": "^1.7.9",
+    "axios": "^1.15.0",
     "date-fns": "^4.1.0",
     "expo": "~54.0.0",
     "expo-asset": "~12.0.10",

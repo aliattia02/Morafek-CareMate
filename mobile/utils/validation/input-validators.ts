@@ -3,19 +3,20 @@
  * Location: mobile/utils/validation/input-validators.ts
  *
  * Description: Core input validation utilities for diabetes data (glucose, insulin, meals)
- *
- * Features:
- * - Blood glucose reading validation with limits
- * - Insulin dose validation with safety checks
- * - Meal entry and food item validation
- * - Carbohydrate value validation
- * - Comprehensive error and warning messages
  */
 
-// Types
-import type { GlucoseReading } from '@/types/glucose.types';
-import type { InsulinDose } from '@/types/insulin.types';
-import type { MealFoodEntry } from '@/types/meal.types';
+// Inline type definitions (shared types not available in this build)
+interface InsulinDose {
+  dose?: number;
+  insulinType?: string;
+  administrationTime?: string | Date;
+}
+
+interface MealFoodEntry {
+  name?: string;
+  portion?: { amount: number; unit: string };
+  details?: { carbs?: number; protein?: number; fat?: number };
+}
 
 /**
  * Validation result with error and warning details
