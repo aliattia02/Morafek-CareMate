@@ -49,7 +49,8 @@ const API = {
   AUTH: {
     LOGIN: '/login',
     REGISTER: '/register',
-    LOGOUT: '/logout',
+    LOGOUT: '/logout', // Note: Flask has no /logout route — JWT is stateless.
+                       // Client clears token locally. This constant is kept for future use.
     FORGOT_PASSWORD: '/api/auth/forgot-password',
     RESET_PASSWORD:  '/api/auth/reset-password',
   },
@@ -80,6 +81,7 @@ const API = {
     DOCUMENT:         (id: string) => v(`/api/patient/documents/${id}`),
     PATIENT_DOCUMENTS: (patientId: string) => v(`/api/doctor/patient/${patientId}/documents`),
     EXERCISES:        v('/api/patient/exercises'),
+    CONVERSATIONS:    v('/api/messages/conversations'),
     PATIENT_EXERCISES: (patientId: string) => v(`/api/doctor/patient/${patientId}/exercises`),
     PATIENT_EXERCISE_BY_ID: (patientId: string, exerciseId: string) =>
       v(`/api/doctor/patient/${patientId}/exercises/${exerciseId}`),

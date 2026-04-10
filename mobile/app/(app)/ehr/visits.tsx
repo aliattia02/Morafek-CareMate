@@ -26,6 +26,7 @@ import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { apiClient } from '@/services/api/client';
+import { API } from '@/services/api/endpoints';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -136,7 +137,7 @@ export default function VisitsScreen() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const res = await apiClient.get<Visit[]>('/api/patient/visits');
+      const res = await apiClient.get<Visit[]>(API.EHR.VISITS);
       setVisits(res.data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load visits');

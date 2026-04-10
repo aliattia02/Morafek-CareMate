@@ -69,6 +69,7 @@ def create_app():
         from routes.patient_routes import patient_routes
         from routes.ehr_routes import ehr_routes
         from routes.upload_routes import upload_routes
+        from routes.monitoring_routes import monitoring_routes
 
         blueprints = [
             (auth_routes, ''),
@@ -76,6 +77,7 @@ def create_app():
             (patient_routes, ''),
             (ehr_routes, ''),
             (upload_routes, ''),
+            (monitoring_routes, ''),
         ]
 
         for blueprint, url_prefix in blueprints:
