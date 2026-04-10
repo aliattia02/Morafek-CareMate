@@ -1,27 +1,7 @@
 /**
  * API response type definitions
  * Location: mobile/types/api.ts
- *
- * This file defines mobile-specific API response wrappers and extends
- * shared types from the shared library with backend-specific fields.
- *
- * Import pattern:
- * - Use shared types for domain models (User, Meal, GlucoseReading, etc.)
- * - Define mobile-specific response wrappers here (pagination, API metadata)
  */
-
-import type {
-  User,
-  Patient,
-  PatientConstants,
-  Meal,
-  MealType,
-  GlucoseReading,
-  InsulinDose,
-  Activity,
-  FoodItem,
-  AbsorptionType,
-} from '../../shared/src/types';
 
 /**
  * Standard API response wrapper
@@ -69,55 +49,15 @@ export interface RegisterResponse {
 }
 
 /**
- * Patient constants response
- */
-export interface PatientConstantsResponse {
-  constants: PatientConstants & {
-    patient_id: string;
-    active_conditions: string[];
-    active_medications: string[];
-    medication_schedules: Record<string, {
-      id: string;
-      startDate: string;
-      endDate: string;
-      dailyTimes: string[];
-    }>;
-  };
-}
-
-/**
  * Meal response types
  */
 export interface MealResponse {
   id: string;
+  name: string;
   timestamp: string;
-  mealTime?: string;
-  mealType: string;
-  foodItems: Array<{
-    name: string;
-    portion: number;
-    measurement: string;
-    nutrition?: {
-      carbs: number;
-      protein: number;
-      fat: number;
-      calories: number;
-    };
-  }>;
-  nutrition: {
-    calories: number;
-    carbs: number;
-    protein: number;
-    fat: number;
-    absorption_factor?: number;
-  };
-  notes?: string;
-  bloodSugar?: number;
-  bloodSugarTimestamp?: string;
-  suggestedInsulin?: number;
-  intendedInsulin?: number;
-  insulinCalculation?: Record<string, unknown>;
-  calculation_summary?: Record<string, unknown>;
+  carbs: number;
+  protein: number;
+  fat: number;
 }
 
 export interface MealsListResponse {
@@ -129,13 +69,10 @@ export interface MealsListResponse {
  * Blood sugar response types
  */
 export interface BloodSugarResponse {
-  _id: string;
-  bloodSugar: number;
+  id: string;
+  value: number;
   timestamp: string;
-  bloodSugarTimestamp?: string;
-  status: 'low' | 'normal' | 'high';
-  notes?: string;
-  target: number;
+  unit: string;
 }
 
 export interface BloodSugarCreateResponse {
@@ -193,18 +130,9 @@ export interface ActiveInsulinResponse {
  */
 export interface ActivityResponse {
   id: string;
-  type: 'expected' | 'completed';
-  level: number;
-  levelLabel: string;
-  impact: number;
-  duration: string;
+  activityType: string;
+  duration: number;
   timestamp: string;
-  startTime?: string;
-  endTime?: string;
-  expectedTime?: string;
-  completedTime?: string;
-  notes?: string;
-  meal_id?: string;
 }
 
 /**
@@ -252,7 +180,6 @@ export interface FoodCategoriesResponse {
  * Error response type
  */
 export interface ApiError {
-  error: string;
-  details?: string;
+  message: string;
   status?: number;
 }

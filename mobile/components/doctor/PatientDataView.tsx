@@ -20,7 +20,6 @@ import {
 } from 'react-native';
 
 import { Card } from '@/components/ui';
-import { getPatientConstants } from '@/services/api/doctor';
 import {
   getDoctorPatientVitals,
   getDoctorPatientVisits,

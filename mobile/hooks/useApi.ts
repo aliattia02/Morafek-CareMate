@@ -3,9 +3,8 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { isNetworkError, isAuthError } from '@/services/api/client';
+import { isNetworkError } from '@/services/api/client';
 import apiClient from '@/services/api/client';
-import { useOfflineStore } from '@/store/offline.store';
 
 export interface ApiState<T> {
   data: T | null;
@@ -50,7 +49,6 @@ export function useApi<T, P extends unknown[] = []>(
     error: null,
   });
   
-  const setOnline = useOfflineStore((s) => s.setOnline);
   const isMounted = useRef(true);
   
   useEffect(() => {
@@ -75,7 +73,7 @@ export function useApi<T, P extends unknown[] = []>(
       return result;
     } catch (error) {
       if (isNetworkError(error)) {
-        setOnline(false);
+        // Network is offline — could update offline store here if available
       }
       
       const errorMessage = error instanceof Error ? error.message : 'An error occurred';
@@ -90,7 +88,7 @@ export function useApi<T, P extends unknown[] = []>(
       
       return null;
     }
-  }, [apiFunction, showLoading, setOnline]);
+  }, [apiFunction, showLoading]);
 
   const reset = useCallback(() => {
     setState({

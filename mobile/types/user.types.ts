@@ -3,23 +3,6 @@
  * @module types/user
  */
 
-import type {
-  PatientConstants,
-  InsulinTimingGuideline,
-  TimeOfDayFactor,
-  DiseaseFactor,
-  MedicationFactor
-} from './constants.types';
-
-// Re-export the types for convenience
-export type {
-  PatientConstants,
-  InsulinTimingGuideline,
-  TimeOfDayFactor,
-  DiseaseFactor,
-  MedicationFactor
-};
-
 /**
  * User role types in the system
  */
@@ -48,7 +31,7 @@ export interface Patient extends User {
   diabetesType?: 'type_1_diabetes' | 'type_2_diabetes' | 'gestational_diabetes';
   diagnosisDate?: string;
   assignedDoctorId?: string;
-  patientConstants?: PatientConstants;
+  patientConstants?: Record<string, unknown>;
   medications?: string[];
   conditions?: string[];
 }

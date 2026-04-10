@@ -28,7 +28,7 @@ export interface InputProps extends Omit<RNTextInputProps, 'style'> {
   onRightIconPress?: () => void;
 }
 
-export const Input: React.FC<InputProps> = ({
+export const Input = React.forwardRef<RNTextInput, InputProps>(({
   label,
   error,
   helperText,
@@ -41,7 +41,7 @@ export const Input: React.FC<InputProps> = ({
   onRightIconPress,
   editable = true,
   ...props
-}) => {
+}, ref) => {
   const [isFocused, setIsFocused] = useState(false);
 
   const inputContainerStyle = [
@@ -71,6 +71,7 @@ export const Input: React.FC<InputProps> = ({
         {leftIcon && <View style={styles.leftIcon}>{leftIcon}</View>}
 
         <RNTextInput
+          ref={ref}
           style={textInputStyle}
           placeholderTextColor={colors.text.disabled}
           editable={editable}
@@ -94,7 +95,8 @@ export const Input: React.FC<InputProps> = ({
       {(!error && helperText) ? <Text style={styles.helperText}>{helperText}</Text> : null}
     </View>
   );
-};
+});
+Input.displayName = 'Input';
 
 const styles = StyleSheet.create({
   container: {

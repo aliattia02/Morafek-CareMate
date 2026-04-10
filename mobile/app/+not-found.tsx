@@ -31,7 +31,7 @@ export default function NotFoundScreen() {
         The page you're looking for doesn't exist or has been moved.
       </Text>
       <Link href="/" asChild>
-        <Button title="Go Home" variant="primary" style={styles.button} />
+        <Button title="Go Home" variant="primary" onPress={() => {}} style={styles.button} />
       </Link>
     </View>
   );

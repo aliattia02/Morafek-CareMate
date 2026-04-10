@@ -12,10 +12,10 @@
  */
 
 // Types
-import type { User, Patient, PatientConstants } from '@/types';
+import type { User, Patient } from '@/types';
 
 // Re-export for convenience
-export type { User, Patient, PatientConstants };
+export type { User, Patient };
 
 /**
  * Auth stack param list
