@@ -777,15 +777,24 @@ DOCUMENT_ALLOWED_MIME_TYPES = {
 }
 DOCUMENT_MAX_FILE_BYTES = 10 * 1024 * 1024  # 10 MB
 
+LOINC_MAP = {
+    'lab_report':   ('11502-2', 'Laboratory report'),
+    'imaging':      ('18748-4', 'Diagnostic imaging study'),
+    'prescription': ('57833-6', 'Prescription for medication'),
+    'other':        ('34133-9', 'Summary of episode note'),
+}
+
 
 def _serialize_document(doc):
     """Convert a MongoDB document dict into a JSON-serialisable response."""
+    attachment = (doc.get('content') or [{}])[0].get('attachment', {})
     return {
         'id': str(doc['_id']),
         'category': doc.get('category', 'other'),
         'description': doc.get('description', ''),
-        'url': doc.get('url', ''),
-        'created_at': doc.get('created_at', ''),
+        'url': attachment.get('url', ''),
+        'title': attachment.get('title', ''),
+        'date': doc.get('date', ''),
     }
 
 
@@ -801,7 +810,7 @@ def get_own_documents(current_user):
     docs = list(
         mongo.db.ehr_documents
         .find({'patient_id': patient_id})
-        .sort('created_at', -1)
+        .sort('date', -1)
     )
     return jsonify([_serialize_document(d) for d in docs]), 200
 
@@ -846,6 +855,8 @@ def upload_own_document(current_user):
     if not description:
         return jsonify({'error': 'Description is required.'}), 400
 
+    encounter_id = request.form.get('encounter_id', '').strip() or None
+
     patient_id = str(current_user['_id'])
     doc_uuid = str(uuid4())
 
@@ -858,19 +869,44 @@ def upload_own_document(current_user):
         resource_type=resource_type,
     )
 
-    url = upload_result.get('secure_url')
-    if not url:
+    cloudinary_url = upload_result.get('secure_url')
+    if not cloudinary_url:
         logger.error('Cloudinary document upload succeeded but returned no secure_url')
         return jsonify({'error': 'Upload failed: no URL returned'}), 500
 
-    created_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    cloudinary_public_id = upload_result.get('public_id', '')
+    loinc_code, loinc_display = LOINC_MAP.get(category, ('34133-9', 'Document'))
+
     document = {
+        'resourceType': 'DocumentReference',
+        'id': doc_uuid,
         'patient_id': patient_id,
+        'uploaded_by': str(current_user['_id']),
+        'status': 'current',
+        'type': {
+            'coding': [{
+                'system': 'http://loinc.org',
+                'code': loinc_code,
+                'display': loinc_display,
+            }]
+        },
         'category': category,
+        'subject': {'reference': f'Patient/{patient_id}'},
+        'date': datetime.now(timezone.utc).isoformat() + 'Z',
         'description': description,
-        'url': url,
-        'cloudinary_public_id': upload_result.get('public_id', ''),
-        'created_at': created_at,
+        'content': [{
+            'attachment': {
+                'contentType': file.mimetype,
+                'url': cloudinary_url,
+                'title': file.filename,
+                'creation': datetime.now(timezone.utc).isoformat() + 'Z',
+            }
+        }],
+        'context': (
+            {'encounter': [{'reference': f'Encounter/{encounter_id}'}]}
+            if encounter_id else {}
+        ),
+        'cloudinary_public_id': cloudinary_public_id,
     }
 
     result = mongo.db.ehr_documents.insert_one(document)
@@ -905,7 +941,9 @@ def delete_own_document(current_user, document_id):
     public_id = doc.get('cloudinary_public_id')
     if public_id:
         try:
-            ext = doc.get('url', '').rsplit('.', 1)[-1].lower()
+            attachment = (doc.get('content') or [{}])[0].get('attachment', {})
+            url = attachment.get('url', '') or doc.get('url', '')
+            ext = url.rsplit('.', 1)[-1].lower()
             resource_type = 'image' if ext in ('jpg', 'jpeg', 'png', 'webp', 'gif') else 'raw'
             cloudinary.uploader.destroy(public_id, resource_type=resource_type)
         except Exception as e:
@@ -928,7 +966,7 @@ def get_patient_documents(current_user, patient_id):
     docs = list(
         mongo.db.ehr_documents
         .find({'patient_id': patient_id})
-        .sort('created_at', -1)
+        .sort('date', -1)
     )
     return jsonify([_serialize_document(d) for d in docs]), 200
 
