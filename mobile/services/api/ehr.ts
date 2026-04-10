@@ -128,6 +128,11 @@ export async function getPatientMessages(patientId: string): Promise<MessageResp
   return response.data;
 }
 
+// Aliases used by doctor-facing components
+export const getDoctorPatientVitals = getPatientVitals;
+export const getDoctorPatientVisits = getPatientVisits;
+export const getMessageThread = getPatientMessages;
+
 export default {
   submitVital,
   getMyVitals,

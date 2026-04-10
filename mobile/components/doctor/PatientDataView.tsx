@@ -2,7 +2,7 @@
  * Patient Data View Component
  * Location: mobile/components/doctor/PatientDataView.tsx
  *
- * Tabs: Overview | Visits | Vitals
+ * Tabs: Overview | Visits | Vitals | Messages
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
@@ -13,12 +13,21 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  TextInput,
   StyleSheet,
 } from 'react-native';
 
 import { Card } from '@/components/ui';
-import apiClient from '@/services/api/client';
-import { API } from '@/services/api/endpoints';
+import { getPatientConstants } from '@/services/api/doctor';
+import {
+  getDoctorPatientVitals,
+  getDoctorPatientVisits,
+  getMessageThread,
+  sendMessage,
+  type VitalResponse,
+  type VisitResponse,
+  type MessageResponse,
+} from '@/services/api/ehr';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 import type { DoctorPatient } from '@/services/api/doctor';
 
@@ -26,24 +35,7 @@ import type { DoctorPatient } from '@/services/api/doctor';
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TabType = 'overview' | 'visits' | 'vitals';
-
-interface Visit {
-  id?: string;
-  visit_date: string;
-  chief_complaint?: string;
-  diagnosis_text?: string;
-  diagnosis_icd10?: string;
-}
-
-interface Vital {
-  id?: string;
-  timestamp: string;
-  systolic?: number;
-  diastolic?: number;
-  pulse?: number;
-  urgent?: boolean;
-}
+type TabType = 'overview' | 'visits' | 'vitals' | 'messages';
 
 interface PatientDataViewProps {
   patient: DoctorPatient;
@@ -57,37 +49,31 @@ interface PatientDataViewProps {
 export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
   const [activeTab, setActiveTab] = useState<TabType>('overview');
 
-  const [visits, setVisits] = useState<Visit[]>([]);
-  const [visitsLoading, setVisitsLoading] = useState(false);
-  const [visitsLoaded, setVisitsLoaded] = useState(false);
-  const [visitsError, setVisitsError] = useState<string | null>(null);
-  const [visitsRefreshing, setVisitsRefreshing] = useState(false);
-
-  const [vitals, setVitals] = useState<Vital[]>([]);
+  const [vitals, setVitals] = useState<VitalResponse[]>([]);
   const [vitalsLoading, setVitalsLoading] = useState(false);
   const [vitalsLoaded, setVitalsLoaded] = useState(false);
   const [vitalsError, setVitalsError] = useState<string | null>(null);
   const [vitalsRefreshing, setVitalsRefreshing] = useState(false);
 
-  const loadVisits = useCallback(async () => {
-    try {
-      setVisitsError(null);
-      const response = await apiClient.get<Visit[]>(API.EHR.PATIENT_VISITS(patient.id));
-      setVisits(response.data);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load visits';
-      setVisitsError(message);
-    } finally {
-      setVisitsLoading(false);
-      setVisitsLoaded(true);
-    }
-  }, [patient.id]);
+  const [visits, setVisits] = useState<VisitResponse[]>([]);
+  const [visitsLoading, setVisitsLoading] = useState(false);
+  const [visitsLoaded, setVisitsLoaded] = useState(false);
+  const [visitsError, setVisitsError] = useState<string | null>(null);
+  const [visitsRefreshing, setVisitsRefreshing] = useState(false);
+
+  const [messages, setMessages] = useState<MessageResponse[]>([]);
+  const [messagesLoading, setMessagesLoading] = useState(false);
+  const [messagesLoaded, setMessagesLoaded] = useState(false);
+  const [messagesError, setMessagesError] = useState<string | null>(null);
+  const [messagesRefreshing, setMessagesRefreshing] = useState(false);
+  const [messageInput, setMessageInput] = useState('');
+  const [messageSending, setMessageSending] = useState(false);
 
   const loadVitals = useCallback(async () => {
     try {
       setVitalsError(null);
-      const response = await apiClient.get<Vital[]>(API.EHR.PATIENT_VITALS(patient.id));
-      setVitals(response.data);
+      const data = await getDoctorPatientVitals(patient.id);
+      setVitals(data);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to load vitals';
       setVitalsError(message);
@@ -97,12 +83,33 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     }
   }, [patient.id]);
 
-  useEffect(() => {
-    if (activeTab === 'visits' && !visitsLoaded && !visitsLoading) {
-      setVisitsLoading(true);
-      loadVisits();
+  const loadVisits = useCallback(async () => {
+    try {
+      setVisitsError(null);
+      const data = await getDoctorPatientVisits(patient.id);
+      setVisits(data);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to load visits';
+      setVisitsError(message);
+    } finally {
+      setVisitsLoading(false);
+      setVisitsLoaded(true);
     }
-  }, [activeTab, loadVisits]);
+  }, [patient.id]);
+
+  const loadMessages = useCallback(async () => {
+    try {
+      setMessagesError(null);
+      const data = await getMessageThread(patient.id);
+      setMessages(data);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to load messages';
+      setMessagesError(message);
+    } finally {
+      setMessagesLoading(false);
+      setMessagesLoaded(true);
+    }
+  }, [patient.id]);
 
   useEffect(() => {
     if (activeTab === 'vitals' && !vitalsLoaded && !vitalsLoading) {
@@ -111,11 +118,19 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     }
   }, [activeTab, loadVitals]);
 
-  const onRefreshVisits = useCallback(async () => {
-    setVisitsRefreshing(true);
-    await loadVisits();
-    setVisitsRefreshing(false);
-  }, [loadVisits]);
+  useEffect(() => {
+    if (activeTab === 'visits' && !visitsLoaded && !visitsLoading) {
+      setVisitsLoading(true);
+      loadVisits();
+    }
+  }, [activeTab, loadVisits]);
+
+  useEffect(() => {
+    if (activeTab === 'messages' && !messagesLoaded && !messagesLoading) {
+      setMessagesLoading(true);
+      loadMessages();
+    }
+  }, [activeTab, loadMessages]);
 
   const onRefreshVitals = useCallback(async () => {
     setVitalsRefreshing(true);
@@ -123,10 +138,39 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     setVitalsRefreshing(false);
   }, [loadVitals]);
 
+  const onRefreshVisits = useCallback(async () => {
+    setVisitsRefreshing(true);
+    await loadVisits();
+    setVisitsRefreshing(false);
+  }, [loadVisits]);
+
+  const onRefreshMessages = useCallback(async () => {
+    setMessagesRefreshing(true);
+    await loadMessages();
+    setMessagesRefreshing(false);
+  }, [loadMessages]);
+
+  const handleSendMessage = useCallback(async () => {
+    const body = messageInput.trim();
+    if (!body || messageSending) return;
+    try {
+      setMessageSending(true);
+      const sent = await sendMessage(patient.id, body);
+      setMessages((prev) => [...prev, sent]);
+      setMessageInput('');
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to send message';
+      setMessagesError(message);
+    } finally {
+      setMessageSending(false);
+    }
+  }, [messageInput, messageSending, patient.id]);
+
   const tabs: { key: TabType; label: string }[] = [
     { key: 'overview', label: 'Overview' },
     { key: 'visits', label: 'Visits' },
     { key: 'vitals', label: 'Vitals' },
+    { key: 'messages', label: 'Messages' },
   ];
 
   return (
@@ -243,22 +287,76 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                   <Text style={styles.dateText}>{vital.timestamp}</Text>
                   {vital.urgent && <Text style={styles.urgentText}>⚠️ URGENT</Text>}
                 </View>
-                {vital.systolic != null && vital.diastolic != null ? (
-                  <>
-                    <Text style={styles.fieldLabel}>Blood Pressure</Text>
-                    <Text style={styles.fieldValue}>{vital.systolic}/{vital.diastolic} mmHg</Text>
-                  </>
-                ) : null}
-                {vital.pulse != null ? (
-                  <>
-                    <Text style={styles.fieldLabel}>Pulse</Text>
-                    <Text style={styles.fieldValue}>{vital.pulse} bpm</Text>
-                  </>
-                ) : null}
+                <Text style={styles.fieldLabel}>Blood Pressure</Text>
+                <Text style={styles.fieldValue}>{vital.systolic}/{vital.diastolic} mmHg</Text>
+                <Text style={styles.fieldLabel}>Pulse</Text>
+                <Text style={styles.fieldValue}>{vital.pulse} bpm</Text>
               </Card>
             ))
           )}
         </ScrollView>
+      )}
+
+      {/* Messages Tab */}
+      {activeTab === 'messages' && (
+        <View style={styles.messagesContainer}>
+          <ScrollView
+            contentContainerStyle={styles.content}
+            refreshControl={
+              <RefreshControl
+                refreshing={messagesRefreshing}
+                onRefresh={onRefreshMessages}
+                colors={[colors.primary]}
+              />
+            }
+          >
+            {messagesLoading ? (
+              <ActivityIndicator color={colors.primary} style={styles.loader} />
+            ) : messagesError ? (
+              <Text style={styles.errorText}>⚠️ {messagesError}</Text>
+            ) : messages.length === 0 ? (
+              <Text style={styles.emptyText}>No messages yet.</Text>
+            ) : (
+              messages.map((msg, index) => {
+                const isDoctor = msg.sender_type === 'doctor';
+                return (
+                  <View
+                    key={msg.id ?? index}
+                    style={[
+                      styles.messageBubble,
+                      isDoctor ? styles.messageBubbleDoctor : styles.messageBubblePatient,
+                    ]}
+                  >
+                    <Text style={styles.messageBody}>{msg.body}</Text>
+                    <Text style={styles.messageTime}>{msg.created_at}</Text>
+                  </View>
+                );
+              })
+            )}
+          </ScrollView>
+
+          <View style={styles.messageInputRow}>
+            <TextInput
+              style={styles.messageInput}
+              placeholder="Type a message…"
+              placeholderTextColor={colors.text.secondary}
+              value={messageInput}
+              onChangeText={setMessageInput}
+              multiline
+            />
+            <TouchableOpacity
+              style={[styles.sendButton, (!messageInput.trim() || messageSending) && styles.sendButtonDisabled]}
+              onPress={handleSendMessage}
+              disabled={!messageInput.trim() || messageSending}
+            >
+              {messageSending ? (
+                <ActivityIndicator color={colors.surface} size="small" />
+              ) : (
+                <Text style={styles.sendButtonText}>Send</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
       )}
     </View>
   );
@@ -361,5 +459,72 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.danger,
     fontWeight: '700',
+  },
+  // Messages
+  messagesContainer: {
+    flex: 1,
+  },
+  messageBubble: {
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+    maxWidth: '80%',
+  },
+  messageBubbleDoctor: {
+    alignSelf: 'flex-end',
+    backgroundColor: colors.primary,
+  },
+  messageBubblePatient: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  messageBody: {
+    ...typography.body,
+    color: colors.text.primary,
+  },
+  messageTime: {
+    ...typography.small,
+    color: colors.text.secondary,
+    marginTop: spacing.xs,
+  },
+  messageInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    padding: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  messageInput: {
+    flex: 1,
+    ...typography.body,
+    color: colors.text.primary,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginRight: spacing.sm,
+    maxHeight: 100,
+  },
+  sendButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 64,
+  },
+  sendButtonDisabled: {
+    opacity: 0.5,
+  },
+  sendButtonText: {
+    ...typography.body,
+    color: colors.surface,
+    fontWeight: '600',
   },
 });
