@@ -1,5 +1,3 @@
-Replace the entire contents of mobile/app/(app)/(tabs)/index.tsx
-with the following. Delete everything that was there before.
 
 import React, { useEffect, useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity } from 'react-native';
