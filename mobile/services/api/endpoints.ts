@@ -57,6 +57,9 @@ const API = {
     AUTHORIZE_DOCTOR: v('/api/patient/authorize-doctor'),
     REVOKE_DOCTOR: v('/api/patient/revoke-doctor'),
   },
+  USER: {
+    UPLOAD_AVATAR: v('/api/user/avatar'),
+  },
   DOCTORS: {
     LIST: v('/api/doctors'),
   },

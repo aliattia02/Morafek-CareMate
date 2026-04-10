@@ -33,6 +33,7 @@ export const useAuth = () => {
     logout: storeLogout,
     checkAuth,
     clearError,
+    updateProfilePicture,
   } = useAuthStore();
 
   // Wake-up state (shown in login UI before the actual login request fires)
@@ -132,6 +133,7 @@ export const useAuth = () => {
     register,
     checkAuth,
     clearError,
+    updateProfilePicture,
   };
 };
 
