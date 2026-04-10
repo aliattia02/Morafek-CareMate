@@ -1229,3 +1229,46 @@ def get_own_exercises(current_user):
         .sort('order', 1)
     )
     return jsonify([_serialize_exercise(d) for d in docs]), 200
+
+
+@ehr_routes.route('/api/patient/exercises/<exercise_id>/done', methods=['POST'])
+@token_required
+@api_error_handler
+def mark_exercise_done(current_user, exercise_id):
+    """POST /api/patient/exercises/<exercise_id>/done — mark an exercise as done or not done.
+
+    Required JSON fields:
+      done (bool) — true to mark the exercise completed, false to unmark it
+    """
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    try:
+        exercise_oid = ObjectId(exercise_id)
+    except Exception:
+        return jsonify({'error': 'Invalid exercise ID'}), 400
+
+    patient_id = str(current_user['_id'])
+    doc = mongo.db.ehr_exercises.find_one({
+        '_id': exercise_oid,
+        'patient_id': patient_id,
+    })
+    if not doc:
+        return jsonify({'error': 'Exercise not found'}), 404
+
+    data = request.get_json()
+    if not data or 'done' not in data:
+        return jsonify({'error': 'Missing required field: done'}), 400
+
+    done = data['done']
+    if not isinstance(done, bool):
+        return jsonify({'error': 'Field "done" must be a boolean'}), 400
+
+    if done:
+        update = {'$set': {'last_done_at': datetime.now(timezone.utc).isoformat()}}
+    else:
+        update = {'$unset': {'last_done_at': ''}}
+
+    mongo.db.ehr_exercises.update_one({'_id': exercise_oid}, update)
+    logger.info('Exercise %s marked done=%s', exercise_id, done)
+    return jsonify({'message': 'Exercise updated'}), 200
