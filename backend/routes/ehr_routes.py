@@ -387,9 +387,9 @@ def create_visit(current_user, patient_id):
 
     Required JSON fields:
       chief_complaint  (str) — patient's main reason for the visit
-      diagnosis_icd10  (str) — ICD-10-GM code (German modification), e.g. "E11.9"
       diagnosis_text   (str) — human-readable diagnosis label
     Optional JSON fields:
+      diagnosis_icd10 (str) — ICD-10-GM code, e.g. "E11.9" (defaults to "")
       notes      (str) — additional clinical notes
       visit_date (str) — ISO 8601 datetime string, e.g. "2025-06-01T09:00:00Z"
                          (defaults to the current UTC time if omitted)
@@ -402,13 +402,17 @@ def create_visit(current_user, patient_id):
     if not data:
         return jsonify({'error': 'Missing request body'}), 400
 
-    required = ['chief_complaint', 'diagnosis_icd10', 'diagnosis_text']
+    # FIX: diagnosis_icd10 is now optional — only chief_complaint and
+    # diagnosis_text are required. The ICD code field is blank in many
+    # real-world workflows; enforcing it caused silent 400 failures from
+    # the form which left the field empty.
+    required = ['chief_complaint', 'diagnosis_text']
     for field in required:
-        if field not in data:
+        if field not in data or not str(data[field]).strip():
             return jsonify({'error': f'Missing required field: {field}'}), 400
 
     chief_complaint = data['chief_complaint']
-    diagnosis_icd10 = data['diagnosis_icd10']
+    diagnosis_icd10 = data.get('diagnosis_icd10', '') or ''   # optional, default ''
     diagnosis_text = data['diagnosis_text']
     notes = data.get('notes', '')
     doctor_id = str(current_user['_id'])
@@ -547,6 +551,218 @@ def get_visits(current_user, patient_id):
             'diagnosis_text': diagnosis_text,
             'visit_date': enc.get('period', {}).get('start'),
             'notes': notes
+        })
+
+    return jsonify(result), 200
+
+
+# ─── Messages (ehr_messages) ──────────────────────────────────────────────────
+#
+# IMPORTANT — route registration order:
+#   Static routes (/api/messages/conversations, /api/messages/unread-count)
+#   MUST be registered BEFORE the variable route (/api/messages/<other_user_id>).
+#   Werkzeug gives static segments higher priority, but defining them first
+#   makes the intent explicit and avoids any edge-case ambiguity.
+
+@ehr_routes.route('/api/messages/conversations', methods=['GET'])
+@token_required
+@api_error_handler
+def get_conversations(current_user):
+    """GET /api/messages/conversations — list all conversation partners for the current user.
+
+    Returns one entry per unique conversation partner, ordered by most recent
+    message first.  Each entry includes the partner's display name, their user
+    type, the last message preview, its timestamp, and the number of unread
+    messages from that partner.
+    """
+    current_id = str(current_user['_id'])
+
+    # Fetch all messages involving this user, newest first so we naturally
+    # see the most-recent message per thread when we deduplicate.
+    all_messages = list(
+        mongo.db.ehr_messages
+        .find({
+            '$or': [
+                {'sender_id': current_id},
+                {'recipient_id': current_id},
+            ]
+        })
+        .sort('created_at', -1)
+    )
+
+    # Deduplicate: keep only the most-recent message per conversation partner.
+    seen_partner_ids: dict = {}   # other_user_id → last message doc
+    for msg in all_messages:
+        other_id = msg['recipient_id'] if msg['sender_id'] == current_id else msg['sender_id']
+        if other_id not in seen_partner_ids:
+            seen_partner_ids[other_id] = msg
+
+    if not seen_partner_ids:
+        return jsonify([]), 200
+
+    # Bulk-fetch partner user records to avoid N+1 DB calls
+    try:
+        partner_oids = [ObjectId(oid) for oid in seen_partner_ids]
+    except Exception:
+        partner_oids = []
+
+    partner_docs = {
+        str(u['_id']): u
+        for u in mongo.db.users.find(
+            {'_id': {'$in': partner_oids}},
+            {'first_name': 1, 'last_name': 1, 'user_type': 1}
+        )
+    }
+
+    # Bulk-count unread messages per partner
+    unread_pipeline = [
+        {
+            '$match': {
+                'recipient_id': current_id,
+                'sender_id': {'$in': list(seen_partner_ids.keys())},
+                'read': False,
+            }
+        },
+        {'$group': {'_id': '$sender_id', 'count': {'$sum': 1}}}
+    ]
+    unread_by_partner = {
+        row['_id']: row['count']
+        for row in mongo.db.ehr_messages.aggregate(unread_pipeline)
+    }
+
+    result = []
+    for other_id, last_msg in seen_partner_ids.items():
+        partner = partner_docs.get(other_id, {})
+        first = partner.get('first_name', '')
+        last  = partner.get('last_name', '')
+        name  = f'{first} {last}'.strip() or 'Unknown'
+
+        result.append({
+            'other_user_id':   other_id,
+            'other_user_name': name,
+            'other_user_type': partner.get('user_type', ''),
+            'last_message':    last_msg.get('body', ''),
+            'last_message_at': last_msg.get('created_at', ''),
+            'unread_count':    unread_by_partner.get(other_id, 0),
+        })
+
+    return jsonify(result), 200
+
+
+@ehr_routes.route('/api/messages/unread-count', methods=['GET'])
+@token_required
+@api_error_handler
+def get_unread_count(current_user):
+    """GET /api/messages/unread-count — count unread messages for the current user."""
+    current_id = str(current_user['_id'])
+    count = mongo.db.ehr_messages.count_documents({
+        'recipient_id': current_id,
+        'read': False,
+    })
+    return jsonify({'count': count}), 200
+
+
+@ehr_routes.route('/api/messages/<other_user_id>', methods=['GET'])
+@token_required
+@api_error_handler
+def get_messages(current_user, other_user_id):
+    """GET /api/messages/<other_user_id> — get message thread between current user and other_user_id."""
+    current_id = str(current_user['_id'])
+
+    messages = list(
+        mongo.db.ehr_messages
+        .find({
+            '$or': [
+                {'sender_id': current_id, 'recipient_id': other_user_id},
+                {'sender_id': other_user_id, 'recipient_id': current_id},
+            ]
+        })
+        .sort('created_at', 1)
+    )
+
+    result = []
+    for msg in messages:
+        result.append({
+            'id': str(msg['_id']),
+            'sender_id': msg.get('sender_id', ''),
+            'recipient_id': msg.get('recipient_id', ''),
+            'sender_type': msg.get('sender_type', 'patient'),
+            'body': msg.get('body', ''),
+            'read': msg.get('read', False),
+            'created_at': msg.get('created_at', ''),
+        })
+
+    return jsonify(result), 200
+
+
+@ehr_routes.route('/api/messages/<other_user_id>', methods=['POST'])
+@token_required
+@api_error_handler
+def send_message(current_user, other_user_id):
+    """POST /api/messages/<other_user_id> — send a message to another user."""
+    data = request.get_json()
+    if not data or not data.get('body', '').strip():
+        return jsonify({'error': 'Message body is required'}), 400
+
+    current_id = str(current_user['_id'])
+    sender_type = current_user.get('user_type', 'patient')
+    created_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    document = {
+        'sender_id': current_id,
+        'recipient_id': other_user_id,
+        'sender_type': sender_type,
+        'body': data['body'].strip(),
+        'read': False,
+        'created_at': created_at,
+    }
+
+    result = mongo.db.ehr_messages.insert_one(document)
+    logger.info(f'Message sent from {current_id} to {other_user_id}')
+
+    return jsonify({
+        'id': str(result.inserted_id),
+        'sender_id': current_id,
+        'recipient_id': other_user_id,
+        'sender_type': sender_type,
+        'body': document['body'],
+        'read': False,
+        'created_at': created_at,
+    }), 201
+
+
+@ehr_routes.route('/api/doctor/patient/<patient_id>/messages', methods=['GET'])
+@token_required
+@api_error_handler
+def get_patient_messages(current_user, patient_id):
+    """GET /api/doctor/patient/<patient_id>/messages — doctor views message thread with a patient."""
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err), code
+
+    doctor_id = str(current_user['_id'])
+
+    messages = list(
+        mongo.db.ehr_messages
+        .find({
+            '$or': [
+                {'sender_id': doctor_id, 'recipient_id': patient_id},
+                {'sender_id': patient_id, 'recipient_id': doctor_id},
+            ]
+        })
+        .sort('created_at', 1)
+    )
+
+    result = []
+    for msg in messages:
+        result.append({
+            'id': str(msg['_id']),
+            'sender_id': msg.get('sender_id', ''),
+            'recipient_id': msg.get('recipient_id', ''),
+            'sender_type': msg.get('sender_type', 'patient'),
+            'body': msg.get('body', ''),
+            'read': msg.get('read', False),
+            'created_at': msg.get('created_at', ''),
         })
 
     return jsonify(result), 200

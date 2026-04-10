@@ -19,6 +19,7 @@ import {
   StyleSheet,
 } from 'react-native';
 
+import { useRouter } from 'expo-router';
 import { Card } from '@/components/ui';
 import { getPatientConstants } from '@/services/api/doctor';
 import {
@@ -53,6 +54,7 @@ interface PatientDataViewProps {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
 
   const [vitals, setVitals] = useState<VitalResponse[]>([]);
@@ -307,6 +309,17 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             />
           }
         >
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() =>
+              router.push({
+                pathname: '/(app)/ehr/visit-form',
+                params: { patient_id: patient.id, patient_name: `${patient.firstName} ${patient.lastName}` },
+              } as any)
+            }
+          >
+            <Text style={styles.addButtonText}>➕  Add Visit</Text>
+          </TouchableOpacity>
           {visitsLoading ? (
             <ActivityIndicator color={colors.primary} style={styles.loader} />
           ) : visitsError ? (
@@ -511,6 +524,17 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             />
           }
         >
+          <TouchableOpacity
+            style={styles.addButton}
+            onPress={() =>
+              router.push({
+                pathname: '/(app)/ehr/exercise-form',
+                params: { patient_id: patient.id, patient_name: `${patient.firstName} ${patient.lastName}` },
+              } as any)
+            }
+          >
+            <Text style={styles.addButtonText}>➕  Add Exercise</Text>
+          </TouchableOpacity>
           {exercisesLoading ? (
             <ActivityIndicator color={colors.primary} style={styles.loader} />
           ) : exercisesError ? (
@@ -747,6 +771,20 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.surface,
     fontWeight: '600',
+  },
+  // Action buttons
+  addButton: {
+    backgroundColor: colors.primary,
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  addButtonText: {
+    ...typography.body,
+    color: colors.surface,
+    fontWeight: '700',
   },
   // Exercises tab
   exerciseDetails: {

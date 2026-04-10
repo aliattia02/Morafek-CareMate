@@ -9,6 +9,10 @@
  *     enough for a Render cold-start (typically 30–60 s).
  *  3. ERR_NETWORK added to the retry condition so the "sometimes" Network Error
  *     on login is now automatically retried instead of surfaced immediately.
+ *  4. FIX: 401 handling no longer blindly clears credentials. It only clears
+ *     them when no token exists in storage, preventing startup race conditions
+ *     (e.g. doctor dashboard mounting before secure storage is hydrated) from
+ *     logging the user out.
  */
 
 import axios from 'axios';
@@ -125,11 +129,51 @@ apiClient.interceptors.response.use(
       );
     }
 
-    // Clear credentials on 401
+    // ── FIX: Safe 401 handling ──────────────────────────────────────────────
+    //
+    // Previous behaviour: wipe token + user data on ANY 401.
+    // Problem: the doctor dashboard (and other screens) fire authenticated
+    // requests on mount. If secure storage hasn't finished hydrating yet,
+    // the request goes out without a token, receives a 401, and the old code
+    // immediately deleted the real (valid) token — logging the user out on
+    // every app refresh.
+    //
+    // New behaviour:
+    //   • Skip credential-clearing for public/health endpoints.
+    //   • For protected endpoints, only wipe credentials when NO token exists
+    //     in storage (genuine unauthenticated state). If a token IS present,
+    //     the 401 is likely a transient race condition; log a warning and let
+    //     the calling screen surface the error without destroying the session.
+    // ───────────────────────────────────────────────────────────────────────
     if (status === 401) {
-      console.log('[API Error] Unauthorized — clearing stored credentials');
-      await secureStorage.remove(STORAGE_KEYS.AUTH_TOKEN);
-      await secureStorage.remove(STORAGE_KEYS.USER_DATA);
+      const url = error.config?.url ?? '';
+      const isPublicEndpoint =
+        url.includes(HEALTH_ENDPOINT) ||
+        url.includes('/api/auth/login') ||
+        url.includes('/api/auth/register');
+
+      if (!isPublicEndpoint) {
+        try {
+          const storedToken = await secureStorage.get(STORAGE_KEYS.AUTH_TOKEN);
+
+          if (!storedToken) {
+            // No token at all — genuine unauthenticated state, safe to clear.
+            console.log('[API Error] 401 with no stored token — clearing user data');
+            await secureStorage.remove(STORAGE_KEYS.USER_DATA);
+          } else {
+            // Token exists but server returned 401. This is most likely a
+            // startup race condition (screen mounted before storage hydrated)
+            // or a clock-skew issue. Do NOT wipe the session — the auth store
+            // will handle expiry via checkAuth() on its next cycle.
+            console.warn(
+              '[API Error] 401 received but a token IS stored. ' +
+              'Likely a startup race condition — session preserved.'
+            );
+          }
+        } catch (storageErr) {
+          console.error('[API Error] Could not read token during 401 handling:', storageErr);
+        }
+      }
     }
 
     return Promise.reject(error);

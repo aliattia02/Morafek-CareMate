@@ -4,10 +4,10 @@
  *
  * Allows a doctor to add or edit an exercise assigned to a patient.
  *
- * Params (via useLocalSearchParams):
- *   - patient_id   : string – the patient's user ID
- *   - patient_name : string – the patient's display name (used in header)
- *   - exercise_id  : string (optional) – if present, edits the existing exercise
+ * Web-compatibility note:
+ *   Alert.alert with callbacks does NOT work on Expo Web — it maps to the
+ *   synchronous window.alert which drops onPress.  Success / error feedback
+ *   is shown via inline banners and automatic navigation instead.
  */
 
 import React, { useState } from 'react';
@@ -18,7 +18,6 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   TouchableOpacity,
 } from 'react-native';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
@@ -31,20 +30,16 @@ import { API } from '@/services/api/endpoints';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Types
+// Types & constants
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ExerciseCategory = 'mobility' | 'strength' | 'balance' | 'breathing' | 'other';
 
 interface CategoryTile {
-  key: ExerciseCategory;
+  key:   ExerciseCategory;
   emoji: string;
   label: string;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
 
 const CATEGORY_TILES: CategoryTile[] = [
   { key: 'mobility',  emoji: '🦵', label: 'Mobility'  },
@@ -62,24 +57,26 @@ export default function ExerciseFormScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
   const { patient_id, patient_name, exercise_id } = useLocalSearchParams<{
-    patient_id?: string;
+    patient_id?:   string;
     patient_name?: string;
-    exercise_id?: string;
+    exercise_id?:  string;
   }>();
 
   const isEdit = Boolean(exercise_id);
 
-  const [category, setCategory] = useState<ExerciseCategory | null>(null);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [frequency, setFrequency] = useState('');
-  const [duration, setDuration] = useState('');
-  const [repetitions, setRepetitions] = useState('');
-  const [sets, setSets] = useState('');
-  const [videoUrl, setVideoUrl] = useState('');
-  const [doctorNotes, setDoctorNotes] = useState('');
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [submitting, setSubmitting] = useState(false);
+  const [category,     setCategory]     = useState<ExerciseCategory | null>(null);
+  const [title,        setTitle]        = useState('');
+  const [description,  setDescription]  = useState('');
+  const [frequency,    setFrequency]    = useState('');
+  const [duration,     setDuration]     = useState('');
+  const [repetitions,  setRepetitions]  = useState('');
+  const [sets,         setSets]         = useState('');
+  const [videoUrl,     setVideoUrl]     = useState('');
+  const [doctorNotes,  setDoctorNotes]  = useState('');
+  const [errors,       setErrors]       = useState<Record<string, string>>({});
+  const [submitting,   setSubmitting]   = useState(false);
+  const [successMsg,   setSuccessMsg]   = useState<string | null>(null);
+  const [submitError,  setSubmitError]  = useState<string | null>(null);
 
   // Redirect non-doctors to home
   if (user?.user_type !== 'doctor') {
@@ -87,54 +84,78 @@ export default function ExerciseFormScreen() {
     return null;
   }
 
+  // ── Validation ────────────────────────────────────────────────────────────
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
-    if (!category) newErrors.category = 'Please select a category';
-    if (!title.trim()) newErrors.title = 'Exercise title is required';
+
+    if (!category)          newErrors.category    = 'Please select a category';
+    if (!title.trim())      newErrors.title       = 'Exercise title is required';
     if (!description.trim()) newErrors.description = 'Instructions are required';
-    if (!frequency.trim()) newErrors.frequency = 'Frequency is required';
+    if (!frequency.trim())  newErrors.frequency   = 'Frequency is required';
+
+    const durationNum = Number(duration.trim());
+    if (!duration.trim() || isNaN(durationNum) || durationNum <= 0 || !Number.isInteger(durationNum)) {
+      newErrors.duration = 'Duration is required and must be a whole number of minutes (e.g. 10)';
+    }
+
+    if (repetitions.trim()) {
+      const n = Number(repetitions.trim());
+      if (isNaN(n) || n <= 0 || !Number.isInteger(n))
+        newErrors.repetitions = 'Repetitions must be a positive whole number';
+    }
+    if (sets.trim()) {
+      const n = Number(sets.trim());
+      if (isNaN(n) || n <= 0 || !Number.isInteger(n))
+        newErrors.sets = 'Sets must be a positive whole number';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  // ── Submit ────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!validate()) return;
     if (!patient_id) {
-      Alert.alert('Error', 'Missing patient ID');
+      setSubmitError('Missing patient ID. Please go back and try again.');
       return;
     }
+
     try {
       setSubmitting(true);
+      setSubmitError(null);
+
       const payload = {
         category,
-        title: title.trim(),
-        description: description.trim(),
-        frequency: frequency.trim(),
-        duration_minutes: duration.trim() ? Number(duration.trim()) : undefined,
-        repetitions: repetitions.trim() ? Number(repetitions.trim()) : undefined,
-        sets: sets.trim() ? Number(sets.trim()) : undefined,
-        video_url: videoUrl.trim() || undefined,
-        notes: doctorNotes.trim() || undefined,
+        title:            title.trim(),
+        description:      description.trim(),
+        frequency:        frequency.trim(),
+        duration_minutes: Math.round(Number(duration.trim())),  // required int
+        order:            0,                                     // required by backend
+        repetitions:  repetitions.trim() ? Math.round(Number(repetitions.trim())) : undefined,
+        sets:         sets.trim()        ? Math.round(Number(sets.trim()))        : undefined,
+        video_url:    videoUrl.trim()    || undefined,
+        notes:        doctorNotes.trim() || undefined,
       };
 
       if (isEdit && exercise_id) {
-        await apiClient.put(
-          API.EHR.PATIENT_EXERCISE_BY_ID(patient_id, exercise_id),
-          payload
-        );
+        await apiClient.put(API.EHR.PATIENT_EXERCISE_BY_ID(patient_id, exercise_id), payload);
       } else {
         await apiClient.post(API.EHR.PATIENT_EXERCISES(patient_id), payload);
       }
 
-      Alert.alert('Exercise saved', undefined, [{ text: 'OK', onPress: () => router.back() }]);
+      // FIX: web-compatible success — inline banner + auto-navigate back.
+      setSuccessMsg(isEdit ? '✅  Exercise updated successfully.' : '✅  Exercise added successfully.');
+      setTimeout(() => router.back(), 1500);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Failed to save exercise';
-      Alert.alert('Error', message);
+      setSubmitError(message);
     } finally {
       setSubmitting(false);
     }
   };
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
       <Stack.Screen options={{ title: isEdit ? 'Edit Exercise' : 'Add Exercise' }} />
@@ -146,13 +167,27 @@ export default function ExerciseFormScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
+          {/* ── Inline success banner ── */}
+          {successMsg && (
+            <View style={styles.successBanner}>
+              <Text style={styles.successText}>{successMsg}</Text>
+            </View>
+          )}
+
+          {/* ── Inline error banner ── */}
+          {submitError && (
+            <View style={styles.errorBanner}>
+              <Text style={styles.errorBannerText}>⚠️  {submitError}</Text>
+            </View>
+          )}
+
           <Card variant="elevated" padding="large" style={styles.card}>
             <Text style={styles.title}>{isEdit ? 'Edit Exercise' : 'Add Exercise'}</Text>
             {patient_name ? (
               <Text style={styles.subtitle}>Patient: {patient_name}</Text>
             ) : null}
 
-            {/* Category picker */}
+            {/* ── Category picker ── */}
             <Text style={styles.fieldLabel}>
               Category <Text style={styles.required}>*</Text>
             </Text>
@@ -179,17 +214,13 @@ export default function ExerciseFormScreen() {
                 );
               })}
             </View>
-            {errors.category ? (
-              <Text style={styles.errorText}>{errors.category}</Text>
-            ) : null}
+            {errors.category ? <Text style={styles.fieldError}>{errors.category}</Text> : null}
 
+            {/* ── Required text fields ── */}
             <Input
               label="Exercise Title"
               value={title}
-              onChangeText={(v) => {
-                setTitle(v);
-                setErrors((prev) => ({ ...prev, title: '' }));
-              }}
+              onChangeText={(v) => { setTitle(v); setErrors((p) => ({ ...p, title: '' })); }}
               placeholder="e.g. Seated Leg Raises"
               error={errors.title}
               required
@@ -198,10 +229,7 @@ export default function ExerciseFormScreen() {
             <Input
               label="Instructions"
               value={description}
-              onChangeText={(v) => {
-                setDescription(v);
-                setErrors((prev) => ({ ...prev, description: '' }));
-              }}
+              onChangeText={(v) => { setDescription(v); setErrors((p) => ({ ...p, description: '' })); }}
               placeholder="Step-by-step exercise instructions"
               error={errors.description}
               multiline
@@ -212,37 +240,40 @@ export default function ExerciseFormScreen() {
             <Input
               label="Frequency"
               value={frequency}
-              onChangeText={(v) => {
-                setFrequency(v);
-                setErrors((prev) => ({ ...prev, frequency: '' }));
-              }}
+              onChangeText={(v) => { setFrequency(v); setErrors((p) => ({ ...p, frequency: '' })); }}
               placeholder="e.g. 3 times daily"
               error={errors.frequency}
               required
             />
 
+            {/* Duration — required by backend */}
             <Input
               label="Duration (minutes)"
               value={duration}
-              onChangeText={setDuration}
+              onChangeText={(v) => { setDuration(v); setErrors((p) => ({ ...p, duration: '' })); }}
               placeholder="e.g. 10"
               keyboardType="numeric"
+              error={errors.duration}
+              required
             />
 
+            {/* ── Optional fields ── */}
             <Input
               label="Repetitions"
               value={repetitions}
-              onChangeText={setRepetitions}
+              onChangeText={(v) => { setRepetitions(v); setErrors((p) => ({ ...p, repetitions: '' })); }}
               placeholder="e.g. 15"
               keyboardType="numeric"
+              error={errors.repetitions}
             />
 
             <Input
               label="Sets"
               value={sets}
-              onChangeText={setSets}
+              onChangeText={(v) => { setSets(v); setErrors((p) => ({ ...p, sets: '' })); }}
               placeholder="e.g. 3"
               keyboardType="numeric"
+              error={errors.sets}
             />
 
             <Input
@@ -265,9 +296,10 @@ export default function ExerciseFormScreen() {
 
             <View style={styles.buttonRow}>
               <Button
-                title="Save Exercise"
+                title={submitting ? 'Saving…' : 'Save Exercise'}
                 onPress={handleSubmit}
                 loading={submitting}
+                disabled={!!successMsg}
                 fullWidth
               />
             </View>
@@ -283,30 +315,12 @@ export default function ExerciseFormScreen() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-  keyboardView: {
-    flex: 1,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: spacing.lg,
-  },
-  card: {
-    marginBottom: spacing.lg,
-  },
-  title: {
-    ...typography.h2,
-    color: colors.text.primary,
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    ...typography.body,
-    color: colors.text.secondary,
-    marginBottom: spacing.lg,
-  },
+  safeArea:      { flex: 1, backgroundColor: colors.background },
+  keyboardView:  { flex: 1 },
+  scrollContent: { flexGrow: 1, padding: spacing.lg },
+  card:          { marginBottom: spacing.lg },
+  title:         { ...typography.h2, color: colors.text.primary, marginBottom: spacing.xs },
+  subtitle:      { ...typography.body, color: colors.text.secondary, marginBottom: spacing.lg },
   fieldLabel: {
     ...typography.body,
     color: colors.text.primary,
@@ -314,8 +328,11 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     marginTop: spacing.sm,
   },
-  required: {
+  required: { color: colors.danger },
+  fieldError: {
+    ...typography.small,
     color: colors.danger,
+    marginBottom: spacing.sm,
   },
   categoryGrid: {
     flexDirection: 'row',
@@ -339,24 +356,38 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     borderColor: colors.primary,
   },
-  categoryEmoji: {
-    fontSize: 22,
-  },
+  categoryEmoji: { fontSize: 22 },
   categoryLabel: {
     ...typography.body,
     color: colors.text.primary,
     fontWeight: '500',
   },
-  categoryLabelSelected: {
-    color: colors.surface,
-    fontWeight: '700',
+  categoryLabelSelected: { color: colors.surface, fontWeight: '700' },
+  buttonRow: { marginTop: spacing.md },
+
+  // Success banner
+  successBanner: {
+    backgroundColor: (colors as any).successLight ?? '#E8F5E9',
+    borderRadius: borderRadius.md,
+    borderLeftWidth: 4,
+    borderLeftColor: (colors as any).success ?? '#2E7D32',
+    padding: spacing.md,
+    marginBottom: spacing.md,
   },
-  errorText: {
-    ...typography.small,
-    color: colors.danger,
-    marginBottom: spacing.sm,
+  successText: {
+    ...typography.body,
+    color: (colors as any).success ?? '#2E7D32',
+    fontWeight: '600',
   },
-  buttonRow: {
-    marginTop: spacing.md,
+
+  // Error banner
+  errorBanner: {
+    backgroundColor: colors.danger + '12',
+    borderRadius: borderRadius.md,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.danger,
+    padding: spacing.md,
+    marginBottom: spacing.md,
   },
+  errorBannerText: { ...typography.body, color: colors.danger },
 });
