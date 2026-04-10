@@ -477,6 +477,13 @@ def create_visit(current_user, patient_id):
             'coding': [{'system': 'http://terminology.hl7.org/CodeSystem/condition-clinical',
                         'code': 'active'}]
         },
+        'verificationStatus': {
+            'coding': [{
+                'system': 'http://terminology.hl7.org/CodeSystem/condition-ver-status',
+                'code': 'confirmed',
+                'display': 'Confirmed'
+            }]
+        },
         'code': {
             'coding': [] if not diagnosis_icd10 else [{
                 'system': 'http://fhir.de/CodeSystem/bfarm/icd-10-gm',
@@ -710,14 +717,31 @@ def send_message(current_user, other_user_id):
     current_id = str(current_user['_id'])
     sender_type = current_user.get('user_type', 'patient')
     created_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    body = data['body'].strip()
+
+    recipient_doc = mongo.db.users.find_one(
+        {'_id': ObjectId(other_user_id)},
+        {'user_type': 1}
+    )
+    recipient_type = recipient_doc.get('user_type', 'patient') if recipient_doc else 'patient'
+
+    sender_ref = f"{'Practitioner' if sender_type == 'doctor' else 'Patient'}/{current_id}"
+    recipient_ref = f"{'Practitioner' if recipient_type == 'doctor' else 'Patient'}/{other_user_id}"
 
     document = {
         'sender_id': current_id,
         'recipient_id': other_user_id,
         'sender_type': sender_type,
-        'body': data['body'].strip(),
+        'recipient_type': recipient_type,
+        'body': body,
         'read': False,
         'created_at': created_at,
+        'resourceType': 'Communication',
+        'status': 'completed',
+        'sender': {'reference': sender_ref},
+        'recipient': [{'reference': recipient_ref}],
+        'payload': [{'contentString': body}],
+        'sent': created_at,
     }
 
     result = mongo.db.ehr_messages.insert_one(document)
