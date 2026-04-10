@@ -216,6 +216,114 @@ def get_own_vitals(current_user):
     return jsonify(result), 200
 
 
+@ehr_routes.route('/api/patient/vitals', methods=['POST'])
+@token_required
+@api_error_handler
+def create_own_vitals(current_user):
+    """POST /api/patient/vitals — patient records their own vital-sign observation."""
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing request body'}), 400
+
+    required = ['systolic', 'diastolic', 'pulse']
+    for field in required:
+        if field not in data:
+            return jsonify({'error': f'Missing required field: {field}'}), 400
+
+    systolic = data['systolic']
+    diastolic = data['diastolic']
+    pulse = data['pulse']
+    weight_kg = data.get('weight_kg')
+    notes = data.get('notes', '')
+
+    patient_id = str(current_user['_id'])
+    recorded_by = str(current_user['_id'])
+    source = 'patient_home'
+    urgent = systolic > 180 or diastolic > 120
+
+    effective_dt = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    components = [
+        {
+            'code': {'coding': [{'system': 'http://loinc.org',
+                                 'code': '8480-6', 'display': 'Systolic BP'}]},
+            'valueQuantity': {'value': systolic, 'unit': 'mmHg',
+                              'system': 'http://unitsofmeasure.org', 'code': 'mm[Hg]'}
+        },
+        {
+            'code': {'coding': [{'system': 'http://loinc.org',
+                                 'code': '8462-4', 'display': 'Diastolic BP'}]},
+            'valueQuantity': {'value': diastolic, 'unit': 'mmHg',
+                              'system': 'http://unitsofmeasure.org', 'code': 'mm[Hg]'}
+        },
+        {
+            'code': {'coding': [{'system': 'http://loinc.org',
+                                 'code': '8867-4', 'display': 'Heart rate'}]},
+            'valueQuantity': {'value': pulse, 'unit': '/min',
+                              'system': 'http://unitsofmeasure.org', 'code': '/min'}
+        }
+    ]
+
+    if weight_kg is not None:
+        components.append({
+            'code': {'coding': [{'system': 'http://loinc.org',
+                                 'code': '29463-7', 'display': 'Body weight'}]},
+            'valueQuantity': {'value': weight_kg, 'unit': 'kg',
+                              'system': 'http://unitsofmeasure.org', 'code': 'kg'}
+        })
+
+    document = {
+        'resourceType': 'Observation',
+        'id': str(uuid4()),
+        'patient_id': patient_id,
+        'recorded_by': recorded_by,
+        'status': 'final',
+        'category': [{
+            'coding': [{
+                'system': 'http://terminology.hl7.org/CodeSystem/observation-category',
+                'code': 'vital-signs',
+                'display': 'Vital Signs'
+            }]
+        }],
+        'code': {
+            'coding': [{
+                'system': 'http://loinc.org',
+                'code': '55284-4',
+                'display': 'Blood pressure systolic and diastolic'
+            }]
+        },
+        'subject': {'reference': f'Patient/{patient_id}'},
+        'effectiveDateTime': effective_dt,
+        'component': components,
+        'note': [{'text': notes}] if notes else [],
+        'extension': [
+            {
+                'url': 'https://morafek.app/fhir/StructureDefinition/urgent-flag',
+                'valueBoolean': urgent
+            },
+            {
+                'url': 'https://morafek.app/fhir/StructureDefinition/source',
+                'valueString': source
+            }
+        ]
+    }
+
+    result = mongo.db.ehr_vitals.insert_one(document)
+    logger.info("Patient home vitals observation stored in ehr_vitals")
+
+    return jsonify({
+        'id': str(result.inserted_id),
+        'systolic': systolic,
+        'diastolic': diastolic,
+        'pulse': pulse,
+        'urgent': urgent,
+        'timestamp': effective_dt
+    }), 201
+
+
 @ehr_routes.route('/api/patient/visits', methods=['GET'])
 @token_required
 @api_error_handler
