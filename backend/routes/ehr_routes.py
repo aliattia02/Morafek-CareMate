@@ -169,6 +169,107 @@ def get_vitals(current_user, patient_id):
 
 # ─── Visits (ehr_visits + ehr_conditions) ────────────────────────────────────
 
+@ehr_routes.route('/api/patient/vitals', methods=['GET'])
+@token_required
+@api_error_handler
+def get_own_vitals(current_user):
+    """GET /api/patient/vitals — patient views their own vital-sign observations."""
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    patient_id = str(current_user['_id'])
+
+    docs = list(
+        mongo.db.ehr_vitals
+        .find({'patient_id': patient_id})
+        .sort('effectiveDateTime', -1)
+    )
+
+    result = []
+    for doc in docs:
+        systolic = diastolic = pulse = None
+        for comp in doc.get('component', []):
+            codings = comp.get('code', {}).get('coding', [])
+            code_val = codings[0].get('code') if codings else None
+            qty = comp.get('valueQuantity', {}).get('value')
+            if code_val == '8480-6':
+                systolic = qty
+            elif code_val == '8462-4':
+                diastolic = qty
+            elif code_val == '8867-4':
+                pulse = qty
+
+        urgent = False
+        for ext in doc.get('extension', []):
+            if ext.get('url') == 'https://morafek.app/fhir/StructureDefinition/urgent-flag':
+                urgent = ext.get('valueBoolean', False)
+
+        result.append({
+            'id': str(doc['_id']),
+            'systolic': systolic,
+            'diastolic': diastolic,
+            'pulse': pulse,
+            'urgent': urgent,
+            'timestamp': doc.get('effectiveDateTime')
+        })
+
+    return jsonify(result), 200
+
+
+@ehr_routes.route('/api/patient/visits', methods=['GET'])
+@token_required
+@api_error_handler
+def get_own_visits(current_user):
+    """GET /api/patient/visits — patient views their own visit history."""
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    patient_id = str(current_user['_id'])
+
+    encounters = list(
+        mongo.db.ehr_visits
+        .find({'patient_id': patient_id})
+        .sort('period.start', -1)
+    )
+
+    encounter_uuids = [enc.get('id') for enc in encounters if enc.get('id')]
+    conditions_list = list(
+        mongo.db.ehr_conditions.find({'encounter_id': {'$in': encounter_uuids}})
+    )
+    conditions_by_encounter = {c['encounter_id']: c for c in conditions_list}
+
+    result = []
+    for enc in encounters:
+        encounter_uuid = enc.get('id')
+        condition = conditions_by_encounter.get(encounter_uuid)
+
+        diagnosis_icd10 = diagnosis_text = None
+        if condition:
+            codings = condition.get('code', {}).get('coding', [])
+            if codings:
+                diagnosis_icd10 = codings[0].get('code')
+                diagnosis_text = codings[0].get('display')
+
+        notes_list = enc.get('note', [])
+        notes = notes_list[0].get('text', '') if notes_list else ''
+
+        reason_codes = enc.get('reasonCode') or []
+        chief_complaint = reason_codes[0].get('text') if reason_codes else None
+
+        result.append({
+            'id': str(enc['_id']),
+            'encounter_fhir_id': encounter_uuid,
+            'doctor_id': enc.get('doctor_id'),
+            'chief_complaint': chief_complaint,
+            'diagnosis_icd10': diagnosis_icd10,
+            'diagnosis_text': diagnosis_text,
+            'visit_date': enc.get('period', {}).get('start'),
+            'notes': notes
+        })
+
+    return jsonify(result), 200
+
+
 @ehr_routes.route('/api/doctor/patient/<patient_id>/visits', methods=['POST'])
 @token_required
 @api_error_handler
