@@ -47,7 +47,7 @@ def create_vitals(current_user, patient_id):
     diastolic = data['diastolic']
     pulse = data['pulse']
     notes = data.get('notes', '')
-    urgent = bool(data.get('urgent', False))
+    urgent = systolic > 180 or diastolic > 120
     source = data.get('source', 'manual')
 
     recorded_by = str(current_user['_id'])

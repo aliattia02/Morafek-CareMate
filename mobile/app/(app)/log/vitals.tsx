@@ -17,7 +17,7 @@ import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 function getBPCategory(sys: number, dia: number) {
   if (sys >= 180 || dia >= 120)
     return { label: '⚠️ Crisis — seek help immediately', color: colors.danger };
-  if (sys >= 130 || dia >= 80)
+  if (sys >= 130 || dia > 80)
     return { label: '🔴 High Blood Pressure', color: colors.danger };
   if (sys >= 120)
     return { label: '🟠 Elevated', color: colors.warning };
