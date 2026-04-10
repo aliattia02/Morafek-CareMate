@@ -16,13 +16,9 @@
  */
 
 import React, { useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-
-// Components
-import { FullScreenLoading } from '@/components/ui';
 
 // Store
 import { useAuthStore } from '@/store/auth.store';
@@ -31,21 +27,12 @@ import { useAuthStore } from '@/store/auth.store';
 import { colors } from '@/constants/theme';
 
 export default function RootLayout() {
-  const { isLoading, checkAuth } = useAuthStore();
+  const { checkAuth } = useAuthStore();
 
   // Check authentication status on app start
   useEffect(() => {
     checkAuth();
   }, []);
-
-  // Show loading screen while checking auth
-  if (isLoading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <FullScreenLoading text="Loading..." />
-      </View>
-    );
-  }
 
   return (
     <SafeAreaProvider>
@@ -93,10 +80,3 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
-});
