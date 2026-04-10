@@ -658,7 +658,7 @@ def upload_own_document(current_user):
     }
 
     result = mongo.db.ehr_documents.insert_one(document)
-    logger.info(f'Document uploaded for patient {patient_id}')
+    logger.info('Document uploaded successfully')
 
     document['_id'] = result.inserted_id
     return jsonify(_serialize_document(document)), 201
@@ -696,7 +696,7 @@ def delete_own_document(current_user, document_id):
             logger.warning(f'Cloudinary deletion failed for {public_id}: {e}')
 
     mongo.db.ehr_documents.delete_one({'_id': ObjectId(document_id)})
-    logger.info(f'Document {document_id} deleted by patient {patient_id}')
+    logger.info('Document deleted successfully')
     return jsonify({'message': 'Document deleted'}), 200
 
 
