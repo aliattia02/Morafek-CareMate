@@ -215,6 +215,17 @@ export async function deleteDocument(documentId: string): Promise<void> {
   await apiClient.delete(API.EHR.DOCUMENT(documentId));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Exercises
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function markExerciseDone(
+  exerciseId: string,
+  done: boolean
+): Promise<void> {
+  await apiClient.post(API.EHR.EXERCISE_DONE(exerciseId), { done });
+}
+
 export default {
   submitVital,
   getMyVitals,
@@ -230,4 +241,5 @@ export default {
   getDoctorPatientExercises,
   uploadDocument,
   deleteDocument,
+  markExerciseDone,
 };

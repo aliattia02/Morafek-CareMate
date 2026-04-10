@@ -1,1 +1,1 @@
-# models package
+# Models placeholder — not used currently.
