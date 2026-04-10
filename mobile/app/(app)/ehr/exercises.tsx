@@ -141,10 +141,11 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
       <TouchableOpacity
         style={[styles.doneButton, done && styles.doneButtonActive]}
         onPress={() => setDone((prev) => !prev)}
-        accessibilityRole="button"
-        accessibilityLabel={done ? 'Marked as done' : 'Mark as done'}
+        accessibilityRole="checkbox"
+        accessibilityLabel="Toggle exercise completion status"
+        accessibilityState={{ checked: done }}
       >
-        <Text style={[ET.bodyBold, styles.doneButtonText]}>
+        <Text style={[ET.bodyBold, done ? styles.doneButtonTextActive : styles.doneButtonText]}>
           {done ? '✅  Done!' : '✅  Mark as Done'}
         </Text>
       </TouchableOpacity>
@@ -329,10 +330,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   doneButtonActive: {
-    opacity: 0.7,
+    backgroundColor: E.colors.success,
+    borderColor: E.colors.success,
   },
   doneButtonText: {
     color: E.colors.success,
+  },
+  doneButtonTextActive: {
+    color: '#FFFFFF',
   },
 
   // Empty state
