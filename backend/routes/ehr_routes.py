@@ -1270,5 +1270,5 @@ def mark_exercise_done(current_user, exercise_id):
         update = {'$unset': {'last_done_at': ''}}
 
     mongo.db.ehr_exercises.update_one({'_id': exercise_oid}, update)
-    logger.info('Exercise %s marked done=%s by patient %s', exercise_id, done, patient_id)
+    logger.info('Exercise %s marked done=%s', exercise_id, done)
     return jsonify({'message': 'Exercise updated'}), 200
