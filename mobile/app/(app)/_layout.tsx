@@ -3,7 +3,7 @@
  * Location: mobile/app/(app)/_layout.tsx
  *
  * Main Function: AppLayout
- * Description: Root navigation stack for authenticated app screens including tabs, log, meal, and settings
+ * Description: Root navigation stack for authenticated app screens including tabs, log, and settings
  *
  * Features:
  * - Root stack navigator configuration
@@ -42,12 +42,6 @@ export default function AppLayout() {
       />
       <Stack.Screen
         name="log"
-        options={{
-          headerShown: false,
-        }}
-      />
-      <Stack.Screen
-        name="meal"
         options={{
           headerShown: false,
         }}
