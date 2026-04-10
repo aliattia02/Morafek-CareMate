@@ -38,6 +38,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 // doctor-proxied endpoint and returns 403 for patients.
 import { getMessages, sendMessage, type MessageResponse } from '@/services/api/ehr';
 import { apiClient } from '@/services/api/client';
+import { API } from '@/services/api/endpoints';
 import { useAuthStore } from '@/store/auth.store';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
@@ -229,7 +230,7 @@ function ConversationsList() {
   const load = useCallback(async () => {
     try {
       setError(null);
-      const res = await apiClient.get<ConversationSummary[]>('/api/messages/conversations');
+      const res = await apiClient.get<ConversationSummary[]>(API.EHR.CONVERSATIONS);
       setConversations(res.data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load conversations');
