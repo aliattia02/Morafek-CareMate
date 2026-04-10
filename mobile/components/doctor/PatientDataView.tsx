@@ -26,11 +26,13 @@ import {
   getDoctorPatientVisits,
   getMessageThread,
   getDoctorPatientDocuments,
+  getDoctorPatientExercises,
   sendMessage,
   type VitalResponse,
   type VisitResponse,
   type MessageResponse,
   type DocumentResponse,
+  type ExerciseResponse,
 } from '@/services/api/ehr';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 import type { DoctorPatient } from '@/services/api/doctor';
@@ -39,7 +41,7 @@ import type { DoctorPatient } from '@/services/api/doctor';
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TabType = 'overview' | 'visits' | 'vitals' | 'messages' | 'documents';
+type TabType = 'overview' | 'visits' | 'vitals' | 'documents' | 'exercises' | 'messages';
 
 interface PatientDataViewProps {
   patient: DoctorPatient;
@@ -78,6 +80,12 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
   const [documentsLoaded, setDocumentsLoaded] = useState(false);
   const [documentsError, setDocumentsError] = useState<string | null>(null);
   const [documentsRefreshing, setDocumentsRefreshing] = useState(false);
+
+  const [exercises, setExercises] = useState<ExerciseResponse[]>([]);
+  const [exercisesLoading, setExercisesLoading] = useState(false);
+  const [exercisesLoaded, setExercisesLoaded] = useState(false);
+  const [exercisesError, setExercisesError] = useState<string | null>(null);
+  const [exercisesRefreshing, setExercisesRefreshing] = useState(false);
 
   const loadVitals = useCallback(async () => {
     try {
@@ -135,6 +143,20 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     }
   }, [patient.id]);
 
+  const loadExercises = useCallback(async () => {
+    try {
+      setExercisesError(null);
+      const data = await getDoctorPatientExercises(patient.id);
+      setExercises(data);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Failed to load exercises';
+      setExercisesError(message);
+    } finally {
+      setExercisesLoading(false);
+      setExercisesLoaded(true);
+    }
+  }, [patient.id]);
+
   useEffect(() => {
     if (activeTab === 'vitals' && !vitalsLoaded && !vitalsLoading) {
       setVitalsLoading(true);
@@ -163,6 +185,13 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     }
   }, [activeTab, loadDocuments]);
 
+  useEffect(() => {
+    if (activeTab === 'exercises' && !exercisesLoaded && !exercisesLoading) {
+      setExercisesLoading(true);
+      loadExercises();
+    }
+  }, [activeTab, loadExercises]);
+
   const onRefreshVitals = useCallback(async () => {
     setVitalsRefreshing(true);
     await loadVitals();
@@ -187,6 +216,12 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     setDocumentsRefreshing(false);
   }, [loadDocuments]);
 
+  const onRefreshExercises = useCallback(async () => {
+    setExercisesRefreshing(true);
+    await loadExercises();
+    setExercisesRefreshing(false);
+  }, [loadExercises]);
+
   const handleSendMessage = useCallback(async () => {
     const body = messageInput.trim();
     if (!body || messageSending) return;
@@ -207,8 +242,9 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     { key: 'overview', label: 'Overview' },
     { key: 'visits', label: 'Visits' },
     { key: 'vitals', label: 'Vitals' },
-    { key: 'messages', label: 'Messages' },
     { key: 'documents', label: 'Documents' },
+    { key: 'exercises', label: 'Exercises' },
+    { key: 'messages', label: 'Messages' },
   ];
 
   return (
@@ -226,7 +262,12 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
       </View>
 
       {/* Tab Bar */}
-      <View style={styles.tabBar}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.tabBar}
+        contentContainerStyle={styles.tabBarContent}
+      >
         {tabs.map((tab) => (
           <TouchableOpacity
             key={tab.key}
@@ -238,7 +279,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             </Text>
           </TouchableOpacity>
         ))}
-      </View>
+      </ScrollView>
 
       {/* Overview Tab */}
       {activeTab === 'overview' && (
@@ -457,6 +498,53 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
           )}
         </ScrollView>
       )}
+
+      {/* Exercises Tab */}
+      {activeTab === 'exercises' && (
+        <ScrollView
+          contentContainerStyle={styles.content}
+          refreshControl={
+            <RefreshControl
+              refreshing={exercisesRefreshing}
+              onRefresh={onRefreshExercises}
+              colors={[colors.primary]}
+            />
+          }
+        >
+          {exercisesLoading ? (
+            <ActivityIndicator color={colors.primary} style={styles.loader} />
+          ) : exercisesError ? (
+            <Text style={styles.errorText}>⚠️ {exercisesError}</Text>
+          ) : exercises.length === 0 ? (
+            <Text style={styles.emptyText}>No exercises assigned.</Text>
+          ) : (
+            exercises.map((ex, index) => (
+              <Card key={ex.id ?? index} variant="outlined" padding="medium" style={styles.card}>
+                <Text style={styles.fieldValue}>{ex.title}</Text>
+                <Text style={styles.fieldLabel}>{ex.category}</Text>
+                {ex.description ? (
+                  <Text style={styles.fieldValue}>{ex.description}</Text>
+                ) : null}
+                <View style={styles.exerciseDetails}>
+                  <Text style={styles.fieldLabel}>🕐 {ex.frequency}</Text>
+                  {ex.duration_minutes != null && (
+                    <Text style={styles.fieldLabel}>⏱ {ex.duration_minutes} min</Text>
+                  )}
+                  {ex.repetitions != null && ex.sets != null && (
+                    <Text style={styles.fieldLabel}>🔄 {ex.repetitions}×{ex.sets}</Text>
+                  )}
+                </View>
+                {ex.notes ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Notes</Text>
+                    <Text style={styles.fieldValue}>{ex.notes}</Text>
+                  </>
+                ) : null}
+              </Card>
+            ))
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -489,14 +577,16 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
   },
   tabBar: {
-    flexDirection: 'row',
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
+  tabBarContent: {
+    flexDirection: 'row',
+  },
   tab: {
-    flex: 1,
     paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     alignItems: 'center',
   },
   tabActive: {
@@ -657,5 +747,12 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: colors.surface,
     fontWeight: '600',
+  },
+  // Exercises tab
+  exerciseDetails: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
   },
 });

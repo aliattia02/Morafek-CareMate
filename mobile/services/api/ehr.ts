@@ -55,6 +55,22 @@ export interface DocumentResponse {
   created_at: string;
 }
 
+export type ExerciseCategory = 'mobility' | 'strength' | 'balance' | 'breathing' | 'other';
+
+export interface ExerciseResponse {
+  id: string;
+  title: string;
+  description: string;
+  category: ExerciseCategory;
+  frequency: string;
+  duration_minutes?: number;
+  repetitions?: number;
+  sets?: number;
+  video_url?: string;
+  image_url?: string;
+  notes?: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Vitals
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,6 +176,13 @@ export async function getDoctorPatientDocuments(patientId: string): Promise<Docu
   return response.data;
 }
 
+export async function getDoctorPatientExercises(patientId: string): Promise<ExerciseResponse[]> {
+  const response = await apiClient.get<ExerciseResponse[]>(
+    API.EHR.PATIENT_EXERCISES(patientId)
+  );
+  return response.data;
+}
+
 export async function uploadDocument(
   file: { uri: string; name: string; type: string },
   category: DocumentCategory,
@@ -204,6 +227,7 @@ export default {
   getPatientMessages,
   getMyDocuments,
   getDoctorPatientDocuments,
+  getDoctorPatientExercises,
   uploadDocument,
   deleteDocument,
 };
