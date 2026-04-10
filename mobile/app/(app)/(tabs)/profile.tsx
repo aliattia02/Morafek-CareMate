@@ -8,6 +8,7 @@ import { Card, Button } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
 import { colors, spacing, typography } from '@/constants/theme';
 import { uploadAvatar } from '@/services/api/profile';
+import { getBaseUrl } from '@/services/api/client';
 
 const showAlert = (title: string, message: string) => {
   if (Platform.OS === 'web') { window.alert(`${title}\n\n${message}`); }
@@ -16,9 +17,21 @@ const showAlert = (title: string, message: string) => {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout, updateProfilePicture } = useAuth();
+  const { user, token, logout, updateProfilePicture } = useAuth();
   const isDoctor = user?.user_type === 'doctor' || user?.user_type === 'admin';
   const [isUploading, setIsUploading] = useState(false);
+
+  const handleFhirExport = async () => {
+    try {
+      const res = await fetch(`${getBaseUrl()}/api/patient/fhir-export`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const bundle = await res.json();
+      showAlert('FHIR R4 Bundle', `${bundle.entry?.length ?? 0} resources exported`);
+    } catch (err) {
+      showAlert('Export failed', 'Could not export FHIR data. Please try again.');
+    }
+  };
 
   const handleLogout = () => {
     if (Platform.OS === 'web') {
@@ -115,6 +128,15 @@ export default function ProfileScreen() {
               <View style={styles.linkBody}>
                 <Text style={styles.linkTitle}>Log Blood Pressure</Text>
                 <Text style={styles.linkSub}>Record a new vital reading</Text>
+              </View>
+              <Text style={styles.arrow}>›</Text>
+            </TouchableOpacity>
+            <View style={styles.divider} />
+            <TouchableOpacity style={styles.link} onPress={handleFhirExport}>
+              <Text style={styles.linkIcon}>📤</Text>
+              <View style={styles.linkBody}>
+                <Text style={styles.linkTitle}>Export FHIR R4 Data</Text>
+                <Text style={styles.linkSub}>Download your health records bundle</Text>
               </View>
               <Text style={styles.arrow}>›</Text>
             </TouchableOpacity>
