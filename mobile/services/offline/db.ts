@@ -1,18 +1,51 @@
 /**
- * Offline SQLite Cache
- * Location: mobile/services/offline/db.ts
- *
- * Caches vitals and visits locally; queues pending vitals for sync.
+ * Offline SQLite Cache (Mobile) + Web Fallback
  */
 
-import * as SQLite from 'expo-sqlite';
+import { Platform } from 'react-native';
 import type { VitalResponse } from '@/services/api/ehr';
 
-// The database is opened synchronously at module load time.
-// expo-sqlite will throw if the database cannot be opened (e.g. insufficient storage).
-const db = SQLite.openDatabaseSync('morafek.db');
+let db: any;
+
+// 👉 MOBILE: real SQLite
+if (Platform.OS !== 'web') {
+  const SQLite = require('expo-sqlite');
+  db = SQLite.openDatabaseSync('morafek.db');
+}
+
+// 👉 WEB: in-memory fallback so Expo web can run
+else {
+  console.log('SQLite disabled on Web — using in-memory DB');
+
+  const vitals: any[] = [];
+  const pendingVitals: any[] = [];
+
+  db = {
+    execSync: () => {},
+    runSync: (query: string, params: any[]) => {
+      if (query.includes('pending_vitals')) {
+        pendingVitals.push({
+          local_id: params[0],
+          systolic: params[1],
+          diastolic: params[2],
+          pulse: params[3],
+          weight_kg: params[4],
+          notes: params[5],
+          created_at: params[6],
+        });
+      }
+    },
+    getAllSync: (query: string) => {
+      if (query.includes('pending_vitals')) return pendingVitals;
+      if (query.includes('vitals')) return vitals;
+      return [];
+    },
+  };
+}
 
 export function initDB() {
+  if (Platform.OS === 'web') return; // no tables needed for web
+
   db.execSync(`
     CREATE TABLE IF NOT EXISTS vitals (
       id TEXT PRIMARY KEY,
@@ -44,6 +77,8 @@ export function initDB() {
 }
 
 export function cacheVitals(vitals: VitalResponse[]) {
+  if (Platform.OS === 'web') return;
+
   for (const v of vitals) {
     db.runSync(
       `INSERT OR REPLACE INTO vitals VALUES (?,?,?,?,?,?)`,
@@ -53,15 +88,13 @@ export function cacheVitals(vitals: VitalResponse[]) {
 }
 
 export function getCachedVitals(): VitalResponse[] {
-  const rows = db.getAllSync<{
-    id: string;
-    systolic: number;
-    diastolic: number;
-    pulse: number;
-    urgent: number;
-    timestamp: string;
-  }>(`SELECT * FROM vitals ORDER BY timestamp DESC LIMIT 50`);
-  return rows.map((r) => ({ ...r, urgent: r.urgent === 1 }));
+  if (Platform.OS === 'web') return [];
+
+  const rows = db.getAllSync(`
+    SELECT * FROM vitals ORDER BY timestamp DESC LIMIT 50
+  `);
+
+  return rows.map((r: any) => ({ ...r, urgent: r.urgent === 1 }));
 }
 
 export interface PendingVital {
@@ -82,6 +115,7 @@ export function queueVital(data: {
   notes?: string;
 }): string {
   const localId = `local_${Date.now()}`;
+
   db.runSync(
     `INSERT INTO pending_vitals VALUES (?,?,?,?,?,?,?)`,
     [
@@ -94,13 +128,15 @@ export function queueVital(data: {
       new Date().toISOString(),
     ]
   );
+
   return localId;
 }
 
 export function getPendingVitals(): PendingVital[] {
-  return db.getAllSync<PendingVital>(`SELECT * FROM pending_vitals`);
+  return db.getAllSync(`SELECT * FROM pending_vitals`);
 }
 
 export function deletePendingVital(localId: string) {
+  if (Platform.OS === 'web') return;
   db.runSync(`DELETE FROM pending_vitals WHERE local_id = ?`, [localId]);
 }
