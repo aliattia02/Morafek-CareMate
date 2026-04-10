@@ -58,6 +58,12 @@ export default function AppLayout() {
           headerShown: false,
         }}
       />
+      <Stack.Screen
+        name="ehr"
+        options={{
+          headerShown: false,
+        }}
+      />
     </Stack>
   );
 }
