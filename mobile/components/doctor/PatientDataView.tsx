@@ -287,10 +287,18 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                   <Text style={styles.dateText}>{vital.timestamp}</Text>
                   {vital.urgent && <Text style={styles.urgentText}>⚠️ URGENT</Text>}
                 </View>
-                <Text style={styles.fieldLabel}>Blood Pressure</Text>
-                <Text style={styles.fieldValue}>{vital.systolic}/{vital.diastolic} mmHg</Text>
-                <Text style={styles.fieldLabel}>Pulse</Text>
-                <Text style={styles.fieldValue}>{vital.pulse} bpm</Text>
+                {vital.systolic != null && vital.diastolic != null ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Blood Pressure</Text>
+                    <Text style={styles.fieldValue}>{vital.systolic}/{vital.diastolic} mmHg</Text>
+                  </>
+                ) : null}
+                {vital.pulse != null ? (
+                  <>
+                    <Text style={styles.fieldLabel}>Pulse</Text>
+                    <Text style={styles.fieldValue}>{vital.pulse} bpm</Text>
+                  </>
+                ) : null}
               </Card>
             ))
           )}
@@ -327,8 +335,8 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                       isDoctor ? styles.messageBubbleDoctor : styles.messageBubblePatient,
                     ]}
                   >
-                    <Text style={styles.messageBody}>{msg.body}</Text>
-                    <Text style={styles.messageTime}>{msg.created_at}</Text>
+                    <Text style={[styles.messageBody, isDoctor && styles.messageBodyDoctor]}>{msg.body}</Text>
+                    <Text style={[styles.messageTime, isDoctor && styles.messageTimeDoctor]}>{msg.created_at}</Text>
                   </View>
                 );
               })
@@ -484,10 +492,17 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.text.primary,
   },
+  messageBodyDoctor: {
+    color: colors.surface,
+  },
   messageTime: {
     ...typography.small,
     color: colors.text.secondary,
     marginTop: spacing.xs,
+  },
+  messageTimeDoctor: {
+    color: colors.surface,
+    opacity: 0.8,
   },
   messageInputRow: {
     flexDirection: 'row',
