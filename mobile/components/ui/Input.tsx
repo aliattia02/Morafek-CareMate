@@ -46,15 +46,15 @@ export const Input: React.FC<InputProps> = ({
 
   const inputContainerStyle = [
     styles.inputContainer,
-    isFocused && styles.inputContainerFocused,
-    error && styles.inputContainerError,
-    !editable && styles.inputContainerDisabled,
+    isFocused ? styles.inputContainerFocused : null,
+    error ? styles.inputContainerError : null,
+    !editable ? styles.inputContainerDisabled : null,
   ];
 
   const textInputStyle = [
     styles.input,
-    leftIcon && styles.inputWithLeftIcon,
-    rightIcon && styles.inputWithRightIcon,
+    leftIcon ? styles.inputWithLeftIcon : null,
+    rightIcon ? styles.inputWithRightIcon : null,
     inputStyle,
   ];
 
@@ -66,10 +66,10 @@ export const Input: React.FC<InputProps> = ({
           {required && <Text style={styles.required}> *</Text>}
         </Text>
       )}
-      
+
       <View style={inputContainerStyle}>
         {leftIcon && <View style={styles.leftIcon}>{leftIcon}</View>}
-        
+
         <RNTextInput
           style={textInputStyle}
           placeholderTextColor={colors.text.disabled}
@@ -78,7 +78,7 @@ export const Input: React.FC<InputProps> = ({
           onBlur={() => setIsFocused(false)}
           {...props}
         />
-        
+
         {rightIcon && (
           <TouchableOpacity
             style={styles.rightIcon}
@@ -89,9 +89,9 @@ export const Input: React.FC<InputProps> = ({
           </TouchableOpacity>
         )}
       </View>
-      
-      {error && <Text style={styles.error}>{error}</Text>}
-      {!error && helperText && <Text style={styles.helperText}>{helperText}</Text>}
+
+      {error ? <Text style={styles.error}>{error}</Text> : null}
+      {(!error && helperText) ? <Text style={styles.helperText}>{helperText}</Text> : null}
     </View>
   );
 };

@@ -24,7 +24,6 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   KeyboardAvoidingView,
   Platform
 } from 'react-native';
@@ -68,6 +67,7 @@ export default function RegisterScreen() {
   const [userType, setUserType] = useState<UserType>('patient');
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showPassword, setShowPassword] = useState(false);
+  const [registerError, setRegisterError] = useState('');
 
   const updateField = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -112,6 +112,7 @@ export default function RegisterScreen() {
 
   const handleRegister = async () => {
     if (!validateForm()) return;
+    setRegisterError('');
 
     try {
       await register({
@@ -124,14 +125,11 @@ export default function RegisterScreen() {
         user_type: userType,
       });
 
-      Alert.alert(
-        'Registration Successful',
-        'Your account has been created. Please sign in.',
-        [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }]
-      );
+      // Alert.alert doesn't work on Expo web — navigate directly
+      router.replace('/(auth)/login');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Registration failed';
-      Alert.alert('Registration Failed', message);
+      setRegisterError(message);
     }
   };
 
@@ -275,6 +273,12 @@ export default function RegisterScreen() {
               required
             />
 
+            {registerError ? (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorBannerText}>{registerError}</Text>
+              </View>
+            ) : null}
+
             <Button
               title="Create Account"
               onPress={handleRegister}
@@ -361,5 +365,16 @@ const styles = StyleSheet.create({
   },
   registerButton: {
     marginTop: spacing.md,
+  },
+  errorBanner: {
+    backgroundColor: colors.danger + '15',
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  errorBannerText: {
+    ...typography.caption,
+    color: colors.danger,
+    textAlign: 'center',
   },
 });

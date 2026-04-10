@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ScrollView,
-  Alert,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
@@ -28,6 +27,8 @@ function getBPCategory(sys: number, dia: number) {
 export default function VitalsScreen() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'urgent' | 'error'>('idle');
+  const [submitMessage, setSubmitMessage] = useState('');
 
   const [systolic, setSystolic]   = useState('');
   const [diastolic, setDiastolic] = useState('');
@@ -55,6 +56,7 @@ export default function VitalsScreen() {
   const handleSubmit = async () => {
     if (!validate()) return;
     setIsLoading(true);
+    setSubmitStatus('idle');
     try {
       const response = await apiClient.post(API.EHR.VITALS, {
         systolic:  sys,
@@ -65,18 +67,17 @@ export default function VitalsScreen() {
       });
 
       if (response?.data?.urgent) {
-        Alert.alert(
-          '⚠️ Urgent Reading',
-          'Your blood pressure is critically high. Please contact your doctor immediately.',
-          [{ text: 'OK', onPress: () => router.back() }]
-        );
+        setSubmitStatus('urgent');
+        setSubmitMessage('⚠️ Blood pressure is critically high. Please contact your doctor immediately.');
       } else {
-        Alert.alert('Saved', 'Your reading has been recorded.', [
-          { text: 'OK', onPress: () => router.back() },
-        ]);
+        setSubmitStatus('success');
+        setSubmitMessage('✅ Reading saved successfully.');
+        // Navigate back after a short delay so the user sees the confirmation
+        setTimeout(() => router.back(), 1500);
       }
     } catch (err: any) {
-      Alert.alert('Error', err?.message || 'Failed to save reading.');
+      setSubmitStatus('error');
+      setSubmitMessage(err?.message || 'Failed to save reading.');
     } finally {
       setIsLoading(false);
     }
@@ -102,7 +103,7 @@ export default function VitalsScreen() {
                   style={styles.bigInput}
                 />
               </View>
-              <View style={styles.half}>
+              <View style={styles.halfLast}>
                 <Input
                   label="Diastolic"
                   value={diastolic}
@@ -151,6 +152,17 @@ export default function VitalsScreen() {
             />
           </Card>
 
+          {submitStatus !== 'idle' ? (
+            <View style={[
+              styles.statusBanner,
+              submitStatus === 'success' ? styles.statusSuccess : null,
+              submitStatus === 'urgent'  ? styles.statusUrgent  : null,
+              submitStatus === 'error'   ? styles.statusError   : null,
+            ]}>
+              <Text style={styles.statusText}>{submitMessage}</Text>
+            </View>
+          ) : null}
+
           <Button title="Save Reading" onPress={handleSubmit} loading={isLoading} fullWidth />
 
         </ScrollView>
@@ -164,8 +176,9 @@ const styles = StyleSheet.create({
   content:      { padding: spacing.md, paddingBottom: spacing.xl },
   card:         { marginBottom: spacing.md },
   sectionTitle: { ...typography.h3, color: colors.text.primary, marginBottom: spacing.md },
-  row:          { flexDirection: 'row', gap: spacing.md },
-  half:         { flex: 1 },
+  row:          { flexDirection: 'row' },
+  half:         { flex: 1, marginRight: spacing.md },
+  halfLast:     { flex: 1 },
   bigInput:     { minHeight: 56 },
   badge: {
     borderWidth: 1,
@@ -175,4 +188,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   badgeText: { ...typography.body, fontWeight: '600' },
+  statusBanner: {
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    alignItems: 'center',
+  },
+  statusSuccess: { backgroundColor: colors.success + '20' },
+  statusUrgent:  { backgroundColor: colors.danger  + '20' },
+  statusError:   { backgroundColor: colors.danger  + '15' },
+  statusText:    { ...typography.body, fontWeight: '600', textAlign: 'center' },
 });
