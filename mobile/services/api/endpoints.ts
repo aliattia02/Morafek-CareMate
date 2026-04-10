@@ -66,7 +66,8 @@ const API = {
   EHR: {
     VITALS:        v('/api/patient/vitals'),
     VISITS:        v('/api/patient/visits'),
-    MESSAGES:      v('/api/patient/messages'),
+    MESSAGES:      (otherId: string) => v(`/api/messages/${otherId}`),
+    UNREAD_COUNT:  v('/api/messages/unread-count'),
     PATIENT_VISITS:   (id: string) => v(`/api/doctor/patient/${id}/visits`),
     PATIENT_VITALS:   (id: string) => v(`/api/doctor/patient/${id}/vitals`),
     PATIENT_MESSAGES: (id: string) => v(`/api/doctor/patient/${id}/messages`),
@@ -89,5 +90,5 @@ export const logEndpoints = () => {
   console.log('DOCTOR.PATIENTS:', API.DOCTOR.PATIENTS);
   console.log('EHR.VITALS:', API.EHR.VITALS);
   console.log('EHR.VISITS:', API.EHR.VISITS);
-  console.log('EHR.MESSAGES:', API.EHR.MESSAGES);
+  console.log('EHR.MESSAGES(id):', API.EHR.MESSAGES('example-id'));
 };

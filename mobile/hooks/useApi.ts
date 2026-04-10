@@ -4,6 +4,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { isNetworkError, isAuthError } from '@/services/api/client';
+import apiClient from '@/services/api/client';
 import { useOfflineStore } from '@/store/offline.store';
 
 export interface ApiState<T> {
@@ -134,3 +135,33 @@ export function useApiEffect<T>(
 }
 
 export default useApi;
+
+/**
+ * Simple hook that exposes get/post helpers with a shared loading state.
+ * Use when you need to fire ad-hoc requests rather than wrapping a specific function.
+ */
+export function useSimpleApi() {
+  const [isLoading, setIsLoading] = useState(false);
+
+  const get = useCallback(async (url: string) => {
+    setIsLoading(true);
+    try {
+      const response = await apiClient.get(url);
+      return response.data;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  const post = useCallback(async (url: string, body?: unknown) => {
+    setIsLoading(true);
+    try {
+      const response = await apiClient.post(url, body);
+      return response.data;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  return { get, post, isLoading };
+}

@@ -1,0 +1,178 @@
+import React, { useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { useRouter } from 'expo-router';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Card, Input, Button } from '@/components/ui';
+import apiClient from '@/services/api/client';
+import API from '@/services/api/endpoints';
+import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+
+function getBPCategory(sys: number, dia: number) {
+  if (sys >= 180 || dia >= 120)
+    return { label: '⚠️ Crisis — seek help immediately', color: colors.danger };
+  if (sys >= 130 || dia >= 80)
+    return { label: '🔴 High Blood Pressure', color: colors.danger };
+  if (sys >= 120)
+    return { label: '🟠 Elevated', color: colors.warning };
+  return { label: '🟢 Normal', color: colors.success };
+}
+
+export default function VitalsScreen() {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+
+  const [systolic, setSystolic]   = useState('');
+  const [diastolic, setDiastolic] = useState('');
+  const [pulse, setPulse]         = useState('');
+  const [weight, setWeight]       = useState('');
+  const [notes, setNotes]         = useState('');
+  const [errors, setErrors]       = useState<Record<string, string>>({});
+
+  const sys = parseInt(systolic);
+  const dia = parseInt(diastolic);
+  const showCategory = !isNaN(sys) && !isNaN(dia) && sys > 0 && dia > 0;
+  const category = showCategory ? getBPCategory(sys, dia) : null;
+
+  const validate = () => {
+    const e: Record<string, string> = {};
+    if (!systolic)  e.systolic  = 'Required';
+    if (!diastolic) e.diastolic = 'Required';
+    if (!pulse)     e.pulse     = 'Required';
+    if (systolic  && (sys  < 60  || sys  > 300)) e.systolic  = 'Enter a valid value (60–300)';
+    if (diastolic && (dia  < 40  || dia  > 200)) e.diastolic = 'Enter a valid value (40–200)';
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const handleSubmit = async () => {
+    if (!validate()) return;
+    setIsLoading(true);
+    try {
+      const response = await apiClient.post(API.EHR.VITALS, {
+        systolic:  sys,
+        diastolic: dia,
+        pulse:     parseInt(pulse),
+        weight_kg: weight ? parseFloat(weight) : undefined,
+        notes:     notes || undefined,
+      });
+
+      if (response?.data?.urgent) {
+        Alert.alert(
+          '⚠️ Urgent Reading',
+          'Your blood pressure is critically high. Please contact your doctor immediately.',
+          [{ text: 'OK', onPress: () => router.back() }]
+        );
+      } else {
+        Alert.alert('Saved', 'Your reading has been recorded.', [
+          { text: 'OK', onPress: () => router.back() },
+        ]);
+      }
+    } catch (err: any) {
+      Alert.alert('Error', err?.message || 'Failed to save reading.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.safe} edges={['bottom']}>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+
+          <Card variant="outlined" padding="medium" style={styles.card}>
+            <Text style={styles.sectionTitle}>Blood Pressure</Text>
+
+            <View style={styles.row}>
+              <View style={styles.half}>
+                <Input
+                  label="Systolic"
+                  value={systolic}
+                  onChangeText={(v) => { setSystolic(v); setErrors(p => ({...p, systolic: ''})); }}
+                  keyboardType="numeric"
+                  placeholder="120"
+                  error={errors.systolic}
+                  style={styles.bigInput}
+                />
+              </View>
+              <View style={styles.half}>
+                <Input
+                  label="Diastolic"
+                  value={diastolic}
+                  onChangeText={(v) => { setDiastolic(v); setErrors(p => ({...p, diastolic: ''})); }}
+                  keyboardType="numeric"
+                  placeholder="80"
+                  error={errors.diastolic}
+                  style={styles.bigInput}
+                />
+              </View>
+            </View>
+
+            {category && (
+              <View style={[styles.badge, { borderColor: category.color }]}>
+                <Text style={[styles.badgeText, { color: category.color }]}>
+                  {category.label}
+                </Text>
+              </View>
+            )}
+          </Card>
+
+          <Card variant="outlined" padding="medium" style={styles.card}>
+            <Text style={styles.sectionTitle}>Other Measurements</Text>
+            <Input
+              label="Pulse (bpm)"
+              value={pulse}
+              onChangeText={(v) => { setPulse(v); setErrors(p => ({...p, pulse: ''})); }}
+              keyboardType="numeric"
+              placeholder="72"
+              error={errors.pulse}
+            />
+            <Input
+              label="Weight (kg) — optional"
+              value={weight}
+              onChangeText={setWeight}
+              keyboardType="decimal-pad"
+              placeholder="70.5"
+            />
+            <Input
+              label="Notes — optional"
+              value={notes}
+              onChangeText={setNotes}
+              multiline
+              numberOfLines={3}
+              placeholder="How are you feeling?"
+            />
+          </Card>
+
+          <Button title="Save Reading" onPress={handleSubmit} loading={isLoading} fullWidth />
+
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safe:         { flex: 1, backgroundColor: colors.background },
+  content:      { padding: spacing.md, paddingBottom: spacing.xl },
+  card:         { marginBottom: spacing.md },
+  sectionTitle: { ...typography.h3, color: colors.text.primary, marginBottom: spacing.md },
+  row:          { flexDirection: 'row', gap: spacing.md },
+  half:         { flex: 1 },
+  bigInput:     { minHeight: 56 },
+  badge: {
+    borderWidth: 1,
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginTop: spacing.sm,
+    alignItems: 'center',
+  },
+  badgeText: { ...typography.body, fontWeight: '600' },
+});
