@@ -3,130 +3,257 @@
  * Location: mobile/app/(auth)/forgot-password.tsx
  *
  * Main Function: ForgotPasswordScreen
- * Description: Password reset request screen with email validation and success confirmation
+ * Description: Real 2-step password-reset flow.
+ *   Step 1 — Enter email → POST /api/auth/forgot-password
+ *   Step 2 — Enter 6-digit code + new password → POST /api/auth/reset-password
  *
- * Features:
- * - Email input with validation
- * - Password reset email trigger
- * - Success confirmation screen
- * - Email validation
- * - Loading state during API call
- * - Back to login navigation
- * - User-friendly instructions
+ * Follows the same Card + Input + Button pattern as login.tsx.
  */
 
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  Platform,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 // Components
 import { Button, Input, Card } from '@/components/ui';
 
+// Services
+import apiClient from '@/services/api/client';
+import { API } from '@/services/api/endpoints';
+
 // Utils
 import { validateEmail } from '@/utils/validation';
 
 // Constants
-import { colors, spacing, typography } from '@/constants/theme';
+import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+
+// ─── Cross-platform alert helper ─────────────────────────────────────────────
+
+const showAlert = (title: string, message: string, onOk?: () => void) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+    onOk?.();
+  } else {
+    Alert.alert(title, message, [{ text: 'OK', onPress: onOk }]);
+  }
+};
+
+// ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function ForgotPasswordScreen() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSubmitted, setIsSubmitted] = useState(false);
 
-  const handleSubmit = async () => {
+  // Step 1 state
+  const [email, setEmail]         = useState('');
+  const [emailError, setEmailError] = useState('');
+
+  // Step 2 state
+  const [code, setCode]               = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPwd, setConfirmPwd]   = useState('');
+  const [showPwd, setShowPwd]         = useState(false);
+  const [step2Errors, setStep2Errors] = useState<Record<string, string>>({});
+
+  // Shared state
+  const [step, setStep]           = useState<1 | 2>(1);
+  const [isLoading, setIsLoading] = useState(false);
+  const [globalError, setGlobalError] = useState('');
+
+  // ── Step 1: send reset code ───────────────────────────────────────────────
+
+  const handleSendCode = async () => {
+    setGlobalError('');
     const validation = validateEmail(email);
     if (!validation.isValid) {
-      setError(validation.errors[0] || 'Invalid email');
+      setEmailError(validation.errors[0] || 'Invalid email');
       return;
     }
-
-    setError('');
+    setEmailError('');
     setIsLoading(true);
-
     try {
-      // TODO: Implement password reset API call
-      // For now, we'll just show a success message
-      await new Promise((resolve) => setTimeout(resolve, 1000)); // Simulate API call
-      setIsSubmitted(true);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to send reset email. Please try again.');
+      await apiClient.post(API.AUTH.FORGOT_PASSWORD, { email: email.trim().toLowerCase() });
+      setStep(2);
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Request failed. Please try again.';
+      setGlobalError(msg);
     } finally {
       setIsLoading(false);
     }
   };
 
-  if (isSubmitted) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <Card variant="elevated" padding="large" style={styles.card}>
-            <View style={styles.successContainer}>
-              <Text style={styles.successIcon}>✓</Text>
-              <Text style={styles.successTitle}>Check Your Email</Text>
-              <Text style={styles.successDescription}>
-                We've sent password reset instructions to {email}
-              </Text>
-              <Text style={styles.successNote}>
-                If you don't see the email, check your spam folder.
-              </Text>
-              <Button
-                title="Back to Sign In"
-                onPress={() => router.replace('/(auth)/login')}
-                fullWidth
-                style={styles.backButton}
-              />
-            </View>
-          </Card>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
+  // ── Step 2: verify code + set new password ────────────────────────────────
+
+  const handleResetPassword = async () => {
+    setGlobalError('');
+    const errors: Record<string, string> = {};
+
+    if (!code.trim() || code.trim().length !== 6) {
+      errors.code = 'Please enter the 6-digit code';
+    }
+    if (!newPassword) {
+      errors.newPassword = 'New password is required';
+    } else if (newPassword.length < 8) {
+      errors.newPassword = 'Password must be at least 8 characters';
+    }
+    if (newPassword !== confirmPwd) {
+      errors.confirmPwd = 'Passwords do not match';
+    }
+
+    setStep2Errors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    setIsLoading(true);
+    try {
+      await apiClient.post(API.AUTH.RESET_PASSWORD, {
+        email:        email.trim().toLowerCase(),
+        code:         code.trim(),
+        new_password: newPassword,
+      });
+      showAlert('Password Updated', 'Your password has been reset successfully.', () => {
+        router.replace('/(auth)/login');
+      });
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Reset failed. Please try again.';
+      setGlobalError(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <Card variant="elevated" padding="large" style={styles.card}>
-          <Text style={styles.title}>Reset Password</Text>
-          <Text style={styles.description}>
-            Enter your email address and we'll send you instructions to reset your password.
-          </Text>
 
-          <Input
-            label="Email Address"
-            value={email}
-            onChangeText={(text) => {
-              setEmail(text);
-              setError('');
-            }}
-            placeholder="Enter your email"
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-            error={error}
-          />
+          {step === 1 ? (
+            <>
+              <Text style={styles.title}>Reset Password</Text>
+              <Text style={styles.description}>
+                Enter your account email and we will send you a 6-digit reset code.
+              </Text>
 
-          <Button
-            title="Send Reset Instructions"
-            onPress={handleSubmit}
-            loading={isLoading}
-            fullWidth
-            style={styles.submitButton}
-          />
+              <Input
+                label="Email Address"
+                value={email}
+                onChangeText={(text) => { setEmail(text); setEmailError(''); setGlobalError(''); }}
+                placeholder="Enter your email"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                error={emailError}
+                editable={!isLoading}
+              />
 
-          <Button
-            title="Back to Sign In"
-            variant="ghost"
-            onPress={() => router.back()}
-            fullWidth
-          />
+              {globalError ? (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorBoxText}>{globalError}</Text>
+                </View>
+              ) : null}
+
+              <Button
+                title="Send Reset Code"
+                onPress={handleSendCode}
+                loading={isLoading}
+                fullWidth
+                style={styles.primaryButton}
+              />
+
+              <TouchableOpacity
+                style={styles.backLink}
+                onPress={() => router.back()}
+                disabled={isLoading}
+              >
+                <Text style={styles.backLinkText}>← Back to Sign In</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={styles.title}>Enter Reset Code</Text>
+              <Text style={styles.description}>
+                A 6-digit code has been sent to <Text style={styles.emailHighlight}>{email}</Text>.
+                Enter it below along with your new password.
+              </Text>
+
+              <Input
+                label="6-Digit Code"
+                value={code}
+                onChangeText={(text) => { setCode(text); setStep2Errors((p) => ({ ...p, code: '' })); setGlobalError(''); }}
+                placeholder="123456"
+                keyboardType="number-pad"
+                maxLength={6}
+                error={step2Errors.code}
+                editable={!isLoading}
+              />
+
+              <Input
+                label="New Password"
+                value={newPassword}
+                onChangeText={(text) => { setNewPassword(text); setStep2Errors((p) => ({ ...p, newPassword: '' })); }}
+                placeholder="At least 8 characters"
+                secureTextEntry={!showPwd}
+                autoCapitalize="none"
+                error={step2Errors.newPassword}
+                editable={!isLoading}
+                rightIcon={<Text style={styles.showPasswordText}>{showPwd ? 'Hide' : 'Show'}</Text>}
+                onRightIconPress={() => setShowPwd((p) => !p)}
+              />
+
+              <Input
+                label="Confirm New Password"
+                value={confirmPwd}
+                onChangeText={(text) => { setConfirmPwd(text); setStep2Errors((p) => ({ ...p, confirmPwd: '' })); }}
+                placeholder="Re-enter your new password"
+                secureTextEntry={!showPwd}
+                autoCapitalize="none"
+                error={step2Errors.confirmPwd}
+                editable={!isLoading}
+              />
+
+              {globalError ? (
+                <View style={styles.errorBox}>
+                  <Text style={styles.errorBoxText}>{globalError}</Text>
+                </View>
+              ) : null}
+
+              <Button
+                title="Reset Password"
+                onPress={handleResetPassword}
+                loading={isLoading}
+                fullWidth
+                style={styles.primaryButton}
+              />
+
+              <TouchableOpacity
+                style={styles.backLink}
+                onPress={() => { setStep(1); setGlobalError(''); setStep2Errors({}); setCode(''); setNewPassword(''); setConfirmPwd(''); }}
+                disabled={isLoading}
+              >
+                <Text style={styles.backLinkText}>← Back</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
         </Card>
       </ScrollView>
     </SafeAreaView>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -149,38 +276,39 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: colors.text.secondary,
     marginBottom: spacing.lg,
+    lineHeight: 22,
   },
-  submitButton: {
-    marginTop: spacing.md,
-    marginBottom: spacing.sm,
+  emailHighlight: {
+    color: colors.primary,
+    fontWeight: '600',
   },
-  successContainer: {
+  primaryButton: {
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  backLink: {
     alignItems: 'center',
-    padding: spacing.lg,
-  },
-  successIcon: {
-    fontSize: 64,
-    color: colors.success,
-    marginBottom: spacing.md,
-  },
-  successTitle: {
-    ...typography.h2,
-    color: colors.text.primary,
-    marginBottom: spacing.sm,
-  },
-  successDescription: {
-    ...typography.body,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: spacing.sm,
-  },
-  successNote: {
-    ...typography.small,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    marginBottom: spacing.xl,
-  },
-  backButton: {
     marginTop: spacing.md,
+  },
+  backLinkText: {
+    ...typography.body,
+    color: colors.primary,
+    fontWeight: '500',
+  },
+  showPasswordText: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '600',
+  },
+  errorBox: {
+    backgroundColor: colors.danger + '10',
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  errorBoxText: {
+    ...typography.caption,
+    color: colors.danger,
+    textAlign: 'center',
   },
 });

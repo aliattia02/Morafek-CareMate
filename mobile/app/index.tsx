@@ -3,44 +3,41 @@
  * Location: mobile/app/index.tsx
  *
  * Main Function: Index
- * Description: Initial route that handles app initialization and redirects to appropriate screen
+ * Description: Initial route that checks stored auth state and redirects to the
+ *              appropriate screen without causing a visible flash for returning users.
  *
  * Features:
- * - App initialization delay
- * - Loading indicator during startup
- * - Automatic redirect to login screen
- * - Branded loading message
+ * - Reads token + user from auth store synchronously via getState()
+ * - Redirects authenticated users straight to the app tabs
+ * - Redirects unauthenticated users to the login screen
+ * - Shows a centered ActivityIndicator while the effect fires
  */
 
-import { useEffect, useState } from 'react';
-import { View, ActivityIndicator, StyleSheet, Text } from 'react-native';
-import { Redirect } from 'expo-router';
+import { useEffect } from 'react';
+import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { useRouter } from 'expo-router';
+
+// Store
+import { useAuthStore } from '@/store/auth.store';
 
 // Constants
 import { colors } from '@/constants/theme';
 
 export default function Index() {
-  const [isReady, setIsReady] = useState(false);
+  const router = useRouter();
 
   useEffect(() => {
-    // Simple timeout to let the app initialize
-    const timer = setTimeout(() => {
-      setIsReady(true);
-    }, 500);
-
-    return () => clearTimeout(timer);
+    const { token, user } = useAuthStore.getState();
+    if (token && user) {
+      router.replace('/(app)/(tabs)');
+    } else {
+      router.replace('/(auth)/login');
+    }
   }, []);
 
-  // Once ready, redirect to login (we'll add proper auth check later)
-  if (isReady) {
-    return <Redirect href="/(auth)/login" />;
-  }
-
-  // Show loading while initializing
   return (
     <View style={styles.container}>
       <ActivityIndicator size="large" color={colors.primary} />
-      <Text style={styles.text}>Loading NATIVE... </Text>
     </View>
   );
 }
@@ -51,10 +48,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: colors.background,
-  },
-  text: {
-    marginTop: 16,
-    fontSize: 16,
-    color: colors.text.secondary,
   },
 });
