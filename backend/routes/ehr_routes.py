@@ -1296,3 +1296,77 @@ def mark_exercise_done(current_user, exercise_id):
     mongo.db.ehr_exercises.update_one({'_id': exercise_oid}, update)
     logger.info('Exercise %s marked done=%s', exercise_id, done)
     return jsonify({'message': 'Exercise updated'}), 200
+
+
+# ─── FHIR R4 Bundle Export ────────────────────────────────────────────────────
+
+@ehr_routes.route('/api/patient/fhir-export', methods=['GET'])
+@token_required
+@api_error_handler
+def fhir_export(current_user):
+    """GET /api/patient/fhir-export — export the patient's full EHR as a FHIR R4 Bundle.
+
+    Returns a FHIR R4 Bundle (type: "document") containing:
+      - Observation resources  (vitals)
+      - Encounter resources    (visits)
+      - Condition resources    (diagnoses linked to visits)
+      - DocumentReference resources (uploaded documents)
+    """
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    patient_id = str(current_user['_id'])
+    entries = []
+
+    # Vitals — Observation resources
+    for doc in mongo.db.ehr_vitals.find({'patient_id': patient_id}):
+        resource = {k: v for k, v in doc.items() if k not in ('_id', 'patient_id', 'recorded_by')}
+        resource['resourceType'] = 'Observation'
+        resource.setdefault('id', str(doc['_id']))
+        entries.append({
+            'fullUrl': f'urn:uuid:{resource["id"]}',
+            'resource': resource,
+        })
+
+    # Visits — Encounter resources
+    for doc in mongo.db.ehr_visits.find({'patient_id': patient_id}):
+        resource = {k: v for k, v in doc.items() if k not in ('_id', 'patient_id', 'doctor_id')}
+        resource['resourceType'] = 'Encounter'
+        resource.setdefault('id', str(doc['_id']))
+        entries.append({
+            'fullUrl': f'urn:uuid:{resource["id"]}',
+            'resource': resource,
+        })
+
+    # Conditions — Condition resources
+    for doc in mongo.db.ehr_conditions.find({'patient_id': patient_id}):
+        resource = {k: v for k, v in doc.items() if k not in ('_id', 'patient_id', 'encounter_id')}
+        resource['resourceType'] = 'Condition'
+        resource.setdefault('id', str(doc['_id']))
+        entries.append({
+            'fullUrl': f'urn:uuid:{resource["id"]}',
+            'resource': resource,
+        })
+
+    # Documents — DocumentReference resources
+    for doc in mongo.db.ehr_documents.find({'patient_id': patient_id}):
+        resource = {k: v for k, v in doc.items()
+                    if k not in ('_id', 'patient_id', 'uploaded_by', 'cloudinary_public_id')}
+        resource['resourceType'] = 'DocumentReference'
+        resource.setdefault('id', str(doc['_id']))
+        entries.append({
+            'fullUrl': f'urn:uuid:{resource["id"]}',
+            'resource': resource,
+        })
+
+    bundle = {
+        'resourceType': 'Bundle',
+        'id': str(uuid4()),
+        'type': 'document',
+        'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'total': len(entries),
+        'entry': entries,
+    }
+
+    logger.info('FHIR R4 Bundle exported (%d entries)', len(entries))
+    return jsonify(bundle), 200
