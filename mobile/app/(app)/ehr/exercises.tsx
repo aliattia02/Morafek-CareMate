@@ -20,6 +20,7 @@ import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { apiClient } from '@/services/api/client';
 import { API } from '@/services/api/endpoints';
+import { markExerciseDone } from '@/services/api/ehr';
 import { E, ET } from '@/constants/elderlyTheme';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -75,6 +76,17 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
   const handleWatchVideo = () => {
     if (exercise.video_url) {
       Linking.openURL(exercise.video_url);
+    }
+  };
+
+  const handleToggleDone = async () => {
+    const next = !done;
+    setDone(next);
+    try {
+      await markExerciseDone(exercise.id, next);
+    } catch {
+      // Revert optimistic update on failure
+      setDone(!next);
     }
   };
 
@@ -140,7 +152,7 @@ function ExerciseCard({ exercise }: { exercise: Exercise }) {
       {/* Mark as Done */}
       <TouchableOpacity
         style={[styles.doneButton, done && styles.doneButtonActive]}
-        onPress={() => setDone((prev) => !prev)}
+        onPress={handleToggleDone}
         accessibilityRole="checkbox"
         accessibilityLabel="Toggle exercise completion status"
         accessibilityState={{ checked: done }}
