@@ -67,8 +67,9 @@ export default function VitalsScreen() {
           notes: pv.notes ?? undefined,
         });
         deletePendingVital(pv.local_id);
-      } catch {
-        // Leave in queue to retry later
+      } catch (syncErr: unknown) {
+        // Leave in queue to retry later; log for debugging
+        console.warn('[vitals] Failed to sync pending vital:', pv.local_id, syncErr);
       }
     }
   };

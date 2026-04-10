@@ -8,6 +8,8 @@
 import * as SQLite from 'expo-sqlite';
 import type { VitalResponse } from '@/services/api/ehr';
 
+// The database is opened synchronously at module load time.
+// expo-sqlite will throw if the database cannot be opened (e.g. insufficient storage).
 const db = SQLite.openDatabaseSync('morafek.db');
 
 export function initDB() {

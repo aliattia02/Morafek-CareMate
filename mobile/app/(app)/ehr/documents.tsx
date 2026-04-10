@@ -151,7 +151,7 @@ export default function DocumentsScreen() {
 
   const handlePickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
       quality: 0.85,
     });
     if (!result.canceled && result.assets.length > 0) {
