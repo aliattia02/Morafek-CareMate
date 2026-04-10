@@ -715,3 +715,255 @@ def get_patient_documents(current_user, patient_id):
         .sort('created_at', -1)
     )
     return jsonify([_serialize_document(d) for d in docs]), 200
+
+
+# ─── Physical Therapy Exercises (ehr_exercises) ───────────────────────────────
+
+EXERCISE_VALID_CATEGORIES = {'mobility', 'strength', 'balance', 'breathing', 'other'}
+
+
+def _serialize_exercise(doc):
+    """Convert a MongoDB ehr_exercises document into a JSON-serialisable response."""
+    return {
+        'id': str(doc['_id']),
+        'patient_id': doc.get('patient_id', ''),
+        'doctor_id': doc.get('doctor_id', ''),
+        'title': doc.get('title', ''),
+        'description': doc.get('description', ''),
+        'category': doc.get('category', 'other'),
+        'frequency': doc.get('frequency', ''),
+        'duration_minutes': doc.get('duration_minutes'),
+        'repetitions': doc.get('repetitions'),
+        'sets': doc.get('sets'),
+        'video_url': doc.get('video_url', ''),
+        'image_url': doc.get('image_url', ''),
+        'active': doc.get('active', True),
+        'order': doc.get('order', 0),
+        'created_at': doc.get('created_at', ''),
+        'notes': doc.get('notes', ''),
+    }
+
+
+@ehr_routes.route('/api/doctor/patient/<patient_id>/exercises', methods=['POST'])
+@token_required
+@api_error_handler
+def create_exercise(current_user, patient_id):
+    """POST /api/doctor/patient/<patient_id>/exercises — assign a physical therapy exercise.
+
+    Required JSON fields:
+      title             (str) — name of the exercise, e.g. "Ankle Circles"
+      description       (str) — full instructions
+      category          (str) — one of: mobility, strength, balance, breathing, other
+      frequency         (str) — e.g. "3 times daily"
+      duration_minutes  (int) — e.g. 10
+      order             (int) — display order
+    Optional JSON fields:
+      repetitions (int) — e.g. 15
+      sets        (int) — number of sets
+      video_url   (str) — YouTube or Cloudinary URL
+      image_url   (str) — demonstration image URL
+      active      (bool) — defaults to true
+      notes       (str)  — clinical notes visible to patient
+    """
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err), code
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing request body'}), 400
+
+    required = ['title', 'description', 'category', 'frequency', 'duration_minutes', 'order']
+    for field in required:
+        if field not in data:
+            return jsonify({'error': f'Missing required field: {field}'}), 400
+
+    category = data['category']
+    if category not in EXERCISE_VALID_CATEGORIES:
+        return jsonify({
+            'error': f'Invalid category: {category}. '
+                     f'Must be one of: {", ".join(sorted(EXERCISE_VALID_CATEGORIES))}'
+        }), 400
+
+    duration_minutes = data['duration_minutes']
+    if not isinstance(duration_minutes, int) or duration_minutes <= 0:
+        return jsonify({'error': 'duration_minutes must be a positive integer'}), 400
+
+    order = data['order']
+    if not isinstance(order, int):
+        return jsonify({'error': 'order must be an integer'}), 400
+
+    repetitions = data.get('repetitions')
+    if repetitions is not None and (not isinstance(repetitions, int) or repetitions <= 0):
+        return jsonify({'error': 'repetitions must be a positive integer'}), 400
+
+    sets = data.get('sets')
+    if sets is not None and (not isinstance(sets, int) or sets <= 0):
+        return jsonify({'error': 'sets must be a positive integer'}), 400
+
+    doctor_id = str(current_user['_id'])
+    created_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    document = {
+        'patient_id': patient_id,
+        'doctor_id': doctor_id,
+        'title': data['title'].strip(),
+        'description': data['description'].strip(),
+        'category': category,
+        'frequency': data['frequency'].strip(),
+        'duration_minutes': duration_minutes,
+        'repetitions': repetitions,
+        'sets': sets,
+        'video_url': data.get('video_url', ''),
+        'image_url': data.get('image_url', ''),
+        'active': data.get('active', True),
+        'order': order,
+        'created_at': created_at,
+        'notes': data.get('notes', ''),
+    }
+
+    result = mongo.db.ehr_exercises.insert_one(document)
+    logger.info('Exercise created in ehr_exercises')
+
+    document['_id'] = result.inserted_id
+    return jsonify(_serialize_exercise(document)), 201
+
+
+@ehr_routes.route('/api/doctor/patient/<patient_id>/exercises', methods=['GET'])
+@token_required
+@api_error_handler
+def get_exercises(current_user, patient_id):
+    """GET /api/doctor/patient/<patient_id>/exercises — list all exercises for a patient."""
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err), code
+
+    docs = list(
+        mongo.db.ehr_exercises
+        .find({'patient_id': patient_id})
+        .sort('order', 1)
+    )
+    return jsonify([_serialize_exercise(d) for d in docs]), 200
+
+
+@ehr_routes.route('/api/doctor/patient/<patient_id>/exercises/<exercise_id>', methods=['PUT'])
+@token_required
+@api_error_handler
+def update_exercise(current_user, patient_id, exercise_id):
+    """PUT /api/doctor/patient/<patient_id>/exercises/<exercise_id> — update an exercise.
+
+    All fields are optional; only provided fields will be updated.
+    """
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err), code
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing request body'}), 400
+
+    try:
+        exercise_oid = ObjectId(exercise_id)
+    except Exception:
+        return jsonify({'error': 'Invalid exercise ID'}), 400
+
+    doc = mongo.db.ehr_exercises.find_one({
+        '_id': exercise_oid,
+        'patient_id': patient_id,
+    })
+    if not doc:
+        return jsonify({'error': 'Exercise not found'}), 404
+
+    updates = {}
+
+    if 'title' in data:
+        updates['title'] = data['title'].strip()
+    if 'description' in data:
+        updates['description'] = data['description'].strip()
+    if 'category' in data:
+        if data['category'] not in EXERCISE_VALID_CATEGORIES:
+            return jsonify({
+                'error': f'Invalid category: {data["category"]}. '
+                         f'Must be one of: {", ".join(sorted(EXERCISE_VALID_CATEGORIES))}'
+            }), 400
+        updates['category'] = data['category']
+    if 'frequency' in data:
+        updates['frequency'] = data['frequency'].strip()
+    if 'duration_minutes' in data:
+        if not isinstance(data['duration_minutes'], int) or data['duration_minutes'] <= 0:
+            return jsonify({'error': 'duration_minutes must be a positive integer'}), 400
+        updates['duration_minutes'] = data['duration_minutes']
+    if 'repetitions' in data:
+        rep = data['repetitions']
+        if rep is not None and (not isinstance(rep, int) or rep <= 0):
+            return jsonify({'error': 'repetitions must be a positive integer'}), 400
+        updates['repetitions'] = rep
+    if 'sets' in data:
+        s = data['sets']
+        if s is not None and (not isinstance(s, int) or s <= 0):
+            return jsonify({'error': 'sets must be a positive integer'}), 400
+        updates['sets'] = s
+    if 'video_url' in data:
+        updates['video_url'] = data['video_url']
+    if 'image_url' in data:
+        updates['image_url'] = data['image_url']
+    if 'active' in data:
+        updates['active'] = bool(data['active'])
+    if 'order' in data:
+        if not isinstance(data['order'], int):
+            return jsonify({'error': 'order must be an integer'}), 400
+        updates['order'] = data['order']
+    if 'notes' in data:
+        updates['notes'] = data['notes']
+
+    if not updates:
+        return jsonify({'error': 'No valid fields provided for update'}), 400
+
+    mongo.db.ehr_exercises.update_one({'_id': exercise_oid}, {'$set': updates})
+    logger.info('Exercise updated in ehr_exercises')
+
+    updated_doc = mongo.db.ehr_exercises.find_one({'_id': exercise_oid})
+    return jsonify(_serialize_exercise(updated_doc)), 200
+
+
+@ehr_routes.route('/api/doctor/patient/<patient_id>/exercises/<exercise_id>', methods=['DELETE'])
+@token_required
+@api_error_handler
+def delete_exercise(current_user, patient_id, exercise_id):
+    """DELETE /api/doctor/patient/<patient_id>/exercises/<exercise_id> — delete an exercise."""
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err), code
+
+    try:
+        exercise_oid = ObjectId(exercise_id)
+    except Exception:
+        return jsonify({'error': 'Invalid exercise ID'}), 400
+
+    doc = mongo.db.ehr_exercises.find_one({
+        '_id': exercise_oid,
+        'patient_id': patient_id,
+    })
+    if not doc:
+        return jsonify({'error': 'Exercise not found'}), 404
+
+    mongo.db.ehr_exercises.delete_one({'_id': exercise_oid})
+    logger.info('Exercise deleted from ehr_exercises')
+    return jsonify({'message': 'Exercise deleted'}), 200
+
+
+@ehr_routes.route('/api/patient/exercises', methods=['GET'])
+@token_required
+@api_error_handler
+def get_own_exercises(current_user):
+    """GET /api/patient/exercises — patient views their own active exercises."""
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    patient_id = str(current_user['_id'])
+    docs = list(
+        mongo.db.ehr_exercises
+        .find({'patient_id': patient_id, 'active': True})
+        .sort('order', 1)
+    )
+    return jsonify([_serialize_exercise(d) for d in docs]), 200
