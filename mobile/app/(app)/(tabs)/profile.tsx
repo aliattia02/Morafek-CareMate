@@ -69,13 +69,15 @@ export default function ProfileScreen() {
         {/* User card */}
         <Card variant="elevated" padding="large" style={styles.userCard}>
           <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8} style={styles.avatarWrapper}>
-            {user?.profile_picture_url ? (
-              <Image source={{ uri: user.profile_picture_url }} style={[styles.avatar, isDoctor && styles.avatarDoctor]} />
-            ) : (
-              <View style={[styles.avatar, styles.avatarPlaceholder, isDoctor && styles.avatarDoctor]}>
-                <Text style={styles.avatarText}>{user?.firstName?.[0] || 'U'}</Text>
-              </View>
-            )}
+            <View style={[styles.avatarContainer, isDoctor && styles.avatarContainerDoctor]}>
+              {user?.profile_picture_url ? (
+                <Image source={{ uri: user.profile_picture_url }} style={styles.avatar} />
+              ) : (
+                <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                  <Text style={styles.avatarText}>{user?.firstName?.[0] || 'U'}</Text>
+                </View>
+              )}
+            </View>
             {isUploading ? (
               <View style={styles.avatarOverlay}>
                 <ActivityIndicator color={colors.text.inverse} />
@@ -168,6 +170,12 @@ const styles = StyleSheet.create({
   content:    { padding: spacing.md, paddingBottom: spacing.xl },
   userCard:   { alignItems: 'center', marginBottom: spacing.md },
   avatarWrapper: { position: 'relative', marginBottom: spacing.md },
+  avatarContainer: {
+    width: 80, height: 80, borderRadius: 40, overflow: 'hidden',
+  },
+  avatarContainerDoctor: {
+    borderWidth: 2, borderColor: colors.secondary ?? colors.primary,
+  },
   avatar: {
     width: 80, height: 80, borderRadius: 40,
   },
@@ -175,7 +183,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     alignItems: 'center', justifyContent: 'center',
   },
-  avatarDoctor: { borderColor: colors.secondary ?? colors.primary, borderWidth: 2 },
   avatarOverlay: {
     position: 'absolute', bottom: 0, right: 0,
     width: 26, height: 26, borderRadius: 13,
