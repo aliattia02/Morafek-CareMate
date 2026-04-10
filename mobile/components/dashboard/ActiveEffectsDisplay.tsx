@@ -3,7 +3,7 @@ import { Text, StyleSheet } from 'react-native';
 import { Card } from '@/components/ui';
 import { colors, spacing, typography } from '@/constants/theme';
 
-function ActiveEffectsDisplay() {
+export function ActiveEffectsDisplay() {
   return (
     <Card variant="outlined" padding="medium" style={styles.card}>
       <Text style={styles.title}>📋 Health Overview</Text>
@@ -14,7 +14,6 @@ function ActiveEffectsDisplay() {
   );
 }
 
-export { ActiveEffectsDisplay };
 export default ActiveEffectsDisplay;
 
 const styles = StyleSheet.create({
