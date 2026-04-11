@@ -27,7 +27,7 @@ import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { apiClient } from '@/services/api/client';
-import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+import { E, ET } from '@/constants/elderlyTheme';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -62,19 +62,26 @@ interface MedicalProfile {
 function SectionCard({
   icon,
   title,
+  accentColor = E.colors.primary,
   children,
 }: {
   icon: string;
   title: string;
+  accentColor?: string;
   children: React.ReactNode;
 }) {
   return (
     <View style={styles.card}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardIcon}>{icon}</Text>
-        <Text style={styles.cardTitle}>{title}</Text>
+      <View style={[styles.cardAccent, { backgroundColor: accentColor }]} />
+      <View style={styles.cardInner}>
+        <View style={styles.cardHeader}>
+          <View style={[styles.cardIconBg, { backgroundColor: accentColor + '22' }]}>
+            <Text style={styles.cardIcon}>{icon}</Text>
+          </View>
+          <Text style={styles.cardTitle}>{title}</Text>
+        </View>
+        {children}
       </View>
-      {children}
     </View>
   );
 }
@@ -201,7 +208,7 @@ export default function PatientProfileScreen() {
       <Stack.Screen options={{ title: 'Medical Profile' }} />
 
       {loading ? (
-        <ActivityIndicator color={colors.primary} size="large" style={styles.loader} />
+        <ActivityIndicator color={E.colors.primary} size="large" style={styles.loader} />
       ) : error ? (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>⚠️ {error}</Text>
@@ -214,21 +221,25 @@ export default function PatientProfileScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={onRefresh}
-              colors={[colors.primary]}
+              colors={[E.colors.primary]}
             />
           }
         >
-          {/* ── Header banner ── */}
-          <View style={styles.headerCard}>
-            <Text style={styles.headerTitle}>🩺 Medical Profile</Text>
-            <Text style={styles.headerSubtitle}>
-              {profile?.first_name} {profile?.last_name}
-            </Text>
-            {profile?.updated_at ? (
-              <Text style={styles.headerMeta}>
-                Last updated by your doctor · {profile.updated_at.slice(0, 10)}
+          {/* ── Hero card ── */}
+          <View style={styles.heroCard}>
+            <View style={styles.heroAvatar}>
+              <Text style={styles.heroAvatarText}>
+                {profile?.first_name?.[0]?.toUpperCase() ?? '?'}
               </Text>
-            ) : null}
+            </View>
+            <View style={styles.heroInfo}>
+              <Text style={styles.heroName}>{profile?.first_name} {profile?.last_name}</Text>
+              {profile?.updated_at ? (
+                <Text style={styles.heroMeta}>
+                  Last updated · {profile.updated_at.slice(0, 10)}
+                </Text>
+              ) : null}
+            </View>
           </View>
 
           {/* ── Empty state ── */}
@@ -250,7 +261,6 @@ export default function PatientProfileScreen() {
                 { icon: '🩸', label: 'Blood Type', value: displayBloodType(profile?.blood_type ?? '') },
                 { icon: '📏', label: 'Height',     value: profile?.height_cm ? `${profile.height_cm} cm` : '—' },
                 { icon: '⚖️', label: 'Weight',     value: profile?.weight_kg ? `${profile.weight_kg} kg` : '—' },
-                { icon: '🚬', label: 'Smoking',    value: displaySmoking(profile?.smoking_status ?? '') },
               ].map((stat, i, arr) => (
                 <React.Fragment key={stat.label}>
                   <View style={styles.quickStat}>
@@ -266,7 +276,7 @@ export default function PatientProfileScreen() {
 
           {/* ── Demographics ── */}
           {hasData && (
-            <SectionCard icon="👤" title="Demographics">
+            <SectionCard icon="👤" title="Demographics" accentColor={E.colors.primary}>
               <InfoRow label="Date of birth" value={formatDate(profile?.date_of_birth ?? '')} />
               <InfoRow label="Gender"        value={profile?.gender ? profile.gender.replace('_', ' ') : '—'} />
               <InfoRow label="Blood type"    value={displayBloodType(profile?.blood_type ?? '')} />
@@ -281,7 +291,7 @@ export default function PatientProfileScreen() {
           )}
 
           {/* ── Allergies ── */}
-          <SectionCard icon="⚠️" title="Allergies">
+          <SectionCard icon="⚠️" title="Allergies" accentColor={E.colors.danger}>
             <TagList
               items={profile?.allergies ?? []}
               emptyText="No allergies recorded"
@@ -290,7 +300,7 @@ export default function PatientProfileScreen() {
           </SectionCard>
 
           {/* ── Chronic Conditions ── */}
-          <SectionCard icon="🏥" title="Chronic Conditions">
+          <SectionCard icon="🏥" title="Chronic Conditions" accentColor={E.colors.warning}>
             <TagList
               items={profile?.chronic_conditions ?? []}
               emptyText="No chronic conditions recorded"
@@ -298,7 +308,7 @@ export default function PatientProfileScreen() {
           </SectionCard>
 
           {/* ── Current Medications ── */}
-          <SectionCard icon="💊" title="Current Medications">
+          <SectionCard icon="💊" title="Current Medications" accentColor={E.colors.success}>
             <TagList
               items={profile?.current_medications ?? []}
               emptyText="No medications recorded"
@@ -307,7 +317,7 @@ export default function PatientProfileScreen() {
           </SectionCard>
 
           {/* ── Emergency Contact ── */}
-          <SectionCard icon="📞" title="Emergency Contact">
+          <SectionCard icon="📞" title="Emergency Contact" accentColor={E.colors.accent}>
             {profile?.emergency_contact_name || profile?.emergency_contact_phone ? (
               <View style={styles.emergencyCard}>
                 <Text style={styles.emergencyIcon}>🆘</Text>
@@ -327,7 +337,7 @@ export default function PatientProfileScreen() {
 
           {/* ── Clinical Notes ── */}
           {profile?.notes ? (
-            <SectionCard icon="📝" title="Clinical Notes">
+            <SectionCard icon="📝" title="Clinical Notes" accentColor={E.colors.primary}>
               <View style={styles.notesBox}>
                 <Text style={styles.notesText}>{profile.notes}</Text>
               </View>
@@ -347,7 +357,7 @@ export default function PatientProfileScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: E.colors.bg,
   },
   loader: {
     flex: 1,
@@ -355,140 +365,166 @@ const styles = StyleSheet.create({
   },
   errorContainer: {
     flex: 1,
-    padding: spacing.lg,
+    padding: E.pad,
     justifyContent: 'center',
     alignItems: 'center',
   },
   errorText: {
-    ...typography.body,
-    color: colors.danger,
+    ...ET.body,
+    color: E.colors.danger,
     textAlign: 'center',
   },
   scroll: { flex: 1 },
   content: {
-    padding: spacing.md,
+    padding: E.padSm,
     paddingBottom: 40,
-    gap: 12,
+    gap: E.padSm,
   },
 
-  // ── Header ──
-  headerCard: {
-    backgroundColor: colors.primary + '12',
-    borderRadius: borderRadius.md,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.primary,
-    padding: spacing.md,
-    gap: 4,
+  // ── Hero card ──
+  heroCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: E.colors.primary,
+    borderRadius: E.radius,
+    padding: E.pad,
+    gap: E.padSm,
+    ...E.shadow,
   },
-  headerTitle: {
-    ...typography.h3,
-    color: colors.text.primary,
+  heroAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: E.radiusFull,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroAvatarText: {
+    ...ET.h2,
+    color: E.colors.textInverse,
     fontWeight: '700',
   },
-  headerSubtitle: {
-    ...typography.body,
-    color: colors.text.secondary,
+  heroInfo: {
+    flex: 1,
   },
-  headerMeta: {
-    ...typography.small,
-    color: colors.text.secondary,
+  heroName: {
+    ...ET.h3,
+    color: E.colors.textInverse,
+    fontWeight: '700',
+  },
+  heroMeta: {
+    ...ET.small,
+    color: E.colors.primaryLight,
     marginTop: 2,
-    fontStyle: 'italic',
   },
 
   // ── Empty state ──
   emptyState: {
     alignItems: 'center',
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.lg,
-    gap: spacing.sm,
+    paddingVertical: 40,
+    paddingHorizontal: E.pad,
+    gap: E.padSm,
   },
   emptyStateIcon: { fontSize: 48 },
   emptyStateTitle: {
-    ...typography.h3,
-    color: colors.text.primary,
+    ...ET.h3,
     fontWeight: '700',
     textAlign: 'center',
   },
   emptyStateBody: {
-    ...typography.body,
-    color: colors.text.secondary,
+    ...ET.body,
+    color: E.colors.textSecondary,
     textAlign: 'center',
   },
 
   // ── Quick stats ──
   quickStats: {
     flexDirection: 'row',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
+    backgroundColor: E.colors.surface,
+    borderRadius: E.radius,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.sm,
+    borderColor: E.colors.border,
+    padding: E.padXs,
     alignItems: 'center',
+    ...E.shadowSm,
   },
   quickStat: {
     flex: 1,
     alignItems: 'center',
     gap: 2,
-    paddingVertical: spacing.xs,
+    paddingVertical: E.padXs,
   },
   quickStatIcon:  { fontSize: 18 },
   quickStatValue: {
-    ...typography.body,
-    color: colors.text.primary,
-    fontWeight: '700',
+    ...ET.bodyBold,
     textAlign: 'center',
-    fontSize: 13,
+    fontSize: 14,
   },
   quickStatLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
+    ...ET.caption,
     textAlign: 'center',
   },
   quickStatDivider: {
     width: 1,
     height: 40,
-    backgroundColor: colors.border,
+    backgroundColor: E.colors.border,
   },
 
   // ── Section card ──
   card: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
+    backgroundColor: E.colors.surface,
+    borderRadius: E.radius,
     borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
+    borderColor: E.colors.border,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    ...E.shadowSm,
+  },
+  cardAccent: {
+    width: 4,
+  },
+  cardInner: {
+    flex: 1,
+    padding: E.padSm,
     gap: 10,
   },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
+    gap: E.padXs,
+    marginBottom: E.padXs,
   },
-  cardIcon:  { fontSize: 20 },
+  cardIconBg: {
+    width: 32,
+    height: 32,
+    borderRadius: E.radiusXs,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  cardIcon:  { fontSize: 18 },
   cardTitle: {
-    ...typography.h3,
-    color: colors.text.primary,
+    ...ET.h3,
   },
 
   // ── Info row ──
   infoRow: {
     flexDirection: 'row',
-    gap: spacing.sm,
+    gap: E.padXs,
     alignItems: 'flex-start',
+    paddingBottom: E.padXs,
+    borderBottomWidth: 1,
+    borderBottomColor: E.colors.divider,
   },
   infoLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
+    ...ET.small,
     fontWeight: '600',
+    color: E.colors.textSecondary,
     width: 100,
     paddingTop: 2,
     flexShrink: 0,
   },
   infoValue: {
-    ...typography.body,
-    color: colors.text.primary,
+    ...ET.body,
     flex: 1,
     textTransform: 'capitalize',
   },
@@ -497,51 +533,51 @@ const styles = StyleSheet.create({
   tagContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.xs,
+    gap: E.padXs,
   },
   // default tag
   tag: {
-    backgroundColor: colors.primary + '15',
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    backgroundColor: E.colors.primaryLight,
+    borderRadius: E.radiusFull,
+    paddingHorizontal: E.padSm,
+    paddingVertical: E.padXs,
   },
   tagText: {
-    ...typography.small,
-    color: colors.primary,
+    ...ET.small,
+    color: E.colors.primary,
     fontWeight: '600',
   },
   // danger tag (allergies)
   tagDanger: {
     backgroundColor: '#FFEBEE',
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    borderRadius: E.radiusFull,
+    paddingHorizontal: E.padSm,
+    paddingVertical: E.padXs,
     borderWidth: 1,
     borderColor: '#EF9A9A',
   },
   tagTextDanger: {
-    ...typography.small,
+    ...ET.small,
     color: '#B71C1C',
     fontWeight: '600',
   },
   // med tag (medications)
   tagMed: {
     backgroundColor: '#E8F5E9',
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    borderRadius: E.radiusFull,
+    paddingHorizontal: E.padSm,
+    paddingVertical: E.padXs,
     borderWidth: 1,
     borderColor: '#A5D6A7',
   },
   tagTextMed: {
-    ...typography.small,
+    ...ET.small,
     color: '#1B5E20',
     fontWeight: '600',
   },
   emptyTagText: {
-    ...typography.body,
-    color: colors.text.secondary,
+    ...ET.body,
+    color: E.colors.textSecondary,
     fontStyle: 'italic',
   },
 
@@ -549,35 +585,32 @@ const styles = StyleSheet.create({
   emergencyCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFF8E1',
-    borderRadius: borderRadius.sm,
-    padding: spacing.sm,
-    gap: spacing.sm,
+    backgroundColor: E.colors.accentLight,
+    borderRadius: E.radiusSm,
+    padding: E.padXs,
+    gap: E.padXs,
     borderWidth: 1,
-    borderColor: '#FFE082',
+    borderColor: E.colors.accent + '55',
   },
   emergencyIcon: { fontSize: 22 },
   emergencyInfo: { flex: 1 },
   emergencyName: {
-    ...typography.body,
-    color: colors.text.primary,
-    fontWeight: '700',
+    ...ET.bodyBold,
   },
   emergencyPhone: {
-    ...typography.body,
-    color: colors.text.secondary,
+    ...ET.body,
+    color: E.colors.textSecondary,
   },
 
   // ── Clinical notes ──
   notesBox: {
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.sm,
-    padding: spacing.sm,
+    backgroundColor: E.colors.bg,
+    borderRadius: E.radiusSm,
+    padding: E.padXs,
     borderLeftWidth: 3,
-    borderLeftColor: colors.primary,
+    borderLeftColor: E.colors.primary,
   },
   notesText: {
-    ...typography.body,
-    color: colors.text.primary,
+    ...ET.body,
   },
 });

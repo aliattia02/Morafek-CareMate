@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+import { E, ET } from '@/constants/elderlyTheme';
 import { useAuthStore } from '@/store/auth.store';
 import { PatientList, PatientDataView } from '@/components/doctor';
 import { getPatients, type DoctorPatient } from '@/services/api/doctor';
@@ -100,15 +100,41 @@ export default function DoctorDashboardScreen() {
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={[colors.primary]}
+            colors={[E.colors.primary]}
           />
         }
       >
         {/* ── Welcome ── */}
         <View style={styles.welcomeSection}>
-          <Text style={styles.greeting}>{greeting()}</Text>
-          <Text style={styles.userName}>Dr. {user?.firstName || 'Doctor'}</Text>
-          <Text style={styles.roleTag}>👨‍⚕️ Doctor Dashboard</Text>
+          <View style={styles.welcomeRow}>
+            <View style={styles.welcomeAvatar}>
+              <Text style={styles.welcomeAvatarText}>
+                {(user?.firstName?.[0] ?? 'D').toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.welcomeText}>
+              <Text style={styles.greeting}>{greeting()}</Text>
+              <Text style={styles.userName}>Dr. {user?.firstName || 'Doctor'}</Text>
+              <Text style={styles.roleTag}>👨‍⚕️ Doctor Dashboard</Text>
+            </View>
+          </View>
+          {/* Stats row — floats out of teal header */}
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{patients.length}</Text>
+              <Text style={styles.statLabel}>Patients</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>{clinics.length}</Text>
+              <Text style={styles.statLabel}>Clinics</Text>
+            </View>
+            <View style={styles.statDivider} />
+            <View style={styles.statItem}>
+              <Text style={styles.statValue}>0</Text>
+              <Text style={styles.statLabel}>Updates</Text>
+            </View>
+          </View>
         </View>
 
         {/* ── Clinics strip ── */}
@@ -164,7 +190,9 @@ export default function DoctorDashboardScreen() {
                     </Text>
                   </View>
                   {item.created_by === user?.id && (
-                    <View style={styles.ownerDot} />
+                    <View style={styles.ownerBadge}>
+                      <Text style={styles.ownerBadgeText}>Owner</Text>
+                    </View>
                   )}
                 </TouchableOpacity>
               )}
@@ -180,7 +208,10 @@ export default function DoctorDashboardScreen() {
         )}
 
         {/* ── Patient list ── */}
-        <View style={styles.patientListContainer}>
+        <View style={styles.patientListSection}>
+          <View style={styles.patientListHeader}>
+            <Text style={styles.patientListTitle}>👥 My Patients</Text>
+          </View>
           <PatientList
             patients={patients}
             selectedPatient={selectedPatient}
@@ -200,62 +231,109 @@ export default function DoctorDashboardScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: E.colors.bg,
   },
   container: {
     flex: 1,
   },
 
-  // Welcome
+  // Welcome — teal header
   welcomeSection: {
-    padding: spacing.md,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    backgroundColor: E.colors.primary,
+    paddingTop: E.pad,
+    paddingHorizontal: E.pad,
+    paddingBottom: 56, // extra space for statsRow overflow
+  },
+  welcomeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: E.padSm,
+  },
+  welcomeAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: E.radiusFull,
+    backgroundColor: E.colors.textInverse,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  welcomeAvatarText: {
+    ...ET.h2,
+    color: E.colors.primary,
+    fontWeight: '700',
+  },
+  welcomeText: {
+    flex: 1,
   },
   greeting: {
-    ...typography.body,
-    color: colors.text.secondary,
+    ...ET.body,
+    color: E.colors.primaryLight,
   },
   userName: {
-    ...typography.h1,
-    color: colors.text.primary,
+    ...ET.h1,
+    color: E.colors.textInverse,
   },
   roleTag: {
-    ...typography.caption,
-    color: colors.primary,
-    marginTop: spacing.xs,
+    ...ET.small,
+    color: E.colors.primaryLight,
+    marginTop: 2,
+  },
+
+  // Stats row — white pill floating below teal header
+  statsRow: {
+    flexDirection: 'row',
+    backgroundColor: E.colors.surface,
+    borderRadius: E.radius,
+    marginTop: E.padSm,
+    paddingVertical: E.padSm,
+    ...E.shadow,
+  },
+  statItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  statValue: {
+    ...ET.h2,
+    color: E.colors.primary,
+  },
+  statLabel: {
+    ...ET.caption,
+    marginTop: 2,
+  },
+  statDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: E.colors.border,
+    alignSelf: 'center',
   },
 
   // Clinics section
   clinicsSection: {
-    backgroundColor: colors.surface,
+    backgroundColor: E.colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    paddingTop: spacing.md,
-    paddingBottom: spacing.sm,
+    borderBottomColor: E.colors.border,
+    paddingTop: E.pad,
+    paddingBottom: E.padSm,
   },
   clinicsHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+    paddingHorizontal: E.pad,
+    marginBottom: E.padSm,
   },
   clinicsTitle: {
-    ...typography.body,
-    fontWeight: '700',
-    color: colors.text.primary,
+    ...ET.bodyBold,
   },
   manageBtn: {
     paddingVertical: 4,
-    paddingHorizontal: spacing.sm,
-    backgroundColor: colors.primary + '15',
-    borderRadius: borderRadius.sm,
+    paddingHorizontal: E.padSm,
+    backgroundColor: E.colors.primaryLight,
+    borderRadius: E.radiusSm,
   },
   manageBtnText: {
-    ...typography.caption,
-    color: colors.primary,
+    ...ET.caption,
+    color: E.colors.primary,
     fontWeight: '600',
   },
 
@@ -263,105 +341,115 @@ const styles = StyleSheet.create({
   clinicsEmpty: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginHorizontal: spacing.md,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
+    marginHorizontal: E.pad,
+    padding: E.pad,
+    borderRadius: E.radius,
     borderWidth: 1,
     borderStyle: 'dashed',
-    borderColor: colors.border,
-    backgroundColor: colors.background,
+    borderColor: E.colors.border,
+    backgroundColor: E.colors.bg,
   },
   clinicsEmptyIcon: {
     fontSize: 28,
-    marginRight: spacing.sm,
+    marginRight: E.padSm,
   },
   clinicsEmptyText: {
     flex: 1,
   },
   clinicsEmptyTitle: {
-    ...typography.body,
-    fontWeight: '600',
-    color: colors.text.primary,
+    ...ET.bodyBold,
   },
   clinicsEmptySub: {
-    ...typography.small,
-    color: colors.text.secondary,
+    ...ET.small,
   },
   clinicsEmptyArrow: {
     fontSize: 22,
-    color: colors.text.secondary,
+    color: E.colors.textSecondary,
   },
 
   // Clinic chips
   clinicsList: {
-    paddingHorizontal: spacing.md,
-    gap: spacing.sm,
+    paddingHorizontal: E.pad,
+    gap: E.padSm,
   },
   clinicChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.background,
+    backgroundColor: E.colors.bg,
     borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.sm,
+    borderColor: E.colors.border,
+    borderRadius: E.radius,
+    paddingVertical: E.padSm,
+    paddingHorizontal: E.padSm,
     maxWidth: 200,
   },
   clinicChipAvatar: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.primary,
+    borderRadius: E.radiusFull,
+    backgroundColor: E.colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: spacing.sm,
+    marginRight: E.padSm,
   },
   clinicChipAvatarText: {
-    ...typography.body,
-    color: colors.text.inverse,
-    fontWeight: '700',
+    ...ET.bodyBold,
+    color: E.colors.textInverse,
   },
   clinicChipBody: {
     flex: 1,
   },
   clinicChipName: {
-    ...typography.small,
+    ...ET.small,
     fontWeight: '600',
-    color: colors.text.primary,
+    color: E.colors.textPrimary,
   },
   clinicChipCount: {
-    ...typography.caption,
-    color: colors.text.secondary,
+    ...ET.caption,
   },
-  // Small dot to indicate "you created this"
-  ownerDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.primary,
-    marginLeft: spacing.xs,
-    alignSelf: 'flex-start',
-    marginTop: 4,
+  // Owner badge pill
+  ownerBadge: {
+    backgroundColor: E.colors.primaryLight,
+    borderRadius: E.radiusFull,
+    paddingHorizontal: E.padXs,
+    paddingVertical: 2,
+    marginLeft: E.padXs,
+  },
+  ownerBadgeText: {
+    ...ET.caption,
+    color: E.colors.primary,
+    fontWeight: '600',
   },
 
   // Error
   errorContainer: {
-    margin: spacing.md,
-    padding: spacing.md,
-    backgroundColor: colors.danger + '10',
-    borderRadius: 8,
+    margin: E.pad,
+    padding: E.pad,
+    backgroundColor: E.colors.dangerLight,
+    borderRadius: E.radiusSm,
     borderLeftWidth: 4,
-    borderLeftColor: colors.danger,
+    borderLeftColor: E.colors.danger,
   },
   errorText: {
-    ...typography.body,
-    color: colors.danger,
+    ...ET.body,
+    color: E.colors.danger,
   },
 
-  // Patient list
-  patientListContainer: {
-    flex: 1,
-    minHeight: 400,
+  // Patient list section card
+  patientListSection: {
+    backgroundColor: E.colors.surface,
+    borderRadius: E.radius,
+    margin: E.pad,
+    overflow: 'hidden',
+    ...E.shadow,
+  },
+  patientListHeader: {
+    paddingHorizontal: E.pad,
+    paddingVertical: E.padSm,
+    borderBottomWidth: 1,
+    borderBottomColor: E.colors.divider,
+  },
+  patientListTitle: {
+    ...ET.h3,
   },
 });

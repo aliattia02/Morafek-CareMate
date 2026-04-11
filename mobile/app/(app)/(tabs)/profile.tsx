@@ -5,9 +5,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
-import { Card, Button } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
-import { colors, spacing, typography } from '@/constants/theme';
+import { E, ET } from '@/constants/elderlyTheme';
 import { uploadAvatar } from '@/services/api/profile';
 import { getBaseUrl } from '@/services/api/client';
 
@@ -118,21 +117,23 @@ export default function ProfileScreen() {
     <SafeAreaView style={styles.safe} edges={['bottom']}>
       <ScrollView contentContainerStyle={styles.content}>
 
-        {/* User card */}
-        <Card variant="elevated" padding="large" style={styles.userCard}>
+        {/* Hero section */}
+        <View style={styles.hero}>
           <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8} style={styles.avatarWrapper}>
-            <View style={[styles.avatarContainer, isDoctor && styles.avatarContainerDoctor]}>
-              {user?.profile_picture_url ? (
-                <Image source={{ uri: user.profile_picture_url }} style={styles.avatar} />
-              ) : (
-                <View style={[styles.avatar, styles.avatarPlaceholder]}>
-                  <Text style={styles.avatarText}>{user?.firstName?.[0] || 'U'}</Text>
-                </View>
-              )}
+            <View style={[styles.avatarRing, isDoctor && styles.avatarRingDoctor]}>
+              <View style={styles.avatarContainer}>
+                {user?.profile_picture_url ? (
+                  <Image source={{ uri: user.profile_picture_url }} style={styles.avatar} />
+                ) : (
+                  <View style={[styles.avatar, styles.avatarPlaceholder]}>
+                    <Text style={styles.avatarText}>{user?.firstName?.[0] || 'U'}</Text>
+                  </View>
+                )}
+              </View>
             </View>
             {isUploading ? (
               <View style={styles.avatarOverlay}>
-                <ActivityIndicator color={colors.text.inverse} />
+                <ActivityIndicator color={E.colors.textInverse} />
               </View>
             ) : (
               <View style={styles.avatarOverlay}>
@@ -143,90 +144,112 @@ export default function ProfileScreen() {
           <Text style={styles.name}>
             {isDoctor ? 'Dr. ' : ''}{user?.firstName} {user?.lastName}
           </Text>
-          <Text style={styles.role}>
-            {isDoctor ? '👨‍⚕️ Healthcare Provider' : '🧑 Patient'}
-          </Text>
-        </Card>
+          <View style={styles.roleChip}>
+            <Text style={styles.roleChipText}>
+              {isDoctor ? '👨‍⚕️ Healthcare Provider' : '🧑 Patient'}
+            </Text>
+          </View>
+        </View>
 
         {/* Patient links */}
         {!isDoctor && (
-          <Card variant="outlined" padding="none" style={styles.linksCard}>
-            <TouchableOpacity style={styles.link}
-              onPress={() => router.push('/(app)/ehr/patient-profile')}>
-              <Text style={styles.linkIcon}>🩺</Text>
-              <View style={styles.linkBody}>
-                <Text style={styles.linkTitle}>My Medical Profile</Text>
-                <Text style={styles.linkSub}>Blood type, allergies &amp; conditions</Text>
-              </View>
-              <Text style={styles.arrow}>›</Text>
-            </TouchableOpacity>
-            <View style={styles.divider} />
-            <TouchableOpacity style={styles.link}
-              onPress={() => router.push('/(app)/settings/doctors')}>
-              <Text style={styles.linkIcon}>👨‍⚕️</Text>
-              <View style={styles.linkBody}>
-                <Text style={styles.linkTitle}>Manage My Doctors</Text>
-                <Text style={styles.linkSub}>Authorize doctors to view your data</Text>
-              </View>
-              <Text style={styles.arrow}>›</Text>
-            </TouchableOpacity>
-            <View style={styles.divider} />
-            <TouchableOpacity style={styles.link}
-              onPress={() => router.push('/(app)/log/vitals')}>
-              <Text style={styles.linkIcon}>📊</Text>
-              <View style={styles.linkBody}>
-                <Text style={styles.linkTitle}>Log Blood Pressure</Text>
-                <Text style={styles.linkSub}>Record a new vital reading</Text>
-              </View>
-              <Text style={styles.arrow}>›</Text>
-            </TouchableOpacity>
-            <View style={styles.divider} />
-            <TouchableOpacity style={styles.link} onPress={handleFhirExport} disabled={isExporting}>
-              <Text style={styles.linkIcon}>📤</Text>
-              <View style={styles.linkBody}>
-                <Text style={styles.linkTitle}>Export FHIR R4 Data</Text>
-                <Text style={styles.linkSub}>
-                  {isExporting ? 'Preparing export…' : 'Download your health records bundle'}
-                </Text>
-              </View>
-              {isExporting
-                ? <ActivityIndicator size="small" color={colors.primary} />
-                : <Text style={styles.arrow}>›</Text>}
-            </TouchableOpacity>
-          </Card>
+          <>
+            <Text style={styles.groupLabel}>MY HEALTH</Text>
+            <View style={styles.groupCard}>
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/ehr/patient-profile')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>🩺</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>My Medical Profile</Text>
+                  <Text style={styles.linkSub}>Blood type, allergies &amp; conditions</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+              <View style={styles.divider} />
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/log/vitals')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>📊</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>Log Blood Pressure</Text>
+                  <Text style={styles.linkSub}>Record a new vital reading</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+              <View style={styles.divider} />
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/settings/doctors')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>👨‍⚕️</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>Manage My Doctors</Text>
+                  <Text style={styles.linkSub}>Authorize doctors to view your data</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+              <View style={styles.divider} />
+              <TouchableOpacity style={styles.link} onPress={handleFhirExport} disabled={isExporting}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>📤</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>Export FHIR R4 Data</Text>
+                  <Text style={styles.linkSub}>
+                    {isExporting ? 'Preparing export…' : 'Download your health records bundle'}
+                  </Text>
+                </View>
+                {isExporting
+                  ? <ActivityIndicator size="small" color={E.colors.primary} />
+                  : <Text style={styles.arrow}>›</Text>}
+              </TouchableOpacity>
+            </View>
+          </>
         )}
 
         {/* Doctor links */}
         {isDoctor && (
-          <Card variant="outlined" padding="none" style={styles.linksCard}>
-            <TouchableOpacity style={styles.link}
-              onPress={() => router.push('/(app)/(tabs)/doctor-dashboard')}>
-              <Text style={styles.linkIcon}>👥</Text>
-              <View style={styles.linkBody}>
-                <Text style={styles.linkTitle}>My Patients</Text>
-                <Text style={styles.linkSub}>View and manage assigned patients</Text>
-              </View>
-              <Text style={styles.arrow}>›</Text>
-            </TouchableOpacity>
-            <View style={styles.divider} />
-            {/* ── NEW: My Clinics ── */}
-            <TouchableOpacity style={styles.link}
-              onPress={() => router.push('/(app)/settings/clinics')}>
-              <Text style={styles.linkIcon}>🏥</Text>
-              <View style={styles.linkBody}>
-                <Text style={styles.linkTitle}>My Clinics</Text>
-                <Text style={styles.linkSub}>Create and manage your clinic listings</Text>
-              </View>
-              <Text style={styles.arrow}>›</Text>
-            </TouchableOpacity>
-          </Card>
+          <>
+            <Text style={styles.groupLabel}>PRACTICE</Text>
+            <View style={styles.groupCard}>
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/(tabs)/doctor-dashboard')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>👥</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>My Patients</Text>
+                  <Text style={styles.linkSub}>View and manage assigned patients</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+              <View style={styles.divider} />
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/settings/clinics')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>🏥</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>My Clinics</Text>
+                  <Text style={styles.linkSub}>Create and manage your clinic listings</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+            </View>
+          </>
         )}
 
         {/* Shared links */}
-        <Card variant="outlined" padding="none" style={styles.linksCard}>
+        <Text style={styles.groupLabel}>SUPPORT &amp; LEGAL</Text>
+        <View style={styles.groupCard}>
           <TouchableOpacity style={styles.link}
             onPress={() => showAlert('Help', 'Support documentation coming soon.')}>
-            <Text style={styles.linkIcon}>❓</Text>
+            <View style={styles.linkIconWrap}>
+              <Text style={styles.linkIcon}>❓</Text>
+            </View>
             <View style={styles.linkBody}>
               <Text style={styles.linkTitle}>Help & Support</Text>
             </View>
@@ -235,16 +258,30 @@ export default function ProfileScreen() {
           <View style={styles.divider} />
           <TouchableOpacity style={styles.link}
             onPress={() => showAlert('Privacy', 'Privacy policy coming soon.')}>
-            <Text style={styles.linkIcon}>🔒</Text>
+            <View style={styles.linkIconWrap}>
+              <Text style={styles.linkIcon}>🔒</Text>
+            </View>
             <View style={styles.linkBody}>
               <Text style={styles.linkTitle}>Privacy Policy (DSGVO)</Text>
             </View>
             <Text style={styles.arrow}>›</Text>
           </TouchableOpacity>
-        </Card>
+        </View>
 
-        <Button title="Sign Out" variant="outline" onPress={handleLogout}
-          fullWidth style={styles.logout} />
+        {/* Destructive */}
+        <Text style={styles.groupLabel}>ACCOUNT</Text>
+        <View style={styles.groupCard}>
+          <TouchableOpacity style={styles.link} onPress={handleLogout}>
+            <View style={[styles.linkIconWrap, styles.linkIconWrapDestructive]}>
+              <Text style={styles.linkIcon}>🚪</Text>
+            </View>
+            <View style={styles.linkBody}>
+              <Text style={[styles.linkTitle, { color: E.colors.danger }]}>Sign Out</Text>
+            </View>
+            <Text style={[styles.arrow, { color: E.colors.danger }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
         <Text style={styles.version}>Morafek v1.0.0</Text>
       </ScrollView>
     </SafeAreaView>
@@ -252,42 +289,82 @@ export default function ProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe:       { flex: 1, backgroundColor: colors.background },
-  content:    { padding: spacing.md, paddingBottom: spacing.xl },
-  userCard:   { alignItems: 'center', marginBottom: spacing.md },
-  avatarWrapper: { position: 'relative', marginBottom: spacing.md },
-  avatarContainer: {
-    width: 80, height: 80, borderRadius: 40, overflow: 'hidden',
+  safe:    { flex: 1, backgroundColor: E.colors.bg },
+  content: { paddingBottom: 40 },
+
+  // Hero
+  hero: {
+    alignItems: 'center',
+    backgroundColor: E.colors.primary,
+    paddingTop: E.pad,
+    paddingBottom: E.pad + 16,
   },
-  avatarContainerDoctor: {
-    borderWidth: 2, borderColor: colors.secondary ?? colors.primary,
+  avatarWrapper: { position: 'relative', marginBottom: E.padSm },
+  avatarRing: {
+    width: 96, height: 96, borderRadius: E.radiusFull,
+    borderWidth: 4, borderColor: E.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  avatarRingDoctor: {
+    borderColor: E.colors.accent,
+  },
+  avatarContainer: {
+    width: 84, height: 84, borderRadius: E.radiusFull, overflow: 'hidden',
   },
   avatar: {
-    width: 80, height: 80, borderRadius: 40,
+    width: 84, height: 84, borderRadius: E.radiusFull,
   },
   avatarPlaceholder: {
-    backgroundColor: colors.primary,
+    backgroundColor: E.colors.primaryDark,
     alignItems: 'center', justifyContent: 'center',
   },
   avatarOverlay: {
     position: 'absolute', bottom: 0, right: 0,
-    width: 26, height: 26, borderRadius: 13,
+    width: 28, height: 28, borderRadius: E.radiusFull,
     backgroundColor: 'rgba(0,0,0,0.55)',
     alignItems: 'center', justifyContent: 'center',
   },
   avatarEditIcon: { color: '#fff', fontSize: 14 },
-  avatarText: { fontSize: 32, fontWeight: 'bold', color: colors.text.inverse },
-  name:       { ...typography.h2, color: colors.text.primary },
-  role:       { ...typography.body, color: colors.text.secondary, marginTop: spacing.xs },
-  linksCard:  { marginBottom: spacing.md, overflow: 'hidden' },
-  link:       { flexDirection: 'row', alignItems: 'center', padding: spacing.md },
-  linkIcon:   { fontSize: 24, marginRight: spacing.md },
-  linkBody:   { flex: 1 },
-  linkTitle:  { ...typography.body, color: colors.text.primary, fontWeight: '500' },
-  linkSub:    { ...typography.small, color: colors.text.secondary },
-  arrow:      { fontSize: 24, color: colors.text.secondary },
-  divider:    { height: 1, backgroundColor: colors.divider, marginLeft: 56 },
-  logout:     { marginTop: spacing.md, borderColor: colors.danger },
-  version:    { ...typography.small, color: colors.text.secondary,
-                textAlign: 'center', marginTop: spacing.lg },
+  avatarText: { fontSize: 36, fontWeight: 'bold', color: E.colors.textInverse },
+  name: { ...ET.h2, color: E.colors.textInverse, marginBottom: 6 },
+  roleChip: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: E.radiusFull,
+    paddingHorizontal: E.padSm,
+    paddingVertical: 4,
+  },
+  roleChipText: { ...ET.small, color: E.colors.textInverse, fontWeight: '600' },
+
+  // Group labels + cards
+  groupLabel: {
+    ...ET.label,
+    marginTop: E.pad,
+    marginBottom: E.padXs,
+    marginHorizontal: E.pad,
+  },
+  groupCard: {
+    backgroundColor: E.colors.surface,
+    borderRadius: E.radius,
+    marginHorizontal: E.pad,
+    overflow: 'hidden',
+    ...E.shadowSm,
+  },
+  link: { flexDirection: 'row', alignItems: 'center', padding: E.padSm, minHeight: E.tap },
+  linkIconWrap: {
+    width: 40, height: 40, borderRadius: E.radiusSm,
+    backgroundColor: E.colors.primaryLight,
+    alignItems: 'center', justifyContent: 'center',
+    marginRight: E.padSm,
+  },
+  linkIconWrapDestructive: {
+    backgroundColor: E.colors.dangerLight,
+  },
+  linkIcon:  { fontSize: 20 },
+  linkBody:  { flex: 1 },
+  linkTitle: { ...ET.bodyBold },
+  linkSub:   { ...ET.small },
+  arrow:     { fontSize: 24, color: E.colors.textSecondary },
+  divider:   { height: 1, backgroundColor: E.colors.divider, marginLeft: 60 },
+  version:   { ...ET.small, textAlign: 'center', marginTop: E.pad, marginBottom: E.padSm },
 });

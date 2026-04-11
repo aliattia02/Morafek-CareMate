@@ -130,34 +130,49 @@ export default function VitalsScreen() {
           {/* ── INSTRUCTION CARD ── */}
           <View style={styles.instructionCard}>
             <Text style={styles.sectionTitle}>📋 Before you measure:</Text>
-            <Text style={styles.instructionLine}>1. Sit quietly for 5 minutes</Text>
-            <Text style={styles.instructionLine}>2. Place the cuff on your left arm</Text>
-            <Text style={styles.instructionLine}>3. Do not talk while measuring</Text>
+            {[
+              { icon: '🪑', text: 'Sit quietly for 5 minutes' },
+              { icon: '💪', text: 'Place the cuff on your left arm' },
+              { icon: '🤫', text: 'Do not talk while measuring' },
+            ].map((step) => (
+              <View key={step.text} style={styles.prepStep}>
+                <Text style={styles.prepStepIcon}>{step.icon}</Text>
+                <Text style={styles.prepStepText}>{step.text}</Text>
+              </View>
+            ))}
           </View>
 
           {/* ── BP INPUTS CARD ── */}
           <View style={styles.card}>
-            <Text style={styles.inputLabel}>Systolic (Upper Number)</Text>
-            <Input
-              value={systolic}
-              onChangeText={(v) => { setSystolic(v); setErrors(p => ({...p, systolic: ''})); }}
-              keyboardType="number-pad"
-              placeholder="120"
-              error={errors.systolic}
-              containerStyle={styles.inputContainer}
-              inputStyle={styles.bigInputText}
-            />
-
-            <Text style={styles.inputLabel}>Diastolic (Lower Number)</Text>
-            <Input
-              value={diastolic}
-              onChangeText={(v) => { setDiastolic(v); setErrors(p => ({...p, diastolic: ''})); }}
-              keyboardType="number-pad"
-              placeholder="80"
-              error={errors.diastolic}
-              containerStyle={styles.inputContainer}
-              inputStyle={styles.bigInputText}
-            />
+            <View style={styles.bpInputRow}>
+              <View style={styles.bpInputCol}>
+                <Text style={styles.inputLabel}>Systolic</Text>
+                <Input
+                  value={systolic}
+                  onChangeText={(v) => { setSystolic(v); setErrors(p => ({...p, systolic: ''})); }}
+                  keyboardType="number-pad"
+                  placeholder="120"
+                  error={errors.systolic}
+                  containerStyle={styles.inputContainer}
+                  inputStyle={styles.bigInputText}
+                />
+              </View>
+              <View style={styles.bpSlash}>
+                <Text style={styles.bpSlashText}>/</Text>
+              </View>
+              <View style={styles.bpInputCol}>
+                <Text style={styles.inputLabel}>Diastolic</Text>
+                <Input
+                  value={diastolic}
+                  onChangeText={(v) => { setDiastolic(v); setErrors(p => ({...p, diastolic: ''})); }}
+                  keyboardType="number-pad"
+                  placeholder="80"
+                  error={errors.diastolic}
+                  containerStyle={styles.inputContainer}
+                  inputStyle={styles.bigInputText}
+                />
+              </View>
+            </View>
 
             {/* Live BP status badge */}
             {category && (
@@ -223,7 +238,7 @@ export default function VitalsScreen() {
             onPress={handleSubmit}
             disabled={isLoading}
           >
-            <Text style={styles.saveButtonText}>✅  Save Reading</Text>
+            <Text style={styles.saveButtonText}>{isLoading ? 'Saving…' : '✅  Save Reading'}</Text>
           </TouchableOpacity>
 
         </ScrollView>
@@ -242,24 +257,56 @@ const styles = StyleSheet.create({
     padding: E.pad,
     margin: 16,
     marginBottom: 0,
+    ...E.shadowSm,
   },
   sectionTitle: {
     ...ET.h3,
     marginBottom: 10,
   },
-  instructionLine: {
+  // Prep steps
+  prepStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  prepStepIcon: {
+    fontSize: 20,
+    marginRight: E.padSm,
+    width: 28,
+    textAlign: 'center',
+  },
+  prepStepText: {
     ...ET.body,
-    marginBottom: 6,
+    flex: 1,
   },
   // Cards
   card: {
-    backgroundColor: E.colors.bg,
+    backgroundColor: E.colors.surface,
     borderRadius: E.radius,
-    borderWidth: 2,
-    borderColor: E.colors.border,
     margin: 16,
     marginBottom: 0,
     padding: E.pad,
+    ...E.shadow,
+  },
+  // BP input row (side-by-side)
+  bpInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+  },
+  bpInputCol: {
+    flex: 1,
+  },
+  bpSlash: {
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 20,
+    paddingTop: 24,
+  },
+  bpSlashText: {
+    fontSize: 40,
+    color: E.colors.textSecondary,
+    fontWeight: '300',
   },
   // Input labels
   inputLabel: {
@@ -283,12 +330,15 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     minHeight: 100,
   },
-  // Live badge
+  // Live badge — row with icon and text
   liveBadge: {
-    height: 64,
-    borderRadius: E.radius,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 56,
+    borderRadius: E.radius,
+    paddingHorizontal: E.padSm,
+    paddingVertical: E.padXs,
     marginTop: 4,
   },
   liveBadgeText: {
@@ -315,6 +365,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     margin: 16,
+    ...E.shadow,
   },
   saveButtonDisabled: {
     opacity: 0.6,
