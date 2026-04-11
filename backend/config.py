@@ -67,8 +67,10 @@ ALLOWED_ORIGINS = [
     "http://192.168.0.104:8081",
     # Render backend
     "https://morafek-api.onrender.com",
-    # Vercel PWA deployments
+    "https://morafek-caremate.onrender.com",  # ← new URL (no hyphen before caremate)
+    "https://morafek-api.onrender.com",  # keep old one too
     "https://morafek.vercel.app",
+    "https://morafek-care-mate.vercel.app",
 ]
 
 
