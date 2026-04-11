@@ -27,7 +27,6 @@ import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { apiClient } from '@/services/api/client';
-import { colors } from '@/constants/theme';
 import { E, ET } from '@/constants/elderlyTheme';
 
 // ─────────────────────────────────────────────────────────────────────────────

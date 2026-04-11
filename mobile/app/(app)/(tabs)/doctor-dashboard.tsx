@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 import { E, ET } from '@/constants/elderlyTheme';
 import { useAuthStore } from '@/store/auth.store';
 import { PatientList, PatientDataView } from '@/components/doctor';

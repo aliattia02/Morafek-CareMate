@@ -6,7 +6,6 @@ import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { useAuth } from '@/hooks/useAuth';
-import { colors, spacing, typography } from '@/constants/theme';
 import { E, ET } from '@/constants/elderlyTheme';
 import { uploadAvatar } from '@/services/api/profile';
 import { getBaseUrl } from '@/services/api/client';
@@ -134,7 +133,7 @@ export default function ProfileScreen() {
             </View>
             {isUploading ? (
               <View style={styles.avatarOverlay}>
-                <ActivityIndicator color={colors.text.inverse} />
+                <ActivityIndicator color={E.colors.textInverse} />
               </View>
             ) : (
               <View style={styles.avatarOverlay}>
