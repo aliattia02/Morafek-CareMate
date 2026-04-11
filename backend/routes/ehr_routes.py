@@ -1445,36 +1445,34 @@ def mark_exercise_done(current_user, exercise_id):
     return jsonify({'message': 'Exercise updated'}), 200
 
 
-# ─── ICD-10-GM AI Suggest (Google Gemini) ────────────────────────────────────
+# ─── ICD-10-GM AI Suggest (google-genai SDK) ────────────────────────────────
 #
 # POST /api/ehr/icd10-suggest
-# Doctors only — sends chief_complaint + diagnosis_hint to Gemini and returns
-# 3-5 ranked ICD-10-GM 2026 codes as structured JSON.
+# Doctors only — sends chief_complaint + diagnosis_hint to Gemini 1.5 Flash
+# and returns 3-5 ranked ICD-10-GM 2026 codes as structured JSON.
 #
-# Free tier: 15 requests/min, 1 500 requests/day, 1M tokens/day — no cost.
+# Free tier: 15 req/min · 1 500 req/day · 1 M tokens/day — zero cost.
 # Requires env var: GEMINI_API_KEY
+# Package: google-genai (already in requirements.txt)
 
 import os as _os
 import json as _json
-import google.generativeai as _genai
+from google import genai as _genai
+from google.genai import types as _genai_types
 
-# Configure once at import time; safe to call even if key is missing
-# (will fail at call time with a clear error, not at startup).
 _GEMINI_API_KEY = _os.environ.get("GEMINI_API_KEY", "")
-if _GEMINI_API_KEY:
-    _genai.configure(api_key=_GEMINI_API_KEY)
+_gemini_client  = _genai.Client(api_key=_GEMINI_API_KEY) if _GEMINI_API_KEY else None
 
-_ICD10_PROMPT_TEMPLATE = """\
-You are a certified medical coder specialising in ICD-10-GM (German Modification).
+_ICD10_PROMPT_TEMPLATE = """You are a certified medical coder specialising in ICD-10-GM (German Modification).
 Given a chief complaint and a diagnosis hint, return the 3-5 most appropriate ICD-10-GM codes.
 
 Respond ONLY with a JSON array (no markdown, no explanation) in this exact schema:
 [
-  {{
+  {
     "code": "I10",
     "description": "Essentielle (primäre) Hypertonie",
     "rationale": "Primäre Hypertonie ohne Organschaden"
-  }}
+  }
 ]
 
 Rules:
@@ -1504,7 +1502,7 @@ def icd10_suggest(current_user):
     if current_user.get('user_type') != 'doctor':
         return jsonify({'error': 'Only doctors can use ICD-10 suggest'}), 403
 
-    if not _GEMINI_API_KEY:
+    if not _gemini_client:
         logger.error("GEMINI_API_KEY is not set — ICD-10 suggest unavailable")
         return jsonify({'error': 'AI service is not configured on this server'}), 503
 
@@ -1521,11 +1519,11 @@ def icd10_suggest(current_user):
     )
 
     try:
-        model    = _genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(
-            prompt,
-            generation_config=_genai.types.GenerationConfig(
-                temperature=0.2,      # low temperature → consistent medical codes
+        response = _gemini_client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+            config=_genai_types.GenerateContentConfig(
+                temperature=0.2,
                 max_output_tokens=512,
             ),
         )
