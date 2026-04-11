@@ -8,6 +8,7 @@ import logging
 from datetime import timezone, timedelta
 from dotenv import load_dotenv
 import os
+import re
 
 # Load environment variables from .env file
 load_dotenv()
@@ -65,13 +66,25 @@ ALLOWED_ORIGINS = [
     "http://192.168.0.104:3000",
     "http://192.168.0.104:5000",
     "http://192.168.0.104:8081",
-    # Render backend
     "https://morafek-api.onrender.com",
-    "https://morafek-caremate.onrender.com",  # ← new URL (no hyphen before caremate)
-    "https://morafek-api.onrender.com",  # keep old one too
+    "https://morafek-caremate.onrender.com",
     "https://morafek.vercel.app",
     "https://morafek-care-mate.vercel.app",
 ]
+
+# Regex patterns to allow ALL Vercel preview deployments for this project
+ALLOWED_ORIGIN_PATTERNS = [
+    re.compile(r"^https://morafek-care-mate.*\.vercel\.app$"),
+    re.compile(r"^https://morafek.*\.vercel\.app$"),
+]
+
+
+def is_origin_allowed(origin: str) -> bool:
+    if not origin:
+        return False
+    if origin in ALLOWED_ORIGINS:
+        return True
+    return any(p.match(origin) for p in ALLOWED_ORIGIN_PATTERNS)
 
 
 def create_app_config(app):
@@ -137,7 +150,7 @@ def create_app_config(app):
     @app.after_request
     def after_request(response):
         origin = request.headers.get('Origin')
-        if origin in ALLOWED_ORIGINS:
+        if origin and is_origin_allowed(origin):
             response.headers['Access-Control-Allow-Origin'] = origin
             response.headers['Access-Control-Allow-Credentials'] = 'true'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
@@ -148,9 +161,10 @@ def create_app_config(app):
     @app.before_request
     def handle_preflight():
         if request.method == "OPTIONS":
-            response = jsonify({"status": "ok"})
             origin = request.headers.get('Origin', 'http://localhost:3000')
-            response.headers['Access-Control-Allow-Origin'] = origin
+            response = jsonify({"status": "ok"})
+            if is_origin_allowed(origin):
+                response.headers['Access-Control-Allow-Origin'] = origin
             response.headers['Access-Control-Allow-Credentials'] = 'true'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, Accept, Origin, X-Requested-With, X-Client-Type'
