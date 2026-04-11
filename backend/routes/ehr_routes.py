@@ -1448,16 +1448,15 @@ def mark_exercise_done(current_user, exercise_id):
 # ─── ICD-10-GM AI Suggest (google-genai SDK) ────────────────────────────────
 #
 # POST /api/ehr/icd10-suggest
-# Doctors only — sends chief_complaint + diagnosis_hint to Gemini 1.5 Flash
+# Doctors only — sends chief_complaint + diagnosis_hint to Gemini 2.0 Flash
 # and returns 3-5 ranked ICD-10-GM 2026 codes as structured JSON.
 #
-# Free tier: 15 req/min · 1 500 req/day · 1 M tokens/day — zero cost.
 # Requires env var: GEMINI_API_KEY
-# Package: google-genai (already in requirements.txt)
+# Package: google-genai>=1.0.0
 
 import os as _os
+import re as _re
 import json as _json
-from google import genai as _genai
 
 _GEMINI_API_KEY = _os.environ.get("GEMINI_API_KEY", "")
 
@@ -1466,11 +1465,11 @@ Given a chief complaint and a diagnosis hint, return the 3-5 most appropriate IC
 
 Respond ONLY with a JSON array (no markdown, no explanation) in this exact schema:
 [
-  {
+  {{
     "code": "I10",
     "description": "Essentielle (primäre) Hypertonie",
     "rationale": "Primäre Hypertonie ohne Organschaden"
-  }
+  }}
 ]
 
 Rules:
@@ -1482,6 +1481,14 @@ Rules:
 Leitsymptom: {chief_complaint}
 Diagnosehinweis: {diagnosis_hint}
 """
+
+
+def _strip_markdown_fences(text: str) -> str:
+    """Remove ```json ... ``` or ``` ... ``` wrappers Gemini sometimes adds."""
+    match = _re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
 
 @ehr_routes.route('/api/ehr/icd10-suggest', methods=['POST'])
@@ -1517,22 +1524,34 @@ def icd10_suggest(current_user):
     )
 
     try:
-        _client  = _genai.Client(api_key=_GEMINI_API_KEY)
-        response = _client.models.generate_content(
-            model="gemini-1.5-flash",
+        # Imported here so a missing package gives a clean 503
+        # rather than crashing the entire blueprint at startup.
+        from google import genai as _genai  # noqa: PLC0415
+
+        client   = _genai.Client(api_key=_GEMINI_API_KEY)
+        response = client.models.generate_content(
+            # gemini-1.5-flash is deprecated — 2.0-flash is the current default
+            model="gemini-2.0-flash",
             contents=prompt,
         )
-        raw = response.text.strip()
+
+        # FIX: response.text can be None when Gemini blocks output via safety
+        # filters. Calling .strip() on None raises AttributeError which was the
+        # root cause of the 500 — it leaked past this try block in the old code.
+        raw = response.text
+        if not raw:
+            raise ValueError("Gemini returned an empty/blocked response")
+        raw = raw.strip()
+
+    except ImportError:
+        logger.error("google-genai package is not installed")
+        return jsonify({'error': 'AI service is not configured on this server'}), 503
     except Exception as e:
         logger.error("Gemini API error in icd10_suggest: %s", e)
         return jsonify({'error': 'AI service temporarily unavailable'}), 502
 
-    # Strip accidental markdown fences Gemini sometimes adds
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-    raw = raw.strip()
+    # Strip markdown fences Gemini sometimes wraps its output in
+    raw = _strip_markdown_fences(raw)
 
     try:
         suggestions = _json.loads(raw)
@@ -1541,13 +1560,25 @@ def icd10_suggest(current_user):
         return jsonify({'error': 'AI returned an unexpected response format'}), 502
 
     if not isinstance(suggestions, list):
+        logger.error("Gemini ICD-10 response is not a list: %s", raw)
         return jsonify({'error': 'AI returned an unexpected response format'}), 502
+
+    # Sanitise — keep only the expected keys, skip malformed entries
+    clean = [
+        {
+            'code':        str(item['code']).strip(),
+            'description': str(item['description']).strip(),
+            'rationale':   str(item.get('rationale', '')).strip() or None,
+        }
+        for item in suggestions
+        if isinstance(item, dict) and item.get('code') and item.get('description')
+    ]
 
     logger.info(
         "ICD-10 suggest: %d codes returned for doctor %s",
-        len(suggestions), str(current_user['_id'])
+        len(clean), str(current_user['_id'])
     )
-    return jsonify({"suggestions": suggestions}), 200
+    return jsonify({"suggestions": clean}), 200
 
 
 # ─── FHIR R4 Bundle Export ────────────────────────────────────────────────────
