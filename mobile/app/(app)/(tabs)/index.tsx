@@ -114,7 +114,8 @@ export default function PatientHomeScreen() {
           onPress={() => Linking.openURL('tel:112')}
           accessibilityLabel="SOS emergency call"
         >
-          <Text style={styles.sosText}>🆘 SOS</Text>
+          <Text style={styles.sosIcon}>🆘</Text>
+          <Text style={styles.sosText}>SOS</Text>
         </TouchableOpacity>
       </View>
 
@@ -145,6 +146,7 @@ export default function PatientHomeScreen() {
 
         {/* ── BLOOD PRESSURE CARD ── */}
         <View style={styles.card}>
+          <View style={styles.cardTopAccent} />
           {/* Row 1: title + timestamp */}
           <View style={styles.cardHeader}>
             <Text style={styles.cardTitle}>💓 Blood Pressure</Text>
@@ -163,6 +165,7 @@ export default function PatientHomeScreen() {
                   <Text style={styles.bpDisplay}>{vital.systolic}/{vital.diastolic}</Text>
                   <Text style={styles.bpUnit}>mmHg</Text>
                 </View>
+                <View style={styles.bpDivider} />
                 <View style={styles.bpRight}>
                   <Text style={styles.bpPulse}>{vital.pulse}</Text>
                   <Text style={styles.bpUnit}>/min</Text>
@@ -227,21 +230,21 @@ export default function PatientHomeScreen() {
         </View>
 
         {/* ── ACTION TILES ── */}
-        <View style={styles.tilesContainer}>
+        <View style={styles.tilesGrid}>
           {[
-            { icon: '📋', title: 'My Visits',    route: '/(app)/ehr/visits'    },
-            { icon: '💬', title: 'Messages',     route: '/(app)/ehr/messages'  },
-            { icon: '📁', title: 'My Documents', route: '/(app)/ehr/documents' },
-            { icon: '🏋️', title: 'My Exercises', route: '/(app)/ehr/exercises' },
+            { icon: '📋', title: 'My Visits',    sub: 'History',   route: '/(app)/ehr/visits',    color: '#E6F4F6', accent: E.colors.primary   },
+            { icon: '💬', title: 'Messages',     sub: 'Chat',      route: '/(app)/ehr/messages',  color: '#FEF3DC', accent: E.colors.accent     },
+            { icon: '📁', title: 'My Documents', sub: 'Files',     route: '/(app)/ehr/documents', color: '#E6F5EE', accent: E.colors.success    },
+            { icon: '🏋️', title: 'My Exercises', sub: 'Workouts',  route: '/(app)/ehr/exercises', color: '#F0F4F5', accent: E.colors.textSecondary },
           ].map((tile) => (
             <TouchableOpacity
               key={tile.route}
-              style={styles.tile}
+              style={[styles.tile, { backgroundColor: tile.color }]}
               onPress={() => router.push(tile.route as any)}
             >
               <Text style={styles.tileIcon}>{tile.icon}</Text>
               <Text style={styles.tileTitle}>{tile.title}</Text>
-              <Text style={styles.tileChevron}>›</Text>
+              <Text style={[styles.tileSub, { color: tile.accent }]}>{tile.sub}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -290,14 +293,18 @@ const styles = StyleSheet.create({
   sosButton: {
     width: 64,
     height: 64,
-    borderRadius: 32,
+    borderRadius: E.radiusFull,
     backgroundColor: E.colors.danger,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  sosIcon: {
+    fontSize: 22,
+  },
   sosText: {
-    ...ET.bodyBold,
+    ...ET.caption,
     color: E.colors.textInverse,
+    fontWeight: '700',
   },
   // Scroll
   container: {
@@ -330,18 +337,23 @@ const styles = StyleSheet.create({
   },
   // Cards
   card: {
-    backgroundColor: E.colors.bg,
+    backgroundColor: E.colors.surface,
     borderRadius: E.radius,
     margin: 16,
-    padding: E.pad,
-    borderWidth: 2,
-    borderColor: E.colors.border,
+    overflow: 'hidden',
+    ...E.shadow,
+  },
+  cardTopAccent: {
+    height: 4,
+    backgroundColor: E.colors.primary,
   },
   cardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
+    paddingHorizontal: E.pad,
+    paddingTop: E.padSm,
   },
   cardTitle: {
     ...ET.h3,
@@ -353,13 +365,22 @@ const styles = StyleSheet.create({
   bpRow: {
     flexDirection: 'row',
     marginBottom: 12,
+    paddingHorizontal: E.pad,
+    alignItems: 'center',
   },
   bpLeft: {
     flex: 1,
   },
+  bpDivider: {
+    width: 1,
+    height: 60,
+    backgroundColor: E.colors.border,
+    marginHorizontal: E.padSm,
+  },
   bpRight: {
     flex: 1,
     alignItems: 'flex-start',
+    paddingLeft: E.padSm,
   },
   bpDisplay: {
     ...ET.display,
@@ -373,10 +394,11 @@ const styles = StyleSheet.create({
   // Status badge
   statusBadge: {
     height: 56,
-    borderRadius: E.radius,
+    borderRadius: E.radiusSm,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
+    marginHorizontal: E.pad,
   },
   statusBadgeText: {
     ...ET.bodyBold,
@@ -385,9 +407,12 @@ const styles = StyleSheet.create({
   primaryButton: {
     height: E.tapXL,
     backgroundColor: E.colors.primary,
-    borderRadius: E.radius,
+    borderRadius: 0,
+    borderBottomLeftRadius: E.radius,
+    borderBottomRightRadius: E.radius,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 4,
   },
   primaryButtonText: {
     ...ET.btnPrimary,
@@ -396,46 +421,52 @@ const styles = StyleSheet.create({
   visitDate: {
     ...ET.bodyBold,
     marginBottom: 4,
+    paddingHorizontal: E.pad,
   },
   visitDiagnosis: {
     ...ET.body,
+    paddingHorizontal: E.pad,
+    paddingBottom: E.padSm,
   },
   // Empty states
   emptyText: {
     ...ET.body,
     textAlign: 'center',
     marginBottom: 12,
+    paddingHorizontal: E.pad,
   },
   emptyTextSecondary: {
     ...ET.body,
     color: E.colors.textSecondary,
+    paddingHorizontal: E.pad,
+    paddingBottom: E.padSm,
   },
-  // Action tiles
-  tilesContainer: {
+  // Action tiles — 2-column grid
+  tilesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     marginHorizontal: 16,
+    gap: 12,
   },
   tile: {
-    height: E.tap,
-    backgroundColor: E.colors.surfaceAlt,
+    width: '47%',
+    minHeight: E.tap,
     borderRadius: E.radius,
-    borderWidth: 1,
-    borderColor: E.colors.border,
-    marginBottom: 12,
-    paddingHorizontal: E.pad,
-    flexDirection: 'row',
-    alignItems: 'center',
+    padding: E.padSm,
+    justifyContent: 'center',
+    ...E.shadowSm,
   },
   tileIcon: {
     fontSize: 28,
-    marginRight: 12,
+    marginBottom: 6,
   },
   tileTitle: {
     ...ET.bodyBold,
-    flex: 1,
+    marginBottom: 2,
   },
-  tileChevron: {
-    ...ET.h2,
-    color: E.colors.textSecondary,
+  tileSub: {
+    ...ET.small,
+    fontWeight: '600',
   },
   // Sensors card
   sensorsCard: {
