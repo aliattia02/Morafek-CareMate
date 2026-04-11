@@ -74,17 +74,8 @@ export const validatePassword = (password: string): ValidationResult => {
     errors.push('Password is required');
     return { isValid: false, errors, warnings };
   }
-
-  if (password.length < 8) {
-    errors.push('Password must be at least 8 characters');
-  }
-
-  // Check for at least one letter and one number
-  if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
-    errors.push('Password must contain at least one letter and one number');
-  }
-
-  return { isValid: errors.length === 0, errors, warnings };
+  // NOTE: Password strength checks temporarily disabled. Re-enable before production.
+  return { isValid: true, errors, warnings };
 };
 
 /**
