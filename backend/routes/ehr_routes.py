@@ -1458,10 +1458,8 @@ def mark_exercise_done(current_user, exercise_id):
 import os as _os
 import json as _json
 from google import genai as _genai
-from google.genai import types as _genai_types
 
 _GEMINI_API_KEY = _os.environ.get("GEMINI_API_KEY", "")
-_gemini_client  = _genai.Client(api_key=_GEMINI_API_KEY) if _GEMINI_API_KEY else None
 
 _ICD10_PROMPT_TEMPLATE = """You are a certified medical coder specialising in ICD-10-GM (German Modification).
 Given a chief complaint and a diagnosis hint, return the 3-5 most appropriate ICD-10-GM codes.
@@ -1502,7 +1500,7 @@ def icd10_suggest(current_user):
     if current_user.get('user_type') != 'doctor':
         return jsonify({'error': 'Only doctors can use ICD-10 suggest'}), 403
 
-    if not _gemini_client:
+    if not _GEMINI_API_KEY:
         logger.error("GEMINI_API_KEY is not set — ICD-10 suggest unavailable")
         return jsonify({'error': 'AI service is not configured on this server'}), 503
 
@@ -1519,13 +1517,10 @@ def icd10_suggest(current_user):
     )
 
     try:
-        response = _gemini_client.models.generate_content(
+        _client  = _genai.Client(api_key=_GEMINI_API_KEY)
+        response = _client.models.generate_content(
             model="gemini-1.5-flash",
             contents=prompt,
-            config=_genai_types.GenerateContentConfig(
-                temperature=0.2,
-                max_output_tokens=512,
-            ),
         )
         raw = response.text.strip()
     except Exception as e:

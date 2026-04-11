@@ -15,7 +15,7 @@
  *   logic, web-compatible success/error banners) is unchanged.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -55,9 +55,14 @@ export default function VisitFormScreen() {
   const [successMsg,     setSuccessMsg]     = useState<string | null>(null);
   const [submitError,    setSubmitError]    = useState<string | null>(null);
 
-  // Redirect non-doctors to home
+  // Redirect non-doctors to home (must be in useEffect — cannot navigate during render)
+  useEffect(() => {
+    if (user?.user_type !== 'doctor') {
+      router.replace('/');
+    }
+  }, [user?.user_type]);
+
   if (user?.user_type !== 'doctor') {
-    router.replace('/');
     return null;
   }
 
