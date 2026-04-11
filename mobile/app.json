@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "DiaTwin",
-    "slug": "diatwin",
+    "name": "Morafek",
+    "slug": "Morafek",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "scheme": "diatwin",
+    "scheme": "Morafek",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "splash": {
