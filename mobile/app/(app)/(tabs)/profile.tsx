@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Image, ActivityIndicator } from 'react-native';
+import {
+  View, Text, StyleSheet, ScrollView, TouchableOpacity,
+  Alert, Platform, Image, ActivityIndicator, Modal, TextInput,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -9,6 +12,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { E, ET } from '@/constants/elderlyTheme';
 import { uploadAvatar } from '@/services/api/profile';
 import { getBaseUrl } from '@/services/api/client';
+import apiClient from '@/services/api/client';
 
 const showAlert = (title: string, message: string) => {
   if (Platform.OS === 'web') { window.alert(`${title}\n\n${message}`); }
@@ -21,6 +25,40 @@ export default function ProfileScreen() {
   const isDoctor = user?.user_type === 'doctor' || user?.user_type === 'admin';
   const [isUploading, setIsUploading] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+
+  // ── DSGVO delete-account modal ────────────────────────────────────────────
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword]   = useState('');
+  const [deleteError, setDeleteError]         = useState('');
+  const [isDeleting, setIsDeleting]           = useState(false);
+
+  const openDeleteModal = () => {
+    setDeletePassword('');
+    setDeleteError('');
+    setShowDeleteModal(true);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletePassword) {
+      setDeleteError('Please enter your password to confirm.');
+      return;
+    }
+    setIsDeleting(true);
+    setDeleteError('');
+    try {
+      await apiClient.delete('/api/auth/delete-account', {
+        data: { password: deletePassword },
+      });
+      setShowDeleteModal(false);
+      // Log out and clear all local state — server has wiped everything
+      logout();
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Deletion failed. Try again.';
+      setDeleteError(msg);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleFhirExport = async () => {
     setIsExporting(true);
@@ -280,10 +318,98 @@ export default function ProfileScreen() {
             </View>
             <Text style={[styles.arrow, { color: E.colors.danger }]}>›</Text>
           </TouchableOpacity>
+          <View style={styles.divider} />
+          <TouchableOpacity style={styles.link} onPress={openDeleteModal}>
+            <View style={[styles.linkIconWrap, styles.linkIconWrapDestructive]}>
+              <Text style={styles.linkIcon}>🗑️</Text>
+            </View>
+            <View style={styles.linkBody}>
+              <Text style={[styles.linkTitle, { color: E.colors.danger }]}>Delete My Data</Text>
+              <Text style={styles.linkSub}>DSGVO Art. 17 — permanent erasure</Text>
+            </View>
+            <Text style={[styles.arrow, { color: E.colors.danger }]}>›</Text>
+          </TouchableOpacity>
         </View>
 
         <Text style={styles.version}>Morafek v1.0.0</Text>
       </ScrollView>
+
+      {/* ── DSGVO Delete Account Modal ──────────────────────────────────── */}
+      <Modal
+        visible={showDeleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !isDeleting && setShowDeleteModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <View style={styles.modalIconWrap}>
+                <Text style={styles.modalIcon}>🗑️</Text>
+              </View>
+              <Text style={styles.modalTitle}>Delete All My Data</Text>
+              <Text style={styles.modalSubtitle}>
+                DSGVO Art. 17 — Right to Erasure
+              </Text>
+            </View>
+
+            {/* Warning */}
+            <View style={styles.warningBox}>
+              <Text style={styles.warningTitle}>⚠️  This cannot be undone</Text>
+              <Text style={styles.warningBody}>
+                The following will be permanently deleted:{'\n'}
+                {'  '}• Your account &amp; login credentials{'\n'}
+                {'  '}• All blood pressure readings{'\n'}
+                {'  '}• All visit records{'\n'}
+                {'  '}• All uploaded documents{'\n'}
+                {'  '}• Your medical profile{'\n'}
+                {'  '}• All exercise plans
+              </Text>
+            </View>
+
+            {/* Password confirmation */}
+            <Text style={styles.confirmLabel}>CONFIRM WITH YOUR PASSWORD</Text>
+            <TextInput
+              style={[styles.confirmInput, deleteError ? styles.confirmInputError : null]}
+              value={deletePassword}
+              onChangeText={(v) => { setDeletePassword(v); setDeleteError(''); }}
+              placeholder="Enter your password"
+              placeholderTextColor={E.colors.textMuted}
+              secureTextEntry
+              editable={!isDeleting}
+              autoCapitalize="none"
+            />
+            {deleteError ? (
+              <Text style={styles.deleteErrorText}>{deleteError}</Text>
+            ) : null}
+
+            {/* Actions */}
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setShowDeleteModal(false)}
+                disabled={isDeleting}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.deleteBtn, isDeleting && styles.deleteBtnDisabled]}
+                onPress={handleDeleteAccount}
+                disabled={isDeleting}
+              >
+                {isDeleting
+                  ? <ActivityIndicator color="#fff" size="small" />
+                  : <Text style={styles.deleteBtnText}>Delete Everything</Text>
+                }
+              </TouchableOpacity>
+            </View>
+
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -367,4 +493,123 @@ const styles = StyleSheet.create({
   arrow:     { fontSize: 24, color: E.colors.textSecondary },
   divider:   { height: 1, backgroundColor: E.colors.divider, marginLeft: 60 },
   version:   { ...ET.small, textAlign: 'center', marginTop: E.pad, marginBottom: E.padSm },
+
+  // ── DSGVO Delete modal ────────────────────────────────────────────────────
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(10,20,22,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: E.pad,
+  },
+  modalCard: {
+    backgroundColor: E.colors.surface,
+    borderRadius: E.radius,
+    padding: E.pad,
+    width: '100%',
+    maxWidth: 420,
+    ...E.shadow,
+  },
+  modalHeader: {
+    alignItems: 'center',
+    marginBottom: E.padSm,
+  },
+  modalIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: E.radiusFull,
+    backgroundColor: E.colors.dangerLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: E.padSm,
+  },
+  modalIcon: { fontSize: 24 },
+  modalTitle: {
+    ...ET.h2,
+    color: E.colors.danger,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    ...ET.small,
+    color: E.colors.textSecondary,
+    textAlign: 'center',
+  },
+  warningBox: {
+    backgroundColor: E.colors.dangerLight,
+    borderRadius: E.radiusSm,
+    borderLeftWidth: 4,
+    borderLeftColor: E.colors.danger,
+    padding: E.padSm,
+    marginTop: E.padSm,
+    marginBottom: E.pad,
+  },
+  warningTitle: {
+    ...ET.bodyBold,
+    color: E.colors.danger,
+    marginBottom: 6,
+  },
+  warningBody: {
+    ...ET.small,
+    color: E.colors.danger,
+    lineHeight: 20,
+  },
+  confirmLabel: {
+    ...ET.label,
+    marginBottom: 6,
+  },
+  confirmInput: {
+    height: 52,
+    borderRadius: E.radiusSm,
+    borderWidth: 1.5,
+    borderColor: E.colors.border,
+    backgroundColor: E.colors.bg,
+    paddingHorizontal: E.padSm,
+    ...ET.body,
+    color: E.colors.textPrimary,
+  },
+  confirmInputError: {
+    borderColor: E.colors.danger,
+    backgroundColor: E.colors.dangerLight,
+  },
+  deleteErrorText: {
+    ...ET.caption,
+    color: E.colors.danger,
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: E.padSm,
+    marginTop: E.pad,
+  },
+  cancelBtn: {
+    flex: 1,
+    height: E.tap,
+    borderRadius: E.radiusSm,
+    borderWidth: 1.5,
+    borderColor: E.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: E.colors.surface,
+  },
+  cancelBtnText: {
+    ...ET.bodyBold,
+    color: E.colors.textSecondary,
+  },
+  deleteBtn: {
+    flex: 2,
+    height: E.tap,
+    borderRadius: E.radiusSm,
+    backgroundColor: E.colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteBtnDisabled: {
+    opacity: 0.6,
+  },
+  deleteBtnText: {
+    ...ET.bodyBold,
+    color: '#fff',
+  },
 });

@@ -393,3 +393,82 @@ def reset_password():
     except Exception as e:
         current_app.logger.error(f"Reset-password error: {str(e)}")
         return jsonify({"error": "Request failed"}), 500
+
+# ─── DSGVO Art. 17 — Right to Erasure ────────────────────────────────────────
+
+@auth_routes.route('/api/auth/delete-account', methods=['DELETE'])
+@token_required
+def delete_account(current_user):
+    """
+    DELETE /api/auth/delete-account
+    DSGVO Art. 17 — Right to Erasure ("Right to be Forgotten").
+
+    Body:   { "password": "<current_password>" }
+
+    Wipes:
+      patient  → vitals, visits, documents, exercises, medical_profiles,
+                 removes from doctors' authorized_doctors lists
+      doctor   → removes from clinic doctor lists and patients' authorized_doctors lists
+      both     → user document itself
+
+    Returns 200 so the client can immediately log out and clear local state.
+    """
+    try:
+        logger = current_app.logger
+        db     = current_app.mongo.db
+
+        data = request.get_json()
+        if not data or not data.get('password'):
+            return jsonify({"error": "Password confirmation is required"}), 400
+
+        # Re-authenticate before any deletion
+        user = db.users.find_one({"_id": current_user['_id']})
+        if not user or not check_password_hash(user['password'], data['password']):
+            logger.warning(f"delete-account: wrong password for user {current_user['_id']}")
+            return jsonify({"error": "Incorrect password"}), 401
+
+        user_id     = current_user['_id']   # ObjectId
+        user_id_str = str(user_id)
+        user_type   = user.get('user_type', '')
+        deleted     = {}
+
+        # ── Patient-owned collections ─────────────────────────────────────
+        if user_type == 'patient':
+            for col in ('vitals', 'visits', 'documents', 'exercises', 'medical_profiles'):
+                res = getattr(db, col).delete_many({"patient_id": user_id_str})
+                deleted[col] = res.deleted_count
+
+            # Scrub this patient from every doctor's authorized_doctors list
+            db.users.update_many(
+                {"authorized_doctors": user_id_str},
+                {"$pull": {"authorized_doctors": user_id_str}},
+            )
+
+        # ── Doctor-owned relations ────────────────────────────────────────
+        if user_type == 'doctor':
+            db.clinics.update_many(
+                {"doctors": user_id_str},
+                {"$pull": {"doctors": user_id_str}},
+            )
+            db.users.update_many(
+                {"authorized_doctors": user_id_str},
+                {"$pull": {"authorized_doctors": user_id_str}},
+            )
+            deleted['clinic_memberships_removed'] = True
+
+        # ── Delete the user document itself ───────────────────────────────
+        db.users.delete_one({"_id": user_id})
+        deleted['user'] = 1
+
+        logger.info(
+            f"DSGVO erasure complete | user={user_id_str} type={user_type} | {deleted}"
+        )
+
+        return jsonify({
+            "message": "Your account and all personal data have been permanently deleted.",
+            "deleted": deleted,
+        }), 200
+
+    except Exception as e:
+        current_app.logger.error(f"delete-account error: {str(e)}")
+        return jsonify({"error": "Account deletion failed. Please try again."}), 500
