@@ -1,14 +1,6 @@
 /**
  * Login Screen — Redesigned
  * Location: mobile/app/(auth)/login.tsx
- *
- * Redesign changes:
- * - Role selector (Patient / Doctor) promoted to hero section as large tab chips
- * - Split layout: teal hero header → white form body → trust bar footer
- * - Larger, more accessible inputs (52px height, clear labels)
- * - Contextual welcome copy that updates per role
- * - Trust bar (DSGVO / Encrypted / FHIR R4) for medical context
- * - Pulse-line SVG decoration in hero for EHR identity
  */
 
 import React, { useState, useRef } from 'react';
@@ -21,13 +13,9 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Svg,
-  Polyline,
-  Path,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LinearGradient } from 'expo-linear-gradient';
 
 import { Button, Input, Card } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
@@ -112,11 +100,11 @@ export default function LoginScreen() {
   const router = useRouter();
   const { login, isLoading, isWakingUp, wakeProgress, error, clearError } = useAuth();
 
-  const [username,         setUsername]        = useState('');
-  const [password,         setPassword]        = useState('');
-  const [userType,         setUserType]        = useState<UserType>('patient');
-  const [showPassword,     setShowPassword]    = useState(false);
-  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
+  const [username,          setUsername]         = useState('');
+  const [password,          setPassword]         = useState('');
+  const [userType,          setUserType]         = useState<UserType>('patient');
+  const [showPassword,      setShowPassword]     = useState(false);
+  const [validationErrors,  setValidationErrors] = useState<Record<string, string>>({});
   const passwordRef = useRef<any>(null);
 
   const busy = isLoading || isWakingUp;
@@ -149,8 +137,8 @@ export default function LoginScreen() {
     }
   };
 
-  const welcomeLine  = userType === 'doctor' ? ' Welcome, Doctor'     : ' Welcome back';
-  const welcomeSub   = userType === 'doctor' ? ' Sign in to your doctor account' : ' Sign in to your patient account';
+  const welcomeLine = userType === 'doctor' ? ' Welcome, Doctor'              : ' Welcome back';
+  const welcomeSub  = userType === 'doctor' ? ' Sign in to your doctor account' : ' Sign in to your patient account';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -167,8 +155,6 @@ export default function LoginScreen() {
           <View style={styles.hero}>
             {/* Pulse line decoration */}
             <View style={styles.pulseDecoration} pointerEvents="none">
-              {/* Rendered as a simple decorative strip — replace with react-native-svg
-                  <Svg> if your project already uses it */}
               <View style={styles.pulseLine} />
             </View>
 
@@ -219,45 +205,54 @@ export default function LoginScreen() {
             <Text style={styles.welcomeLine}>{welcomeLine}</Text>
             <Text style={styles.welcomeSub}>{welcomeSub}</Text>
 
-            <Input
-              label="UserName"
-              value={username}
-              onChangeText={(text) => {
-                setUsername(text);
-                setValidationErrors((p) => ({ ...p, username: '' }));
-              }}
-              placeholder=" Enter your username"
-              autoCapitalize="none"
-              autoCorrect={false}
-              error={validationErrors.username}
-              editable={!busy}
-              returnKeyType="next"
-              onSubmitEditing={() => passwordRef.current?.focus()}
-              blurOnSubmit={false}
-              style={styles.inputOverride}
-            />
+            {/* ── Username ── */}
+            <View style={styles.fieldWrapper}>
+              <Text style={styles.fieldLabel}>UserName</Text>
+              <View style={[styles.inputBox, validationErrors.username ? styles.inputBoxError : null]}>
+                <input
+                  style={webInputStyle}
+                  value={username}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    setValidationErrors((p) => ({ ...p, username: '' }));
+                  }}
+                  placeholder="Enter your username"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  disabled={busy}
+                  onKeyDown={(e) => e.key === 'Enter' && passwordRef.current?.focus()}
+                />
+              </View>
+              {validationErrors.username ? (
+                <Text style={styles.fieldError}>{validationErrors.username}</Text>
+              ) : null}
+            </View>
 
-            <Input
-              ref={passwordRef}
-              label="Password"
-              value={password}
-              onChangeText={(text) => {
-                setPassword(text);
-                setValidationErrors((p) => ({ ...p, password: '' }));
-              }}
-              placeholder=" Enter your password"
-              secureTextEntry={!showPassword}
-              autoCapitalize="none"
-              error={validationErrors.password}
-              editable={!busy}
-              returnKeyType="done"
-              onSubmitEditing={handleLogin}
-              rightIcon={
-                <Text style={styles.showPasswordText}>{showPassword ? 'Hide' : 'Show'}</Text>
-              }
-              onRightIconPress={() => setShowPassword(!showPassword)}
-              style={styles.inputOverride}
-            />
+            {/* ── Password ── */}
+            <View style={styles.fieldWrapper}>
+              <Text style={styles.fieldLabel}>Password</Text>
+              <View style={[styles.inputBox, validationErrors.password ? styles.inputBoxError : null, styles.inputBoxRow]}>
+                <input
+                  ref={passwordRef}
+                  style={{ ...webInputStyle, flex: 1 }}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setValidationErrors((p) => ({ ...p, password: '' }));
+                  }}
+                  placeholder="Enter your password"
+                  type={showPassword ? 'text' : 'password'}
+                  disabled={busy}
+                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.showBtn}>
+                  <Text style={styles.showPasswordText}>{showPassword ? 'Hide' : 'Show'}</Text>
+                </TouchableOpacity>
+              </View>
+              {validationErrors.password ? (
+                <Text style={styles.fieldError}>{validationErrors.password}</Text>
+              ) : null}
+            </View>
 
             {/* Forgot password */}
             <View style={styles.forgotRow}>
@@ -316,9 +311,9 @@ export default function LoginScreen() {
 
           {/* ── TRUST BAR ────────────────────────────────────────────────── */}
           <View style={styles.trustBar}>
-            <TrustItem color={E.colors.success}  label="DSGVO compliant" />
-            <TrustItem color={E.colors.primary}   label="End-to-end encrypted" />
-            <TrustItem color={E.colors.accent}    label="FHIR R4" />
+            <TrustItem color={E.colors.success} label="DSGVO compliant" />
+            <TrustItem color={E.colors.primary}  label="End-to-end encrypted" />
+            <TrustItem color={E.colors.accent}   label="FHIR R4" />
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -326,12 +321,28 @@ export default function LoginScreen() {
   );
 }
 
+// ─── Web-native input style (plain JS object, not StyleSheet) ─────────────────
+// Using a raw <input> guarantees full-width on web regardless of how the
+// custom Input wrapper component handles its internal layout.
+const webInputStyle: React.CSSProperties = {
+  width: '100%',
+  height: 52,
+  border: 'none',
+  outline: 'none',
+  background: 'transparent',
+  fontSize: 16,
+  color: '#1a1a1a',
+  fontFamily: 'inherit',
+  padding: '0 12px',
+  boxSizing: 'border-box',
+};
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  safe:        { flex: 1, backgroundColor: E.colors.primary },
+  safe:         { flex: 1, backgroundColor: E.colors.primary },
   keyboardView: { flex: 1 },
-  scroll:      { flexGrow: 1 },
+  scroll:       { flexGrow: 1 },
 
   // ── Hero
   hero: {
@@ -351,13 +362,11 @@ const styles = StyleSheet.create({
     height: 50,
   },
   pulseLine: {
-    // Placeholder — swap in a react-native-svg <Polyline> for a real ECG line
     width: '100%',
     height: 2,
     backgroundColor: '#fff',
     marginTop: 24,
   },
-
   secureBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -382,7 +391,6 @@ const styles = StyleSheet.create({
     color: E.colors.primaryLight,
     fontWeight: '500',
   },
-
   logoRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
   logoIcon: {
     width: 36,
@@ -407,8 +415,6 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     marginBottom: E.pad,
   },
-
-  // Role chips
   roleChips: {
     flexDirection: 'row',
     gap: 10,
@@ -432,12 +438,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     borderTopColor: E.colors.accent,
   },
-  roleChipIcon:  { fontSize: 20, marginBottom: 4 },
-  roleChipLabel: { fontSize: 13, fontWeight: '600' },
+  roleChipIcon:          { fontSize: 20, marginBottom: 4 },
+  roleChipLabel:         { fontSize: 13, fontWeight: '600' },
   roleChipLabelActive:   { color: E.colors.primary },
   roleChipLabelInactive: { color: 'rgba(255,255,255,0.75)' },
-
-  // Wave edge between hero and form
   heroWave: {
     height: 24,
     backgroundColor: '#fff',
@@ -451,20 +455,53 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingHorizontal: 24,
     paddingTop: 4,
+    // Ensure the form always fills the full width of the scroll container
+    alignSelf: 'stretch',
+    width: '100%',
   },
-  welcomeLine: {
-    ...ET.h2,
-    marginBottom: 2,
-  },
-  welcomeSub: {
-    ...ET.body,
-    color: E.colors.textSecondary,
-    marginBottom: E.pad,
-  },
-  inputOverride: {
-    // Pass to Input's containerStyle if your component supports it
+  welcomeLine: { ...ET.h2, marginBottom: 2 },
+  welcomeSub:  { ...ET.body, color: E.colors.textSecondary, marginBottom: E.pad },
+
+  // ── Full-width field wrappers (replace the custom Input component on web)
+  fieldWrapper: {
+    width: '100%',
     marginBottom: E.padSm,
   },
+  fieldLabel: {
+    ...ET.label,
+    marginBottom: 6,
+    color: E.colors.textSecondary,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  inputBox: {
+    width: '100%',
+    height: 52,
+    borderRadius: E.radiusSm,
+    borderWidth: 1.5,
+    borderColor: E.colors.border,
+    backgroundColor: E.colors.bg,
+    overflow: 'hidden',
+  },
+  inputBoxError: {
+    borderColor: E.colors.danger,
+    backgroundColor: E.colors.dangerLight,
+  },
+  inputBoxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  showBtn: {
+    paddingHorizontal: 12,
+    height: '100%',
+    justifyContent: 'center',
+  },
+  fieldError: {
+    ...ET.caption,
+    color: E.colors.danger,
+    marginTop: 4,
+  },
+
   forgotRow: {
     alignItems: 'flex-end',
     marginBottom: E.padSm,
@@ -475,7 +512,6 @@ const styles = StyleSheet.create({
     color: E.colors.primary,
     fontWeight: '500',
   },
-
   showPasswordText: {
     ...ET.caption,
     color: E.colors.primary,
@@ -493,7 +529,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Sign In button — large, accessible
+  // Sign In button
   signInBtn: {
     height: E.tapXL,
     backgroundColor: E.colors.primary,
@@ -503,20 +539,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     marginBottom: E.pad,
+    width: '100%',
   },
-  signInBtnDisabled: {
-    opacity: 0.65,
-  },
-  signInBtnText: {
-    ...ET.btnPrimary,
-  },
-  signInArrow: {
-    fontSize: 20,
-    color: '#fff',
-    fontWeight: '700',
-  },
+  signInBtnDisabled: { opacity: 0.65 },
+  signInBtnText:     { ...ET.btnPrimary },
+  signInArrow:       { fontSize: 20, color: '#fff', fontWeight: '700' },
 
-  // Divider
   dividerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -526,7 +554,6 @@ const styles = StyleSheet.create({
   dividerLine: { flex: 1, height: 1, backgroundColor: E.colors.divider },
   dividerText: { ...ET.caption, fontWeight: '500' },
 
-  // Register
   registerRow: {
     flexDirection: 'row',
     justifyContent: 'center',

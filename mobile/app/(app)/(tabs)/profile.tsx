@@ -50,8 +50,25 @@ export default function ProfileScreen() {
         data: { password: deletePassword },
       });
       setShowDeleteModal(false);
-      // Log out and clear all local state — server has wiped everything
+      // Clear all local auth state — server has wiped everything
       logout();
+
+      // Hard-redirect on web: router.replace races with React re-render after
+      // logout() clears auth state, leaving the spinner frozen. A full page
+      // reload via window.location.href sidesteps React entirely; the root
+      // layout then redirects to login because the token is already gone.
+      if (Platform.OS === 'web') {
+        window.alert(
+          'Account deleted\n\nYour account and all associated data have been permanently erased.',
+        );
+        window.location.href = '/';
+      } else {
+        Alert.alert(
+          'Account deleted',
+          'Your account and all associated data have been permanently erased.',
+          [{ text: 'OK', onPress: () => router.replace('/(auth)/login') }],
+        );
+      }
     } catch (err: any) {
       const msg = err?.response?.data?.error || err?.message || 'Deletion failed. Try again.';
       setDeleteError(msg);

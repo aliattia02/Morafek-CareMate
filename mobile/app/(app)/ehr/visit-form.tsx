@@ -2,17 +2,17 @@
  * Visit Form Screen (Doctor only)
  * Location: mobile/app/(app)/ehr/visit-form.tsx
  *
- * Allows a doctor to record a patient visit with chief complaint,
- * ICD-10-GM code (optional), diagnosis, visit date, and notes.
+ * Changes vs. previous version
+ * ─────────────────────────────
+ * • Replaced the plain "ICD-10-GM Code" TextInput with the new
+ *   <ICD10SearchInput> component that provides:
+ *     – Live local search over all 14 370 ICD-10-GM 2026 terminal codes
+ *     – ✨ AI-Assist button → POST /api/ehr/icd10-suggest returns ranked
+ *       suggestions based on chief_complaint + diagnosis_hint
+ *     – Auto-fills BOTH diagnosisIcd10 AND diagnosisText on selection
  *
- * Web-compatibility note:
- *   Alert.alert with callbacks does NOT work on Expo Web (maps to the
- *   synchronous window.alert which drops onPress).  All feedback is
- *   shown via inline banners + automatic navigation instead.
- *
- * Backend change:
- *   diagnosis_icd10 is now optional — the backend no longer rejects
- *   requests where it is absent or empty.
+ * • The rest of the form (chief complaint, visit date, notes, submission
+ *   logic, web-compatible success/error banners) is unchanged.
  */
 
 import React, { useState } from 'react';
@@ -28,10 +28,12 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Card, Input, Button } from '@/components/ui';
-import { useAuthStore } from '@/store/auth.store';
-import { apiClient } from '@/services/api/client';
-import { API } from '@/services/api/endpoints';
+import { useAuthStore }        from '@/store/auth.store';
+import { apiClient }           from '@/services/api/client';
+import { API }                 from '@/services/api/endpoints';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+
+import ICD10SearchInput, { ICD10Selection } from '@/components/ehr/ICD10SearchInput';
 
 const todayISO = (): string => new Date().toISOString().split('T')[0];
 
@@ -39,19 +41,19 @@ export default function VisitFormScreen() {
   const router = useRouter();
   const { user } = useAuthStore();
   const { patient_id, patient_name } = useLocalSearchParams<{
-    patient_id?: string;
+    patient_id?:   string;
     patient_name?: string;
   }>();
 
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [diagnosisIcd10, setDiagnosisIcd10] = useState('');
-  const [diagnosisText, setDiagnosisText]   = useState('');
-  const [visitDate, setVisitDate]           = useState(todayISO());
-  const [notes, setNotes]                   = useState('');
-  const [errors, setErrors]                 = useState<Record<string, string>>({});
-  const [submitting, setSubmitting]         = useState(false);
-  const [successMsg, setSuccessMsg]         = useState<string | null>(null);
-  const [submitError, setSubmitError]       = useState<string | null>(null);
+  const [diagnosisText,  setDiagnosisText]  = useState('');
+  const [visitDate,      setVisitDate]      = useState(todayISO());
+  const [notes,          setNotes]          = useState('');
+  const [errors,         setErrors]         = useState<Record<string, string>>({});
+  const [submitting,     setSubmitting]     = useState(false);
+  const [successMsg,     setSuccessMsg]     = useState<string | null>(null);
+  const [submitError,    setSubmitError]    = useState<string | null>(null);
 
   // Redirect non-doctors to home
   if (user?.user_type !== 'doctor') {
@@ -61,16 +63,27 @@ export default function VisitFormScreen() {
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
-    if (!chiefComplaint.trim()) newErrors.chiefComplaint = 'Chief complaint is required';
-    if (!diagnosisText.trim())  newErrors.diagnosisText  = 'Diagnosis description is required';
+    if (!chiefComplaint.trim()) newErrors.chiefComplaint = 'Leitsymptom ist erforderlich';
+    if (!diagnosisText.trim())  newErrors.diagnosisText  = 'Diagnosebeschreibung ist erforderlich';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
+  // ── ICD-10 selection callback ────────────────────────────────────────────
+  const handleICD10Select = ({ code, description }: ICD10Selection) => {
+    setDiagnosisIcd10(code);
+    // Only overwrite diagnosisText if the doctor hasn't typed something custom
+    if (!diagnosisText.trim() || diagnosisText === diagnosisIcd10) {
+      setDiagnosisText(description);
+      setErrors((prev) => ({ ...prev, diagnosisText: '' }));
+    }
+  };
+
+  // ── Submit ───────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!validate()) return;
     if (!patient_id) {
-      setSubmitError('Missing patient ID. Please go back and try again.');
+      setSubmitError('Patienten-ID fehlt. Bitte gehen Sie zurück und versuchen Sie es erneut.');
       return;
     }
 
@@ -80,21 +93,17 @@ export default function VisitFormScreen() {
 
       await apiClient.post(API.EHR.PATIENT_VISITS(patient_id), {
         chief_complaint: chiefComplaint.trim(),
-        // FIX: send empty string instead of undefined so the backend doesn't
-        // reject missing optional field — it now accepts '' for diagnosis_icd10.
         diagnosis_icd10: diagnosisIcd10.trim(),
         diagnosis_text:  diagnosisText.trim(),
         notes:           notes.trim() || undefined,
         visit_date:      visitDate.trim() || todayISO(),
       });
 
-      // FIX: web-compatible success feedback — no Alert.alert.
-      // Show an inline green banner then navigate back after 1.5 s.
-      const name = patient_name ? ` for ${patient_name}` : '';
-      setSuccessMsg(`✅  Visit${name} has been recorded successfully.`);
+      const name = patient_name ? ` für ${patient_name}` : '';
+      setSuccessMsg(`✅  Besuch${name} wurde erfolgreich gespeichert.`);
       setTimeout(() => router.back(), 1500);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to save visit';
+      const message = err instanceof Error ? err.message : 'Fehler beim Speichern';
       setSubmitError(message);
     } finally {
       setSubmitting(false);
@@ -103,7 +112,9 @@ export default function VisitFormScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-      <Stack.Screen options={{ title: patient_name ? `Visit – ${patient_name}` : 'New Visit' }} />
+      <Stack.Screen
+        options={{ title: patient_name ? `Besuch – ${patient_name}` : 'Neuer Besuch' }}
+      />
       <KeyboardAvoidingView
         style={styles.keyboardView}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -112,14 +123,14 @@ export default function VisitFormScreen() {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          {/* ── Inline success banner ── */}
+          {/* ── Success banner ── */}
           {successMsg && (
             <View style={styles.successBanner}>
               <Text style={styles.successText}>{successMsg}</Text>
             </View>
           )}
 
-          {/* ── Inline error banner ── */}
+          {/* ── Error banner ── */}
           {submitError && (
             <View style={styles.errorBanner}>
               <Text style={styles.errorBannerText}>⚠️  {submitError}</Text>
@@ -127,67 +138,82 @@ export default function VisitFormScreen() {
           )}
 
           <Card variant="elevated" padding="large" style={styles.card}>
-            <Text style={styles.title}>Record Visit</Text>
+            <Text style={styles.title}>Besuch dokumentieren</Text>
             {patient_name ? (
               <Text style={styles.subtitle}>Patient: {patient_name}</Text>
             ) : null}
 
+            {/* ── Chief Complaint ── */}
             <Input
-              label="Chief Complaint"
+              label="Leitsymptom / Vorstellungsgrund"
               value={chiefComplaint}
               onChangeText={(v) => {
                 setChiefComplaint(v);
                 setErrors((prev) => ({ ...prev, chiefComplaint: '' }));
               }}
-              placeholder="Primary reason for the visit"
+              placeholder="Hauptgrund für den Besuch"
               error={errors.chiefComplaint}
               required
             />
 
-            {/* ICD-10 is optional — no required prop, no validation error */}
-            <Input
-              label="ICD-10-GM Code (optional)"
-              value={diagnosisIcd10}
-              onChangeText={setDiagnosisIcd10}
-              placeholder="e.g. I10, E11.9"
-              autoCapitalize="characters"
-            />
+            {/* ── ICD-10 Search (replaces plain TextInput) ── */}
+            {/*
+             *  The picker:
+             *    • queries the local ICD-10-GM 2026 database (14 370 codes)
+             *    • offers ✨ KI-Assist that calls POST /api/ehr/icd10-suggest
+             *    • on selection auto-fills code + description
+             *
+             *  It is wrapped in a View with zIndex so the dropdown floats
+             *  above sibling inputs.
+             */}
+            <View style={styles.icdPickerWrapper}>
+              <ICD10SearchInput
+                value={diagnosisIcd10}
+                onSelect={handleICD10Select}
+                chiefComplaint={chiefComplaint}
+                diagnosisHint={diagnosisText}
+                aiAssist
+              />
+            </View>
 
+            {/* ── Diagnosis Description ── */}
             <Input
-              label="Diagnosis Description"
+              label="Diagnosebeschreibung"
               value={diagnosisText}
               onChangeText={(v) => {
                 setDiagnosisText(v);
                 setErrors((prev) => ({ ...prev, diagnosisText: '' }));
               }}
-              placeholder="Describe the diagnosis"
+              placeholder="Diagnose beschreiben (oder aus ICD-Suche übernehmen)"
               error={errors.diagnosisText}
               required
             />
 
+            {/* ── Visit Date ── */}
             <Input
-              label="Visit Date"
+              label="Besuchsdatum"
               value={visitDate}
               onChangeText={setVisitDate}
-              placeholder="YYYY-MM-DD"
-              helperText="Format: YYYY-MM-DD"
+              placeholder="JJJJ-MM-TT"
+              helperText="Format: JJJJ-MM-TT"
             />
 
+            {/* ── Notes ── */}
             <Input
-              label="Notes"
+              label="Notizen"
               value={notes}
               onChangeText={setNotes}
-              placeholder="Additional notes (optional)"
+              placeholder="Zusätzliche Notizen (optional)"
               multiline
               numberOfLines={4}
             />
 
             <View style={styles.buttonRow}>
               <Button
-                title={submitting ? 'Saving…' : 'Save Visit'}
+                title={submitting ? 'Wird gespeichert…' : 'Besuch speichern'}
                 onPress={handleSubmit}
                 loading={submitting}
-                disabled={!!successMsg}  // disable after success so user can't double-submit
+                disabled={!!successMsg}
                 fullWidth
               />
             </View>
@@ -197,6 +223,8 @@ export default function VisitFormScreen() {
     </SafeAreaView>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -213,29 +241,35 @@ const styles = StyleSheet.create({
   subtitle: { ...typography.body, color: colors.text.secondary, marginBottom: spacing.lg },
   buttonRow: { marginTop: spacing.md },
 
+  // ICD picker needs elevated zIndex so the dropdown floats over siblings
+  icdPickerWrapper: {
+    zIndex:    10,
+    elevation: 10,  // Android
+  },
+
   // Success banner
   successBanner: {
     backgroundColor: (colors as any).successLight ?? '#E8F5E9',
-    borderRadius: borderRadius.md,
+    borderRadius:    borderRadius.md,
     borderLeftWidth: 4,
     borderLeftColor: (colors as any).success ?? '#2E7D32',
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    padding:         spacing.md,
+    marginBottom:    spacing.md,
   },
   successText: {
     ...typography.body,
-    color: (colors as any).success ?? '#2E7D32',
+    color:      (colors as any).success ?? '#2E7D32',
     fontWeight: '600',
   },
 
   // Error banner
   errorBanner: {
     backgroundColor: colors.danger + '12',
-    borderRadius: borderRadius.md,
+    borderRadius:    borderRadius.md,
     borderLeftWidth: 4,
     borderLeftColor: colors.danger,
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    padding:         spacing.md,
+    marginBottom:    spacing.md,
   },
   errorBannerText: {
     ...typography.body,

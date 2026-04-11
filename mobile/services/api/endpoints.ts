@@ -27,6 +27,7 @@
  *   CALCULATIONS.ACTIVE_EFFECTS_FULL → cumulative_effects_routes.py /api/active-effects-full
  *   CALCULATIONS.CUMULATIVE_EFFECTS  → cumulative_effects_routes.py /api/cumulative-effects
  *   LIBRE.*             → libre_routes.py
+ *   EHR.ICD10_SUGGEST   → ehr_routes.py  /api/ehr/icd10-suggest  (POST, doctors only)
  */
 
 // API version configuration
@@ -74,6 +75,7 @@ const API = {
     VISITS:        v('/api/patient/visits'),
     MESSAGES:      (otherId: string) => v(`/api/messages/${otherId}`),
     UNREAD_COUNT:  v('/api/messages/unread-count'),
+    CONVERSATIONS: v('/api/messages/conversations'),
     PATIENT_VISITS:   (id: string) => v(`/api/doctor/patient/${id}/visits`),
     PATIENT_VITALS:   (id: string) => v(`/api/doctor/patient/${id}/vitals`),
     PATIENT_MESSAGES: (id: string) => v(`/api/doctor/patient/${id}/messages`),
@@ -81,11 +83,16 @@ const API = {
     DOCUMENT:         (id: string) => v(`/api/patient/documents/${id}`),
     PATIENT_DOCUMENTS: (patientId: string) => v(`/api/doctor/patient/${patientId}/documents`),
     EXERCISES:        v('/api/patient/exercises'),
-    CONVERSATIONS:    v('/api/messages/conversations'),
     PATIENT_EXERCISES: (patientId: string) => v(`/api/doctor/patient/${patientId}/exercises`),
     PATIENT_EXERCISE_BY_ID: (patientId: string, exerciseId: string) =>
       v(`/api/doctor/patient/${patientId}/exercises/${exerciseId}`),
     EXERCISE_DONE: (exerciseId: string) => v(`/api/patient/exercises/${exerciseId}/done`),
+
+    // ── ICD-10-GM AI Assist ───────────────────────────────────────────────
+    // POST  { chief_complaint, diagnosis_hint }
+    // →     { suggestions: [{ code, description, rationale }] }
+    // Doctors only — protected by token_required + user_type check on backend.
+    ICD10_SUGGEST: v('/api/ehr/icd10-suggest'),
   },
 } as const;
 
@@ -106,4 +113,5 @@ export const logEndpoints = () => {
   console.log('EHR.VITALS:', API.EHR.VITALS);
   console.log('EHR.VISITS:', API.EHR.VISITS);
   console.log('EHR.MESSAGES(id):', API.EHR.MESSAGES('example-id'));
+  console.log('EHR.ICD10_SUGGEST:', API.EHR.ICD10_SUGGEST);
 };

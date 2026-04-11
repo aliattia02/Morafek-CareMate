@@ -1445,6 +1445,108 @@ def mark_exercise_done(current_user, exercise_id):
     return jsonify({'message': 'Exercise updated'}), 200
 
 
+# ─── ICD-10-GM AI Suggest ────────────────────────────────────────────────────
+#
+# POST /api/ehr/icd10-suggest
+# Doctors only — sends chief_complaint + diagnosis_hint to Claude and returns
+# 3-5 ranked ICD-10-GM 2026 codes as structured JSON.
+#
+# Requires env var: ANTHROPIC_API_KEY
+
+import os as _os
+import json as _json
+import anthropic as _anthropic
+
+_anthropic_client = _anthropic.Anthropic(api_key=_os.environ.get("ANTHROPIC_API_KEY", ""))
+
+_ICD10_SYSTEM_PROMPT = """You are a certified medical coder specialising in ICD-10-GM (German Modification).
+Given a chief complaint and a diagnosis hint, return the 3-5 most appropriate ICD-10-GM codes.
+
+Respond ONLY with a JSON array (no markdown, no explanation) in this exact schema:
+[
+  {
+    "code": "I10",
+    "description": "Essentielle (primäre) Hypertonie",
+    "rationale": "Primäre Hypertonie ohne Organschaden"
+  }
+]
+
+Rules:
+- Use German ICD-10-GM 2026 codes only.
+- Prefer specific (5-character) codes over umbrella codes when the hint is detailed enough.
+- Include a short German rationale (max 10 words).
+- If the hint is too vague, return the best 3 candidates.
+"""
+
+
+@ehr_routes.route('/api/ehr/icd10-suggest', methods=['POST'])
+@token_required
+@api_error_handler
+def icd10_suggest(current_user):
+    """POST /api/ehr/icd10-suggest — AI-powered ICD-10-GM code suggestions (doctors only).
+
+    Required JSON fields (at least one):
+      chief_complaint (str) — patient's main reason for the visit
+      diagnosis_hint  (str) — free-text diagnosis the doctor is considering
+
+    Returns:
+      { "suggestions": [ { "code", "description", "rationale" }, ... ] }
+    """
+    if current_user.get('user_type') != 'doctor':
+        return jsonify({'error': 'Only doctors can use ICD-10 suggest'}), 403
+
+    if not _os.environ.get("ANTHROPIC_API_KEY"):
+        logger.error("ANTHROPIC_API_KEY is not set — ICD-10 suggest unavailable")
+        return jsonify({'error': 'AI service is not configured on this server'}), 503
+
+    body = request.get_json(silent=True) or {}
+    chief_complaint = (body.get('chief_complaint') or '').strip()
+    diagnosis_hint  = (body.get('diagnosis_hint')  or '').strip()
+
+    if not chief_complaint and not diagnosis_hint:
+        return jsonify({'error': 'chief_complaint or diagnosis_hint is required'}), 400
+
+    user_message = (
+        f"Leitsymptom: {chief_complaint or '(nicht angegeben)'}\n"
+        f"Diagnosehinweis: {diagnosis_hint or '(nicht angegeben)'}"
+    )
+
+    try:
+        message = _anthropic_client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=512,
+            system=_ICD10_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": user_message}],
+        )
+    except Exception as e:
+        logger.error("Anthropic API error in icd10_suggest: %s", e)
+        return jsonify({'error': 'AI service temporarily unavailable'}), 502
+
+    raw = message.content[0].text.strip()
+
+    # Strip accidental markdown fences Claude might add
+    if raw.startswith("```"):
+        raw = raw.split("```")[1]
+        if raw.startswith("json"):
+            raw = raw[4:]
+    raw = raw.strip()
+
+    try:
+        suggestions = _json.loads(raw)
+    except _json.JSONDecodeError as e:
+        logger.error("Failed to parse Claude ICD-10 response: %s | raw: %s", e, raw)
+        return jsonify({'error': 'AI returned an unexpected response format'}), 502
+
+    if not isinstance(suggestions, list):
+        return jsonify({'error': 'AI returned an unexpected response format'}), 502
+
+    logger.info(
+        "ICD-10 suggest: %d codes returned for doctor %s",
+        len(suggestions), str(current_user['_id'])
+    )
+    return jsonify({"suggestions": suggestions}), 200
+
+
 # ─── FHIR R4 Bundle Export ────────────────────────────────────────────────────
 
 @ehr_routes.route('/api/patient/fhir-export', methods=['GET'])
