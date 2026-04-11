@@ -15,42 +15,33 @@ VALID_USER_TYPES = ['patient', 'doctor', 'admin']
 @auth_routes.route('/login', methods=['POST'])
 def login():
     try:
-        # Get logger and mongo instances
         logger = current_app.logger
         users = current_app.mongo.db.users
 
-        # Log login attempt
         logger.debug("Processing login request")
 
-        # Extract data from request
         data = request.get_json()
         if not data:
             logger.error("No JSON data in request")
             return jsonify({"error": "Missing request data"}), 400
 
-        username = data.get('username')
-        password = data.get('password')
+        username  = data.get('username')
+        password  = data.get('password')
         user_type = data.get('user_type')
 
         if not all([username, password, user_type]):
             logger.error("Missing required fields")
             return jsonify({"error": "Missing required fields"}), 400
 
-        # Validate user type
         if user_type not in VALID_USER_TYPES:
             logger.error(f"Invalid user type: {user_type}")
             return jsonify({"error": f"Invalid user type.  Must be one of: {', '.join(VALID_USER_TYPES)}"}), 400
 
-        # Find user
         user = users.find_one({"username": username, "user_type": user_type})
         logger.debug(f"User lookup completed for username: {username}")
 
         if user and check_password_hash(user['password'], password):
-            # Generate token — mobile clients (X-Client-Type: mobile) get 90 days,
-            # web clients get the standard 24 hours.
             token = generate_token(str(user['_id']), user['user_type'])
-
-            shared_constants = {}
 
             response = {
                 "message": "Logged in successfully",
@@ -59,7 +50,7 @@ def login():
                 "firstName": user.get('first_name', ''),
                 "lastName": user.get('last_name', ''),
                 "profile_picture_url": user.get('profile_picture_url', ''),
-                "shared_constants": shared_constants,
+                "shared_constants": {},
             }
 
             logger.debug("Login successful")
@@ -77,32 +68,27 @@ def login():
 def register():
     try:
         logger = current_app.logger
-        users = current_app.mongo.db.users
+        users  = current_app.mongo.db.users
 
         logger.debug("Processing registration request")
 
-        # Extract data from request
         data = request.get_json()
         if not data:
             logger.error("No JSON data in request")
             return jsonify({"error": "Missing request data"}), 400
 
-        # Required fields
         required_fields = ['username', 'email', 'password', 'firstName',
                            'lastName', 'dateOfBirth', 'user_type']
 
-        # Check if all required fields are present
         for field in required_fields:
             if field not in data:
                 logger.error(f"Missing required field: {field}")
                 return jsonify({"error": f"Missing required field: {field}"}), 400
 
-        # Validate user type
         if data['user_type'] not in VALID_USER_TYPES:
             logger.error(f"Invalid user type: {data['user_type']}")
             return jsonify({"error": f"Invalid user type. Must be one of: {', '.join(VALID_USER_TYPES)}"}), 400
 
-        # Check if username or email already exists
         if users.find_one({"username": data['username']}):
             logger.warning("Username already exists")
             return jsonify({"error": "Username already exists"}), 400
@@ -111,35 +97,36 @@ def register():
             logger.warning("Email already exists")
             return jsonify({"error": "Email already exists"}), 400
 
-        # Prepare user data
         user_data = {
-            'username': data['username'],
-            'email': data['email'],
-            'password': generate_password_hash(data['password']),
-            'first_name': data['firstName'],
-            'last_name': data['lastName'],
+            'username':     data['username'],
+            'email':        data['email'],
+            'password':     generate_password_hash(data['password']),
+            'first_name':   data['firstName'],
+            'last_name':    data['lastName'],
             'date_of_birth': data['dateOfBirth'],
-            'user_type': data['user_type'],
-            'created_at': datetime.now(timezone.utc)
+            'user_type':    data['user_type'],
+            'created_at':   datetime.now(timezone.utc),
         }
 
-        # Add patient-specific fields
         if data['user_type'] == 'patient':
             user_data['authorized_doctors'] = []
             user_data['ehr_profile'] = {
                 'blood_type': '',
                 'allergies': [],
                 'chronic_conditions': [],
-                'emergency_contact': ''
+                'emergency_contact': '',
             }
 
-        # Insert user
+        # Doctors start with an empty clinic list
+        if data['user_type'] == 'doctor':
+            user_data['clinic_ids'] = []
+
         user_id = users.insert_one(user_data).inserted_id
         logger.info(f"User registered successfully: {user_id}")
 
         return jsonify({
             "message": "User registered successfully",
-            "id": str(user_id)
+            "id": str(user_id),
         }), 201
 
     except Exception as e:
@@ -150,28 +137,59 @@ def register():
 @auth_routes.route('/api/doctors', methods=['GET'])
 @token_required
 def get_available_doctors(current_user):
-    """Get list of all doctors (for patients to select from)"""
-    try:
-        logger = current_app.logger
-        users = current_app.mongo.db.users
+    """
+    GET /api/doctors
+    Returns all doctors visible to the current patient.
 
-        # Only patients can view and select doctors
+    Optional query parameter:
+        clinic_id   — when supplied, only doctors who belong to that clinic
+                      are returned.  The patient still authorizes at the
+                      doctor level; this is purely a filter for discovery.
+    """
+    try:
+        logger  = current_app.logger
+        users   = current_app.mongo.db.users
+        clinics = current_app.mongo.db.clinics
+
         if current_user.get('user_type') != 'patient':
             return jsonify({'message': 'Only patients can view available doctors'}), 403
 
-        # Find all doctors
-        doctors = list(users.find(
-            {"user_type": "doctor"},
-            {"password": 0}  # Exclude password
-        ))
+        clinic_id = request.args.get('clinic_id', '').strip()
+
+        if clinic_id:
+            # Validate clinic exists and collect its doctor IDs
+            try:
+                clinic = clinics.find_one({"_id": ObjectId(clinic_id)})
+            except Exception:
+                return jsonify({"error": "Invalid clinic_id format"}), 400
+
+            if not clinic:
+                return jsonify({"error": "Clinic not found"}), 404
+
+            doctor_ids_in_clinic = clinic.get("doctors", [])
+            if not doctor_ids_in_clinic:
+                return jsonify([]), 200
+
+            # Fetch only those doctors
+            try:
+                object_ids = [ObjectId(did) for did in doctor_ids_in_clinic]
+            except Exception:
+                return jsonify({"error": "Corrupt clinic doctor list"}), 500
+
+            query = {"_id": {"$in": object_ids}, "user_type": "doctor"}
+        else:
+            query = {"user_type": "doctor"}
+
+        doctors = list(users.find(query, {"password": 0}))
 
         doctor_list = []
         for doctor in doctors:
             doctor_data = {
-                'id': str(doctor['_id']),
+                'id':        str(doctor['_id']),
                 'firstName': doctor.get('first_name', ''),
-                'lastName': doctor.get('last_name', ''),
-                'email': doctor.get('email', '')
+                'lastName':  doctor.get('last_name', ''),
+                'email':     doctor.get('email', ''),
+                'clinic_ids': doctor.get('clinic_ids', []),
             }
             doctor_list.append(doctor_data)
 
@@ -185,29 +203,27 @@ def get_available_doctors(current_user):
 @auth_routes.route('/api/patient/authorized-doctors', methods=['GET'])
 @token_required
 def get_authorized_doctors(current_user):
-    """Get list of doctors authorized by the current patient"""
+    """Get list of doctors authorized by the current patient."""
     try:
         logger = current_app.logger
-        users = current_app.mongo.db.users
+        users  = current_app.mongo.db.users
 
         if current_user.get('user_type') != 'patient':
             return jsonify({'message': 'Only patients can view their authorized doctors'}), 403
 
-        # Get patient's authorized doctors
-        patient = users.find_one({"_id": current_user['_id']})
+        patient              = users.find_one({"_id": current_user['_id']})
         authorized_doctor_ids = patient.get('authorized_doctors', [])
 
-        # Fetch doctor details
         authorized_doctors = []
         for doctor_id in authorized_doctor_ids:
             try:
                 doctor = users.find_one({"_id": ObjectId(doctor_id)})
                 if doctor:
                     authorized_doctors.append({
-                        'id': str(doctor['_id']),
+                        'id':        str(doctor['_id']),
                         'firstName': doctor.get('first_name', ''),
-                        'lastName': doctor.get('last_name', ''),
-                        'email': doctor.get('email', '')
+                        'lastName':  doctor.get('last_name', ''),
+                        'email':     doctor.get('email', ''),
                     })
             except Exception as e:
                 logger.error(f"Error fetching doctor {doctor_id}: {str(e)}")
@@ -223,29 +239,27 @@ def get_authorized_doctors(current_user):
 @auth_routes.route('/api/patient/authorize-doctor', methods=['POST'])
 @token_required
 def authorize_doctor(current_user):
-    """Add a doctor to patient's authorized list"""
+    """Add a doctor to patient's authorized list."""
     try:
         logger = current_app.logger
-        users = current_app.mongo.db.users
+        users  = current_app.mongo.db.users
 
         if current_user.get('user_type') != 'patient':
             return jsonify({'message': 'Only patients can authorize doctors'}), 403
 
-        data = request.get_json()
+        data      = request.get_json()
         doctor_id = data.get('doctor_id')
 
         if not doctor_id:
             return jsonify({'error': 'Doctor ID is required'}), 400
 
-        # Verify doctor exists
         doctor = users.find_one({"_id": ObjectId(doctor_id), "user_type": "doctor"})
         if not doctor:
             return jsonify({'error': 'Doctor not found'}), 404
 
-        # Add doctor to authorized list (avoid duplicates)
         result = users.update_one(
             {"_id": current_user['_id']},
-            {"$addToSet": {"authorized_doctors": doctor_id}}
+            {"$addToSet": {"authorized_doctors": doctor_id}},
         )
 
         if result.modified_count > 0 or result.matched_count > 0:
@@ -253,10 +267,10 @@ def authorize_doctor(current_user):
             return jsonify({
                 'message': 'Doctor authorized successfully',
                 'doctor': {
-                    'id': str(doctor['_id']),
+                    'id':        str(doctor['_id']),
                     'firstName': doctor.get('first_name', ''),
-                    'lastName': doctor.get('last_name', '')
-                }
+                    'lastName':  doctor.get('last_name', ''),
+                },
             }), 200
 
         return jsonify({'error': 'Failed to authorize doctor'}), 500
@@ -269,24 +283,23 @@ def authorize_doctor(current_user):
 @auth_routes.route('/api/patient/revoke-doctor', methods=['POST'])
 @token_required
 def revoke_doctor(current_user):
-    """Remove a doctor from patient's authorized list"""
+    """Remove a doctor from patient's authorized list."""
     try:
         logger = current_app.logger
-        users = current_app.mongo.db.users
+        users  = current_app.mongo.db.users
 
         if current_user.get('user_type') != 'patient':
             return jsonify({'message': 'Only patients can revoke doctor access'}), 403
 
-        data = request.get_json()
+        data      = request.get_json()
         doctor_id = data.get('doctor_id')
 
         if not doctor_id:
             return jsonify({'error': 'Doctor ID is required'}), 400
 
-        # Remove doctor from authorized list
         result = users.update_one(
             {"_id": current_user['_id']},
-            {"$pull": {"authorized_doctors": doctor_id}}
+            {"$pull": {"authorized_doctors": doctor_id}},
         )
 
         if result.modified_count > 0:
@@ -302,14 +315,10 @@ def revoke_doctor(current_user):
 
 @auth_routes.route('/api/auth/forgot-password', methods=['POST'])
 def forgot_password():
-    """POST /api/auth/forgot-password — request a password-reset code.
-
-    Security: always returns 200 regardless of whether the email exists,
-    to prevent user-enumeration attacks.
-    """
+    """POST /api/auth/forgot-password — request a password-reset code."""
     try:
         logger = current_app.logger
-        users = current_app.mongo.db.users
+        users  = current_app.mongo.db.users
 
         data = request.get_json()
         if not data:
@@ -322,13 +331,12 @@ def forgot_password():
         user = users.find_one({"email": email})
 
         if user:
-            code = str(random.randint(100000, 999999))
+            code    = str(random.randint(100000, 999999))
             expires = datetime.now(timezone.utc) + timedelta(minutes=15)
             users.update_one(
                 {"_id": user['_id']},
-                {"$set": {"reset_code": code, "reset_code_expires": expires}}
+                {"$set": {"reset_code": code, "reset_code_expires": expires}},
             )
-            # No email server yet — log for development
             logger.info(f"Password reset code for {email}: {code}")
 
         return jsonify({"message": "If this email is registered, a reset link has been sent."}), 200
@@ -343,25 +351,24 @@ def reset_password():
     """POST /api/auth/reset-password — verify code and set a new password."""
     try:
         logger = current_app.logger
-        users = current_app.mongo.db.users
+        users  = current_app.mongo.db.users
 
         data = request.get_json()
         if not data:
             return jsonify({"error": "Missing request data"}), 400
 
-        email = data.get('email', '').strip().lower()
-        code = data.get('code', '').strip()
+        email        = data.get('email', '').strip().lower()
+        code         = data.get('code', '').strip()
         new_password = data.get('new_password', '')
 
         if not all([email, code, new_password]):
             return jsonify({"error": "email, code, and new_password are required"}), 400
 
         user = users.find_one({"email": email})
-
         if not user:
             return jsonify({"error": "Invalid or expired code"}), 400
 
-        stored_code = user.get('reset_code')
+        stored_code    = user.get('reset_code')
         stored_expires = user.get('reset_code_expires')
 
         if (
@@ -375,9 +382,9 @@ def reset_password():
         users.update_one(
             {"_id": user['_id']},
             {
-                "$set": {"password": generate_password_hash(new_password)},
+                "$set":   {"password": generate_password_hash(new_password)},
                 "$unset": {"reset_code": "", "reset_code_expires": ""},
-            }
+            },
         )
 
         logger.info(f"Password reset successfully for {email}")

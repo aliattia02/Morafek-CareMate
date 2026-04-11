@@ -7,6 +7,9 @@
  * FIX: getAllDoctors() now guards against 403 (doctors calling a patient-only
  * endpoint) by returning an empty array instead of throwing, and logs a clear
  * warning so developers know why the list is empty.
+ *
+ * UPDATE: getAllDoctors() accepts an optional clinicId to filter doctors by
+ * clinic. Omit it (or pass undefined) to fetch all doctors as before.
  */
 
 import apiClient from './client';
@@ -17,6 +20,7 @@ export interface Doctor {
   firstName: string;
   lastName: string;
   email: string;
+  clinic_ids: string[];
 }
 
 export interface AuthorizedDoctor extends Doctor {
@@ -24,17 +28,20 @@ export interface AuthorizedDoctor extends Doctor {
 }
 
 /**
- * Get list of all available doctors (patient-facing: for a patient to select
- * which doctors they want to authorize).
+ * Get list of all available doctors (patient-facing).
+ *
+ * @param clinicId  When provided, only doctors belonging to that clinic are
+ *                  returned. Omit to fetch all doctors (existing behaviour).
  *
  * Returns an empty array when called with a doctor token (403) so that any
  * settings screen rendered during a doctor session degrades gracefully instead
  * of crashing.
  */
-export async function getAllDoctors(): Promise<Doctor[]> {
-  console.log('[Doctor Management] Fetching all doctors');
+export async function getAllDoctors(clinicId?: string): Promise<Doctor[]> {
+  console.log('[Doctor Management] Fetching all doctors', clinicId ? `for clinic: ${clinicId}` : '(all clinics)');
   try {
-    const response = await apiClient.get<Doctor[]>(API.DOCTORS.LIST);
+    const params = clinicId ? { clinic_id: clinicId } : undefined;
+    const response = await apiClient.get<Doctor[]>(API.DOCTORS.LIST, { params });
     console.log('[Doctor Management] Found doctors:', response.data.length);
     return response.data;
   } catch (err: any) {

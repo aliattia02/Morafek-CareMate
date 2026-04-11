@@ -17,17 +17,8 @@ def create_app():
     app, _, logger = create_app_config(app)
 
     # ── Health check endpoint ─────────────────────────────────────────────
-    # Used by:
-    #   1. Mobile app wakeUpServer() poller before login
-    #   2. External cron-job.org keep-alive ping
-    #
-    # IMPORTANT: Must return explicit jsonify() response, NOT a plain dict.
-    # Returning a dict directly can trigger Flask's debug toolbar or error
-    # middleware that bloats the response — causing cron-job.org to report
-    # "Failed (output too large)" on cold-start responses.
     @app.route('/api/health', methods=['GET', 'HEAD'])
     def health_check():
-        # HEAD support: cron services sometimes use HEAD to minimise bandwidth
         response = jsonify({"status": "ok"})
         response.headers['Cache-Control'] = 'no-store'
         return response, 200
@@ -70,14 +61,16 @@ def create_app():
         from routes.ehr_routes import ehr_routes
         from routes.upload_routes import upload_routes
         from routes.monitoring_routes import monitoring_routes
+        from routes.clinic_routes import clinic_routes          # ← new
 
         blueprints = [
-            (auth_routes, ''),
-            (doctor_routes, ''),
-            (patient_routes, ''),
-            (ehr_routes, ''),
-            (upload_routes, ''),
+            (auth_routes,       ''),
+            (doctor_routes,     ''),
+            (patient_routes,    ''),
+            (ehr_routes,        ''),
+            (upload_routes,     ''),
             (monitoring_routes, ''),
+            (clinic_routes,     ''),                           # ← new
         ]
 
         for blueprint, url_prefix in blueprints:

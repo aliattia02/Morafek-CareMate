@@ -566,6 +566,153 @@ def get_visits(current_user, patient_id):
     return jsonify(result), 200
 
 
+# ─── Medical Profile (patient_profiles) ──────────────────────────────────────
+
+VALID_BLOOD_TYPES  = {'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'unknown'}
+VALID_GENDERS      = {'male', 'female', 'other', 'prefer_not_to_say'}
+VALID_SMOKING      = {'never', 'former', 'current', 'unknown'}
+
+
+def _serialize_profile(doc) -> dict:
+    """Return a JSON-serialisable medical profile dict."""
+    return {
+        'patient_id':          doc.get('patient_id', ''),
+        'date_of_birth':       doc.get('date_of_birth', ''),
+        'gender':              doc.get('gender', ''),
+        'blood_type':          doc.get('blood_type', 'unknown'),
+        'height_cm':           doc.get('height_cm'),
+        'weight_kg':           doc.get('weight_kg'),
+        'allergies':           doc.get('allergies', []),
+        'chronic_conditions':  doc.get('chronic_conditions', []),
+        'current_medications': doc.get('current_medications', []),
+        'smoking_status':      doc.get('smoking_status', 'unknown'),
+        'emergency_contact_name':  doc.get('emergency_contact_name', ''),
+        'emergency_contact_phone': doc.get('emergency_contact_phone', ''),
+        'notes':               doc.get('notes', ''),
+        'updated_at':          doc.get('updated_at', ''),
+        'updated_by':          doc.get('updated_by', ''),
+    }
+
+
+@ehr_routes.route('/api/doctor/patient/<patient_id>/profile', methods=['GET'])
+@token_required
+@api_error_handler
+def get_patient_profile(current_user, patient_id):
+    """GET /api/doctor/patient/<patient_id>/profile — fetch the patient's medical profile."""
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err), code
+
+    doc = mongo.db.patient_profiles.find_one({'patient_id': patient_id})
+    if not doc:
+        # Return an empty profile shell so the frontend always gets a valid object
+        return jsonify(_serialize_profile({'patient_id': patient_id})), 200
+
+    return jsonify(_serialize_profile(doc)), 200
+
+
+@ehr_routes.route('/api/doctor/patient/<patient_id>/profile', methods=['PUT'])
+@token_required
+@api_error_handler
+def update_patient_profile(current_user, patient_id):
+    """PUT /api/doctor/patient/<patient_id>/profile — create or update the patient's medical profile.
+
+    All fields are optional; only supplied fields are written.
+
+    Accepted JSON fields:
+      date_of_birth           (str)         — ISO date e.g. "1955-03-22"
+      gender                  (str)         — male | female | other | prefer_not_to_say
+      blood_type              (str)         — A+ | A- | … | O- | unknown
+      height_cm               (int/float)
+      weight_kg               (int/float)
+      allergies               (list[str])
+      chronic_conditions      (list[str])
+      current_medications     (list[str])
+      smoking_status          (str)         — never | former | current | unknown
+      emergency_contact_name  (str)
+      emergency_contact_phone (str)
+      notes                   (str)
+    """
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err), code
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Missing request body'}), 400
+
+    updates = {}
+
+    if 'date_of_birth' in data:
+        updates['date_of_birth'] = str(data['date_of_birth']).strip()
+
+    if 'gender' in data:
+        g = str(data['gender']).strip().lower()
+        # FIX: empty string means "not set" — ignore it rather than
+        # failing the allow-list check with '' not in VALID_GENDERS.
+        if g == '':
+            pass
+        elif g not in VALID_GENDERS:
+            return jsonify({'error': f'gender must be one of: {", ".join(sorted(VALID_GENDERS))}'}), 400
+        else:
+            updates['gender'] = g
+
+    if 'blood_type' in data:
+        bt = str(data['blood_type']).strip()
+        if bt not in VALID_BLOOD_TYPES:
+            return jsonify({'error': f'blood_type must be one of: {", ".join(sorted(VALID_BLOOD_TYPES))}'}), 400
+        updates['blood_type'] = bt
+
+    for num_field in ('height_cm', 'weight_kg'):
+        if num_field in data:
+            # FIX: null explicitly clears the field — float(None) would
+            # raise TypeError and return 400, so handle it separately.
+            if data[num_field] is None:
+                updates[num_field] = None
+                continue
+            try:
+                val = float(data[num_field])
+                if val <= 0:
+                    raise ValueError
+                updates[num_field] = val
+            except (TypeError, ValueError):
+                return jsonify({'error': f'{num_field} must be a positive number'}), 400
+
+    for list_field in ('allergies', 'chronic_conditions', 'current_medications'):
+        if list_field in data:
+            raw = data[list_field]
+            if not isinstance(raw, list):
+                return jsonify({'error': f'{list_field} must be a list of strings'}), 400
+            updates[list_field] = [str(item).strip() for item in raw if str(item).strip()]
+
+    if 'smoking_status' in data:
+        ss = str(data['smoking_status']).strip().lower()
+        if ss not in VALID_SMOKING:
+            return jsonify({'error': f'smoking_status must be one of: {", ".join(sorted(VALID_SMOKING))}'}), 400
+        updates['smoking_status'] = ss
+
+    for str_field in ('emergency_contact_name', 'emergency_contact_phone', 'notes'):
+        if str_field in data:
+            updates[str_field] = str(data[str_field]).strip()
+
+    if not updates:
+        return jsonify({'error': 'No valid fields provided for update'}), 400
+
+    updates['updated_at'] = datetime.now(timezone.utc).isoformat() + 'Z'
+    updates['updated_by'] = str(current_user['_id'])
+    updates['patient_id'] = patient_id
+
+    mongo.db.patient_profiles.update_one(
+        {'patient_id': patient_id},
+        {'$set': updates},
+        upsert=True,
+    )
+    logger.info('Medical profile updated for patient %s by doctor %s', patient_id, current_user['_id'])
+
+    doc = mongo.db.patient_profiles.find_one({'patient_id': patient_id})
+    return jsonify(_serialize_profile(doc)), 200
+
+
 # ─── Messages (ehr_messages) ──────────────────────────────────────────────────
 #
 # IMPORTANT — route registration order:

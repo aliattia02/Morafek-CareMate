@@ -2,31 +2,30 @@
  * Doctor Management Screen
  * Location: mobile/app/(app)/settings/doctors.tsx
  *
- * Main Function: DoctorManagementScreen
- * Description: Manage authorized doctors who can access patient health data with authorization/revocation
- *
- * Features:
- * - View all available doctors
- * - View currently authorized doctors
- * - Authorize new doctors to access health data
- * - Revoke doctor access
- * - Doctor search and filtering
- * - Summary statistics (authorized vs available)
- * - Cross-platform alert handling (web vs mobile)
- * - Privacy protection notices
- * - Pull-to-refresh functionality
+ * Flow:
+ *   1. Patient sees a clinic picker (horizontal pill strip) — "All" is always
+ *      the first option.
+ *   2. Selecting a clinic filters the doctor list shown below.
+ *   3. Authorization/revocation logic is unchanged (doctor-level, not clinic-scoped).
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Alert, Platform } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Alert,
+  Platform,
+  FlatList,
+  ActivityIndicator,
+} from 'react-native';
+import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-// Components
 import { DoctorList } from '@/components/doctor/DoctorList';
 import { Card, Loading } from '@/components/ui';
-
-// Services
 import {
   getAllDoctors,
   getAuthorizedDoctors,
@@ -35,11 +34,13 @@ import {
   type Doctor,
   type AuthorizedDoctor,
 } from '@/services/api/doctor-management';
+import { getClinics, type Clinic } from '@/services/api/clinics';
+import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
-// Constants
-import { colors, spacing, typography } from '@/constants/theme';
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-platform confirm helper
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Cross-platform alert function
 const showAlert = (
   title: string,
   message: string,
@@ -56,39 +57,156 @@ const showAlert = (
   }
 };
 
-export default function DoctorManagementScreen() {
-  const router = useRouter();
-  const [allDoctors, setAllDoctors] = useState<Doctor[]>([]);
-  const [authorizedDoctors, setAuthorizedDoctors] = useState<AuthorizedDoctor[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+// ─────────────────────────────────────────────────────────────────────────────
+// Clinic pill strip
+// ─────────────────────────────────────────────────────────────────────────────
 
-  const loadDoctors = useCallback(async () => {
+const ALL_CLINICS_ID = '__all__';
+
+interface ClinicStripProps {
+  clinics: Clinic[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+  isLoading: boolean;
+}
+
+function ClinicStrip({ clinics, selectedId, onSelect, isLoading }: ClinicStripProps) {
+  const items = [{ id: ALL_CLINICS_ID, name: '🏥  All Clinics' }, ...clinics];
+
+  return (
+    <View style={stripStyles.wrapper}>
+      <Text style={stripStyles.label}>Filter by clinic</Text>
+      {isLoading ? (
+        <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.sm }} />
+      ) : (
+        <FlatList
+          horizontal
+          data={items}
+          keyExtractor={item => item.id}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={stripStyles.list}
+          renderItem={({ item }) => {
+            const active = item.id === selectedId;
+            return (
+              <TouchableOpacity
+                style={[stripStyles.pill, active && stripStyles.pillActive]}
+                onPress={() => onSelect(item.id)}
+                activeOpacity={0.75}
+              >
+                <Text style={[stripStyles.pillText, active && stripStyles.pillTextActive]}>
+                  {item.name}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
+        />
+      )}
+    </View>
+  );
+}
+
+const stripStyles = StyleSheet.create({
+  wrapper: {
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.xs,
+  },
+  label: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    marginBottom: spacing.xs,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  list: {
+    gap: spacing.sm,
+    paddingRight: spacing.md,
+  },
+  pill: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.full,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  pillActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  pillText: {
+    ...typography.small,
+    color: colors.text.secondary,
+    fontWeight: '500',
+  },
+  pillTextActive: {
+    color: colors.text.inverse,
+    fontWeight: '600',
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main screen
+// ─────────────────────────────────────────────────────────────────────────────
+
+export default function DoctorManagementScreen() {
+  const [allDoctors,        setAllDoctors]        = useState<Doctor[]>([]);
+  const [authorizedDoctors, setAuthorizedDoctors] = useState<AuthorizedDoctor[]>([]);
+  const [clinics,           setClinics]           = useState<Clinic[]>([]);
+  const [selectedClinicId,  setSelectedClinicId]  = useState<string>(ALL_CLINICS_ID);
+
+  const [isLoading,        setIsLoading]        = useState(true);
+  const [clinicsLoading,   setClinicsLoading]   = useState(true);
+  const [isProcessing,     setIsProcessing]     = useState(false);
+  const [error,            setError]            = useState<string | null>(null);
+
+  // ── data fetching ──────────────────────────────────────────────────────────
+
+  const loadDoctors = useCallback(async (clinicId: string) => {
     try {
       setIsLoading(true);
       setError(null);
 
       const [available, authorized] = await Promise.all([
-        getAllDoctors(),
+        // Pass clinic_id when a specific clinic is selected
+        getAllDoctors(clinicId !== ALL_CLINICS_ID ? clinicId : undefined),
         getAuthorizedDoctors(),
       ]);
 
       setAllDoctors(available);
       setAuthorizedDoctors(authorized);
     } catch (err: any) {
-      console.error('Error loading doctors:', err);
       setError(err.message || 'Failed to load doctors');
     } finally {
       setIsLoading(false);
     }
   }, []);
 
-  useEffect(() => {
-    loadDoctors();
-  }, [loadDoctors]);
+  const loadClinics = useCallback(async () => {
+    try {
+      setClinicsLoading(true);
+      const data = await getClinics();
+      setClinics(data);
+    } catch {
+      // Clinics are optional — silently degrade if unavailable
+    } finally {
+      setClinicsLoading(false);
+    }
+  }, []);
 
-  const handleAuthorize = async (doctorId: string) => {
+  useEffect(() => {
+    loadClinics();
+  }, [loadClinics]);
+
+  // Reload doctors whenever the selected clinic changes
+  useEffect(() => {
+    loadDoctors(selectedClinicId);
+  }, [selectedClinicId, loadDoctors]);
+
+  // ── authorize / revoke ────────────────────────────────────────────────────
+
+  const handleAuthorize = (doctorId: string) => {
     const doctor = allDoctors.find(d => d.id === doctorId);
     if (!doctor) return;
 
@@ -104,7 +222,7 @@ export default function DoctorManagementScreen() {
             try {
               setIsProcessing(true);
               await authorizeDoctor(doctorId);
-              await loadDoctors();
+              await loadDoctors(selectedClinicId);
               showAlert('Success', 'Doctor authorized successfully', [{ text: 'OK' }]);
             } catch (err: any) {
               showAlert('Error', err.message || 'Failed to authorize doctor', [{ text: 'OK' }]);
@@ -117,7 +235,7 @@ export default function DoctorManagementScreen() {
     );
   };
 
-  const handleRevoke = async (doctorId: string) => {
+  const handleRevoke = (doctorId: string) => {
     const doctor = authorizedDoctors.find(d => d.id === doctorId);
     if (!doctor) return;
 
@@ -133,7 +251,7 @@ export default function DoctorManagementScreen() {
             try {
               setIsProcessing(true);
               await revokeDoctor(doctorId);
-              await loadDoctors();
+              await loadDoctors(selectedClinicId);
               showAlert('Success', 'Doctor access revoked', [{ text: 'OK' }]);
             } catch (err: any) {
               showAlert('Error', err.message || 'Failed to revoke access', [{ text: 'OK' }]);
@@ -146,104 +264,124 @@ export default function DoctorManagementScreen() {
     );
   };
 
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-        <Stack.Screen
-          options={{
-            title: 'Manage Doctors',
-            headerShown: true,
-          }}
-        />
-        <Loading text="Loading doctors..." />
-      </SafeAreaView>
-    );
-  }
+  // ── selected clinic label for section title ────────────────────────────────
+
+  const clinicLabel =
+    selectedClinicId === ALL_CLINICS_ID
+      ? null
+      : clinics.find(c => c.id === selectedClinicId)?.name ?? null;
+
+  // ── render ─────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-      <Stack.Screen
-        options={{
-          title: 'Manage Doctors',
-          headerShown: true,
-        }}
+      <Stack.Screen options={{ title: 'Manage Doctors', headerShown: true }} />
+
+      {/* Clinic picker lives outside the scroll so it stays sticky */}
+      <ClinicStrip
+        clinics={clinics}
+        selectedId={selectedClinicId}
+        onSelect={setSelectedClinicId}
+        isLoading={clinicsLoading}
       />
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-        {/* Info Card */}
-        <Card variant="filled" padding="medium" style={styles.infoCard}>
-          <Text style={styles.infoTitle}>🏥 Doctor Authorization</Text>
-          <Text style={styles.infoText}>
-            Select which doctors can view your health data. Only authorized doctors will have
-            access to your glucose readings, meals, and insulin data.
-          </Text>
-        </Card>
 
-        {error && (
-          <Card variant="outlined" padding="medium" style={styles.errorCard}>
-            <Text style={styles.errorText}>⚠️ {error}</Text>
+      {isLoading ? (
+        <Loading text="Loading doctors..." />
+      ) : (
+        <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+
+          {/* Info card */}
+          <Card variant="filled" padding="medium" style={styles.infoCard}>
+            <Text style={styles.infoTitle}>🏥 Doctor Authorization</Text>
+            <Text style={styles.infoText}>
+              {clinicLabel
+                ? `Showing doctors from ${clinicLabel}. `
+                : 'Showing all available doctors. '}
+              Select a clinic above to narrow the list. Only doctors you authorize
+              can view your health data.
+            </Text>
           </Card>
-        )}
 
-        {/* Authorized Doctors Summary */}
-        <Card variant="outlined" padding="medium" style={styles.summaryCard}>
-          <View style={styles.summaryRow}>
-            <View>
-              <Text style={styles.summaryLabel}>Authorized Doctors</Text>
-              <Text style={styles.summaryValue}>{authorizedDoctors.length}</Text>
-            </View>
-            <View>
-              <Text style={styles.summaryLabel}>Available Doctors</Text>
-              <Text style={styles.summaryValue}>{allDoctors.length}</Text>
-            </View>
-          </View>
-        </Card>
+          {/* Error */}
+          {error && (
+            <Card variant="outlined" padding="medium" style={styles.errorCard}>
+              <Text style={styles.errorText}>⚠️ {error}</Text>
+            </Card>
+          )}
 
-        {/* Authorized Doctors Section */}
-        {authorizedDoctors.length > 0 && (
+          {/* Stats */}
+          <Card variant="outlined" padding="medium" style={styles.summaryCard}>
+            <View style={styles.summaryRow}>
+              <View>
+                <Text style={styles.summaryLabel}>Authorized Doctors</Text>
+                <Text style={styles.summaryValue}>{authorizedDoctors.length}</Text>
+              </View>
+              <View>
+                <Text style={styles.summaryLabel}>
+                  {clinicLabel ? `In ${clinicLabel}` : 'Available Doctors'}
+                </Text>
+                <Text style={styles.summaryValue}>{allDoctors.length}</Text>
+              </View>
+            </View>
+          </Card>
+
+          {/* Authorized doctors */}
+          {authorizedDoctors.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Your Authorized Doctors</Text>
+              <Text style={styles.sectionSubtitle}>
+                These doctors can currently view your health data
+              </Text>
+              <DoctorList
+                doctors={authorizedDoctors}
+                authorizedDoctorIds={authorizedDoctors.map(d => d.id)}
+                onAuthorize={handleAuthorize}
+                onRevoke={handleRevoke}
+                isLoading={isProcessing}
+              />
+            </View>
+          )}
+
+          {/* Available / filtered doctors */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Your Authorized Doctors</Text>
+            <Text style={styles.sectionTitle}>
+              {clinicLabel
+                ? `Doctors at ${clinicLabel}`
+                : authorizedDoctors.length > 0
+                  ? 'Add More Doctors'
+                  : 'Available Doctors'}
+            </Text>
             <Text style={styles.sectionSubtitle}>
-              These doctors can currently view your health data
+              {clinicLabel
+                ? 'Browse doctors from this clinic and authorize the ones you trust'
+                : 'Search and authorize doctors to view your data'}
             </Text>
             <DoctorList
-              doctors={authorizedDoctors}
-              authorizedDoctorIds={authorizedDoctors.map(d => d.id)}
+              doctors={allDoctors.filter(
+                d => !authorizedDoctors.find(ad => ad.id === d.id)
+              )}
+              authorizedDoctorIds={[]}
               onAuthorize={handleAuthorize}
               onRevoke={handleRevoke}
               isLoading={isProcessing}
             />
           </View>
-        )}
 
-        {/* Available Doctors Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            {authorizedDoctors.length > 0 ? 'Add More Doctors' : 'Available Doctors'}
-          </Text>
-          <Text style={styles.sectionSubtitle}>
-            Search and authorize doctors to view your data
-          </Text>
-          <DoctorList
-            doctors={allDoctors.filter(
-              d => !authorizedDoctors.find(ad => ad.id === d.id)
-            )}
-            authorizedDoctorIds={[]}
-            onAuthorize={handleAuthorize}
-            onRevoke={handleRevoke}
-            isLoading={isProcessing}
-          />
-        </View>
-
-        {/* Privacy Notice */}
-        <Card variant="filled" padding="small" style={styles.privacyCard}>
-          <Text style={styles.privacyText}>
-            🔒 Your privacy is protected. You can revoke access at any time.
-          </Text>
-        </Card>
-      </ScrollView>
+          {/* Privacy notice */}
+          <Card variant="filled" padding="small" style={styles.privacyCard}>
+            <Text style={styles.privacyText}>
+              🔒 Your privacy is protected. You can revoke access at any time.
+            </Text>
+          </Card>
+        </ScrollView>
+      )}
     </SafeAreaView>
   );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Styles
+// ─────────────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   safeArea: {

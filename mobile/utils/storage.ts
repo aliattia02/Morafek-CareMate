@@ -1,13 +1,13 @@
 /**
  * mobile/utils/storage.ts
  *
- * Secure key-value storage for sensitive data (tokens, user info).
- * Uses expo-secure-store on device (encrypted at rest) with an
- * in-memory fallback for environments where SecureStore is unavailable
- * (e.g. web, Expo Go on some simulators).
+ * Platform-aware secure storage.
+ *
+ * Native (iOS / Android): expo-secure-store  — encrypted, OS keychain-backed.
+ * Web:                     localStorage       — survives page refresh.
+ *                          (expo-secure-store is unavailable / in-memory only on web)
  */
 
-import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 
 // ─── Storage keys ─────────────────────────────────────────────────────────────
@@ -20,76 +20,88 @@ export const STORAGE_KEYS = {
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
 
-// ─── In-memory fallback (web / unavailable SecureStore) ───────────────────────
+// ─── Web localStorage adapter ─────────────────────────────────────────────────
 
-const memoryStore: Record<string, string> = {};
-
-const isSecureStoreAvailable = (): boolean => {
-  // SecureStore is not supported on web
-  return Platform.OS !== 'web';
+const webStorage = {
+  get: (key: string): string | null => {
+    try {
+      return localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  },
+  set: (key: string, value: string): void => {
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      console.error('[Storage] localStorage.setItem failed:', e);
+    }
+  },
+  remove: (key: string): void => {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // ignore
+    }
+  },
 };
 
-// ─── secureStorage API ────────────────────────────────────────────────────────
+// ─── Native secure store adapter ─────────────────────────────────────────────
+
+// Lazy-load so the web bundle never tries to import the native module.
+let SecureStore: typeof import('expo-secure-store') | null = null;
+if (Platform.OS !== 'web') {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  SecureStore = require('expo-secure-store');
+}
+
+// ─── Unified API ─────────────────────────────────────────────────────────────
 
 export const secureStorage = {
   /**
-   * Persist a string value under the given key.
-   * Pass an object — it will be JSON-serialised automatically.
+   * Retrieve a stored value.
+   * Returns `null` if the key does not exist or on any error.
    */
-  async set(key: StorageKey, value: string | object): Promise<void> {
-    const serialised = typeof value === 'string' ? value : JSON.stringify(value);
+  get: async (key: string): Promise<string | null> => {
     try {
-      if (isSecureStoreAvailable()) {
-        await SecureStore.setItemAsync(key, serialised);
-      } else {
-        memoryStore[key] = serialised;
+      if (Platform.OS === 'web') {
+        return webStorage.get(key);
       }
-    } catch (err) {
-      console.error(`[Storage] set("${key}") failed:`, err);
-      // Degrade gracefully — keep value in memory so the session survives
-      memoryStore[key] = serialised;
+      return await SecureStore!.getItemAsync(key);
+    } catch (e) {
+      console.error(`[Storage] get(${key}) failed:`, e);
+      return null;
     }
   },
 
   /**
-   * Retrieve the raw string stored under the given key.
-   * Returns null if the key does not exist.
+   * Persist a string value.
    */
-  async get(key: StorageKey): Promise<string | null> {
+  set: async (key: string, value: string): Promise<void> => {
     try {
-      if (isSecureStoreAvailable()) {
-        return await SecureStore.getItemAsync(key);
+      if (Platform.OS === 'web') {
+        webStorage.set(key, value);
+        return;
       }
-      return memoryStore[key] ?? null;
-    } catch (err) {
-      console.error(`[Storage] get("${key}") failed:`, err);
-      return memoryStore[key] ?? null;
+      await SecureStore!.setItemAsync(key, value);
+    } catch (e) {
+      console.error(`[Storage] set(${key}) failed:`, e);
     }
   },
 
   /**
-   * Delete the value stored under the given key.
-   * Resolves silently if the key does not exist.
+   * Delete a stored value.
    */
-  async remove(key: StorageKey): Promise<void> {
+  remove: async (key: string): Promise<void> => {
     try {
-      if (isSecureStoreAvailable()) {
-        await SecureStore.deleteItemAsync(key);
+      if (Platform.OS === 'web') {
+        webStorage.remove(key);
+        return;
       }
-      delete memoryStore[key];
-    } catch (err) {
-      console.error(`[Storage] remove("${key}") failed:`, err);
-      delete memoryStore[key];
+      await SecureStore!.deleteItemAsync(key);
+    } catch (e) {
+      console.error(`[Storage] remove(${key}) failed:`, e);
     }
-  },
-
-  /**
-   * Remove all known storage keys — useful on full logout.
-   */
-  async clear(): Promise<void> {
-    await Promise.all(
-      Object.values(STORAGE_KEYS).map((key) => secureStorage.remove(key as StorageKey))
-    );
   },
 };
 
