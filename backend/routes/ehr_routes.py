@@ -1542,7 +1542,7 @@ def icd10_suggest(current_user):
             contents=contents,
             config=_types.GenerateContentConfig(
                 temperature=0.1,
-                max_output_tokens=2048,
+                max_output_tokens=4096,
                 response_mime_type="application/json",
             ),
         )
@@ -1615,7 +1615,7 @@ def icd10_suggest_test():
             "detail": "GEMINI_API_KEY is not set in Render environment variables",
         }), 500
 
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash"]
     results = {}
 
     try:
