@@ -1445,10 +1445,10 @@ def mark_exercise_done(current_user, exercise_id):
     return jsonify({'message': 'Exercise updated'}), 200
 
 
-# ─── ICD-10-GM AI Suggest (google-genai SDK) ────────────────────────────────
+# ─── ICD-10-GM AI Suggest ────────────────────────────────────────────────────
 #
 # POST /api/ehr/icd10-suggest
-# Doctors only — sends chief_complaint + diagnosis_hint to Gemini 2.0 Flash
+# Doctors only — sends chief_complaint + diagnosis_hint to Gemini 2.5 Flash
 # and returns 3-5 ranked ICD-10-GM 2026 codes as structured JSON.
 #
 # Requires env var: GEMINI_API_KEY
@@ -1460,27 +1460,26 @@ import json as _json
 
 _GEMINI_API_KEY = _os.environ.get("GEMINI_API_KEY", "")
 
-_ICD10_PROMPT_TEMPLATE = """You are a certified medical coder specialising in ICD-10-GM (German Modification).
+# Same model used by the working food_scan_service
+_ICD10_MODEL = "gemini-2.5-flash"
+
+_ICD10_SYSTEM_PROMPT = """You are a certified medical coder specialising in ICD-10-GM (German Modification).
 Given a chief complaint and a diagnosis hint, return the 3-5 most appropriate ICD-10-GM codes.
 
-Respond ONLY with a JSON array (no markdown, no explanation) in this exact schema:
+Return ONLY valid JSON, no markdown, no preamble, no explanation:
 [
-  {{
+  {
     "code": "I10",
     "description": "Essentielle (primäre) Hypertonie",
     "rationale": "Primäre Hypertonie ohne Organschaden"
-  }}
+  }
 ]
 
 Rules:
 - Use German ICD-10-GM 2026 codes only.
 - Prefer specific (5-character) codes over umbrella codes when the hint is detailed enough.
 - Include a short German rationale (max 10 words).
-- If the hint is too vague, return the best 3 candidates.
-
-Leitsymptom: {chief_complaint}
-Diagnosehinweis: {diagnosis_hint}
-"""
+- If the hint is too vague, return the best 3 candidates."""
 
 
 def _strip_markdown_fences(text: str) -> str:
@@ -1518,26 +1517,36 @@ def icd10_suggest(current_user):
     if not chief_complaint and not diagnosis_hint:
         return jsonify({'error': 'chief_complaint or diagnosis_hint is required'}), 400
 
-    prompt = _ICD10_PROMPT_TEMPLATE.format(
-        chief_complaint=chief_complaint or '(nicht angegeben)',
-        diagnosis_hint=diagnosis_hint   or '(nicht angegeben)',
+    user_text = (
+        f"Leitsymptom: {chief_complaint or '(nicht angegeben)'}\n"
+        f"Diagnosehinweis: {diagnosis_hint or '(nicht angegeben)'}"
     )
 
     try:
-        # Imported here so a missing package gives a clean 503
+        # Imported here so a missing package returns a clean 503
         # rather than crashing the entire blueprint at startup.
-        from google import genai as _genai  # noqa: PLC0415
+        from google import genai as _genai          # noqa: PLC0415
+        from google.genai import types as _types    # noqa: PLC0415
 
-        client   = _genai.Client(api_key=_GEMINI_API_KEY)
+        client = _genai.Client(api_key=_GEMINI_API_KEY)
+
+        # Mirror food_scan_service: text part + GenerateContentConfig with
+        # response_mime_type="application/json" — forces strict JSON output
+        # and eliminates markdown fences / single-quoted keys entirely.
+        contents = [
+            _types.Part.from_text(text=_ICD10_SYSTEM_PROMPT),
+            _types.Part.from_text(text=user_text),
+        ]
         response = client.models.generate_content(
-            # gemini-1.5-flash is deprecated — 2.0-flash is the current default
-            model="gemini-2.0-flash",
-            contents=prompt,
+            model=_ICD10_MODEL,
+            contents=contents,
+            config=_types.GenerateContentConfig(
+                temperature=0.1,
+                max_output_tokens=1024,
+                response_mime_type="application/json",
+            ),
         )
 
-        # FIX: response.text can be None when Gemini blocks output via safety
-        # filters. Calling .strip() on None raises AttributeError which was the
-        # root cause of the 500 — it leaked past this try block in the old code.
         raw = response.text
         if not raw:
             raise ValueError("Gemini returned an empty/blocked response")
@@ -1550,7 +1559,7 @@ def icd10_suggest(current_user):
         logger.error("Gemini API error in icd10_suggest: %s", e)
         return jsonify({'error': 'AI service temporarily unavailable'}), 502
 
-    # Strip markdown fences Gemini sometimes wraps its output in
+    # Strip fences as a safety net (response_mime_type makes this rare)
     raw = _strip_markdown_fences(raw)
 
     try:
