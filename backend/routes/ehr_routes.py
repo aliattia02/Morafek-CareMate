@@ -5,6 +5,11 @@ from uuid import uuid4
 from utils.auth import token_required
 from utils.error_handler import api_error_handler
 from routes.doctor_routes import check_doctor_patient_access
+from utils.fhir_de import (
+    build_observations_from_vitals_doc,
+    build_document_bundle,
+    build_isik_observation_vitals_fields,
+)
 from config import mongo
 import cloudinary.uploader
 import logging
@@ -54,6 +59,12 @@ def create_vitals(current_user, patient_id):
     recorded_by = str(current_user['_id'])
     effective_dt = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
 
+    # Determine performer reference — doctor recording on behalf of patient,
+    # or patient self-reporting.
+    recorder_type  = current_user.get('user_type', 'patient')
+    performer_type = 'Practitioner' if recorder_type == 'doctor' else 'Patient'
+    performer_ref  = f'{performer_type}/{recorded_by}'
+
     document = {
         'resourceType': 'Observation',
         'id': str(uuid4()),
@@ -76,6 +87,8 @@ def create_vitals(current_user, patient_id):
         },
         'subject': {'reference': f'Patient/{patient_id}'},
         'effectiveDateTime': effective_dt,
+        # performer — required by ISiK and MII profiles
+        'performer': [{'reference': performer_ref}],
         'component': [
             {
                 'code': {'coding': [{'system': 'http://loinc.org',
@@ -108,6 +121,9 @@ def create_vitals(current_user, patient_id):
             }
         ]
     }
+
+    # Stamp de.basisprofil.r4 + ISiK profile URLs onto meta.profile
+    build_isik_observation_vitals_fields(document)
 
     result = mongo.db.ehr_vitals.insert_one(document)
     logger.info("Vitals observation stored in ehr_vitals")
@@ -1656,67 +1672,116 @@ def icd10_suggest_test():
 def fhir_export(current_user):
     """GET /api/patient/fhir-export — export the patient's full EHR as a FHIR R4 Bundle.
 
-    Returns a FHIR R4 Bundle (type: "document") containing:
-      - Observation resources  (vitals)
+    Returns a conformant FHIR R4 document Bundle containing:
+      - Composition            (required first entry, FHIR R4 §3.3)
+      - Patient                (self-contained — referenced resources must be bundled)
+      - Observation resources  (vitals — split into one per vital sign)
       - Encounter resources    (visits)
       - Condition resources    (diagnoses linked to visits)
       - DocumentReference resources (uploaded documents)
+
+    Conformance fixes applied vs. previous version:
+      • Bundle.total removed   (invalid for type=document)
+      • Bundle.identifier added (required by KBV / gematik ePA)
+      • Composition added as first entry (FHIR R4 §3.3)
+      • Observations split per vital sign (MII / ISiK requirement)
+      • Patient resource bundled (document must be self-contained)
+      • performer added to all Observations
     """
     if current_user.get('user_type') != 'patient':
         return jsonify({'error': 'Unauthorized access'}), 403
 
     patient_id = str(current_user['_id'])
+    # The patient is both the subject and the author of their own summary.
+    author_ref = f'Patient/{patient_id}'
     entries = []
 
-    # Vitals — Observation resources
-    for doc in mongo.db.ehr_vitals.find({'patient_id': patient_id}):
-        resource = {k: v for k, v in doc.items() if k not in ('_id', 'patient_id', 'recorded_by')}
-        resource['resourceType'] = 'Observation'
-        resource.setdefault('id', str(doc['_id']))
-        entries.append({
-            'fullUrl': f'urn:uuid:{resource["id"]}',
-            'resource': resource,
-        })
+    # ── Patient resource (self-contained bundle requirement) ──────────────────
+    from utils.fhir_de import build_fhir_patient
+    from config import mongo as _mongo
+    from bson.objectid import ObjectId as _ObjId
 
-    # Visits — Encounter resources
+    user    = _mongo.db.users.find_one({'_id': _ObjId(patient_id)}, {'password': 0}) or {}
+    id_doc  = _mongo.db.patient_fhir_identifiers.find_one({'patient_id': patient_id}) or {}
+    medical = _mongo.db.patient_profiles.find_one({'patient_id': patient_id}) or {}
+    fhir_patient = build_fhir_patient(
+        user,
+        gkv_kvid    = id_doc.get('gkv_kvid'),
+        birthdate   = medical.get('date_of_birth'),
+        gender      = medical.get('gender'),
+        phone       = id_doc.get('phone'),
+        street      = id_doc.get('street'),
+        postal_code = id_doc.get('postal_code'),
+        city        = id_doc.get('city'),
+    )
+    entries.append({
+        'fullUrl':  f'urn:uuid:{patient_id}',
+        'resource': fhir_patient,
+    })
+
+    # ── Vitals — split each stored doc into separate Observations ─────────────
+    for doc in mongo.db.ehr_vitals.find({'patient_id': patient_id}):
+        # performer: the doctor who recorded it, or the patient for self-reports
+        recorded_by = doc.get('recorded_by')
+        if recorded_by:
+            doc_user = mongo.db.users.find_one(
+                {'_id': ObjectId(recorded_by)}, {'user_type': 1}
+            ) or {}
+            utype        = doc_user.get('user_type', 'patient')
+            performer_r  = f"{'Practitioner' if utype == 'doctor' else 'Patient'}/{recorded_by}"
+        else:
+            performer_r = author_ref
+
+        for obs in build_observations_from_vitals_doc(
+            doc, patient_id, performer_ref=performer_r
+        ):
+            entries.append({
+                'fullUrl':  f'urn:uuid:{obs["id"]}',
+                'resource': obs,
+            })
+
+    # ── Visits — Encounter resources ──────────────────────────────────────────
     for doc in mongo.db.ehr_visits.find({'patient_id': patient_id}):
-        resource = {k: v for k, v in doc.items() if k not in ('_id', 'patient_id', 'doctor_id')}
+        resource = {k: v for k, v in doc.items()
+                    if k not in ('_id', 'patient_id', 'doctor_id')}
         resource['resourceType'] = 'Encounter'
         resource.setdefault('id', str(doc['_id']))
+        # Add ISiK profile stamp if missing
+        from utils.fhir_de import add_de_profile, PROFILE
+        add_de_profile(resource, PROFILE.ENCOUNTER_DE, PROFILE.ISIK_ENCOUNTER)
         entries.append({
-            'fullUrl': f'urn:uuid:{resource["id"]}',
+            'fullUrl':  f'urn:uuid:{resource["id"]}',
             'resource': resource,
         })
 
-    # Conditions — Condition resources
+    # ── Conditions ────────────────────────────────────────────────────────────
     for doc in mongo.db.ehr_conditions.find({'patient_id': patient_id}):
-        resource = {k: v for k, v in doc.items() if k not in ('_id', 'patient_id', 'encounter_id')}
+        resource = {k: v for k, v in doc.items()
+                    if k not in ('_id', 'patient_id', 'encounter_id')}
         resource['resourceType'] = 'Condition'
         resource.setdefault('id', str(doc['_id']))
+        from utils.fhir_de import add_de_profile, PROFILE
+        add_de_profile(resource, PROFILE.CONDITION_DE, PROFILE.ISIK_CONDITION)
         entries.append({
-            'fullUrl': f'urn:uuid:{resource["id"]}',
+            'fullUrl':  f'urn:uuid:{resource["id"]}',
             'resource': resource,
         })
 
-    # Documents — DocumentReference resources
+    # ── Documents — DocumentReference resources ───────────────────────────────
     for doc in mongo.db.ehr_documents.find({'patient_id': patient_id}):
         resource = {k: v for k, v in doc.items()
                     if k not in ('_id', 'patient_id', 'uploaded_by', 'cloudinary_public_id')}
         resource['resourceType'] = 'DocumentReference'
         resource.setdefault('id', str(doc['_id']))
         entries.append({
-            'fullUrl': f'urn:uuid:{resource["id"]}',
+            'fullUrl':  f'urn:uuid:{resource["id"]}',
             'resource': resource,
         })
 
-    bundle = {
-        'resourceType': 'Bundle',
-        'id': str(uuid4()),
-        'type': 'document',
-        'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-        'total': len(entries),
-        'entry': entries,
-    }
-
-    logger.info('FHIR R4 Bundle exported (%d entries)', len(entries))
+    bundle = build_document_bundle(patient_id, entries, author_ref=author_ref)
+    logger.info(
+        'FHIR R4 document Bundle exported (%d entries, %d observations)',
+        len(bundle['entry']),
+        sum(1 for e in entries if e['resource'].get('resourceType') == 'Observation'),
+    )
     return jsonify(bundle), 200

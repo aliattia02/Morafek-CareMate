@@ -359,6 +359,264 @@ def build_isik_observation_vitals_fields(observation_doc: dict) -> dict:
 
 # ─── Practitioner LANR identifier helper ──────────────────────────────────────
 
+# ─── FHIR Observation splitting ───────────────────────────────────────────────
+
+def build_observations_from_vitals_doc(
+    doc: dict,
+    patient_id: str,
+    *,
+    performer_ref: str | None = None,
+    encounter_ref: str | None = None,
+) -> list[dict]:
+    """
+    Convert a single stored vitals document (which may contain mixed components)
+    into a list of separate, conformant FHIR Observations — one per vital sign.
+
+    German FHIR profiles (MII, ISiK, KBV baseline) require each vital sign to
+    be its own Observation. The only exception is blood pressure: systolic and
+    diastolic MAY share one Observation under LOINC 55284-4.
+
+    Returns 1-3 Observation resources depending on which values are present.
+
+    Parameters
+    ----------
+    doc           : MongoDB vitals document as stored by create_vitals()
+    patient_id    : patient's MongoDB ObjectId string
+    performer_ref : FHIR reference string for the recorder,
+                    e.g. "Practitioner/abc123" or "Patient/abc123".
+                    Falls back to the patient reference for self-measurements.
+    encounter_ref : Optional Encounter reference (e.g. "Encounter/xyz").
+    """
+    components = doc.get("component", [])
+
+    # Extract values from stored mixed components
+    bp_sys = bp_dia = hr_val = wt_val = None
+    for comp in components:
+        code_val = (comp.get("code", {}).get("coding") or [{}])[0].get("code")
+        qty = comp.get("valueQuantity", {}).get("value")
+        if code_val == "8480-6":
+            bp_sys = qty
+        elif code_val == "8462-4":
+            bp_dia = qty
+        elif code_val == "8867-4":
+            hr_val = qty
+        elif code_val == "29463-7":
+            wt_val = qty
+
+    effective_dt = doc.get("effectiveDateTime") or _now_iso()
+    # performer: use supplied ref, or fall back to the patient (self-measurement)
+    performer = [{"reference": performer_ref or f"Patient/{patient_id}"}]
+
+    # Fields shared across all sibling observations
+    base: dict = {
+        "status": doc.get("status", "final"),
+        "category": doc.get("category") or [{
+            "coding": [{
+                "system":  "http://terminology.hl7.org/CodeSystem/observation-category",
+                "code":    "vital-signs",
+                "display": "Vital Signs",
+            }]
+        }],
+        "subject":           {"reference": f"Patient/{patient_id}"},
+        "effectiveDateTime": effective_dt,
+        "performer":         performer,
+    }
+    if encounter_ref:
+        base["encounter"] = {"reference": encounter_ref}
+
+    observations: list[dict] = []
+
+    # ── Blood pressure (systolic + diastolic share one Observation) ───────────
+    if bp_sys is not None or bp_dia is not None:
+        bp_obs: dict = {
+            "resourceType": "Observation",
+            "id":           doc.get("id") or str(uuid4()),
+            **base,
+            "code": {"coding": [{
+                "system":  "http://loinc.org",
+                "code":    "55284-4",
+                "display": "Blood pressure systolic and diastolic",
+            }]},
+            "component": [],
+        }
+        if bp_sys is not None:
+            bp_obs["component"].append({
+                "code": {"coding": [{"system": "http://loinc.org",
+                                     "code": "8480-6", "display": "Systolic BP"}]},
+                "valueQuantity": {"value": bp_sys, "unit": "mmHg",
+                                  "system": "http://unitsofmeasure.org", "code": "mm[Hg]"},
+            })
+        if bp_dia is not None:
+            bp_obs["component"].append({
+                "code": {"coding": [{"system": "http://loinc.org",
+                                     "code": "8462-4", "display": "Diastolic BP"}]},
+                "valueQuantity": {"value": bp_dia, "unit": "mmHg",
+                                  "system": "http://unitsofmeasure.org", "code": "mm[Hg]"},
+            })
+        # Carry over free-text notes and app-specific extensions from the source doc
+        if doc.get("note"):
+            bp_obs["note"] = doc["note"]
+        if doc.get("extension"):
+            bp_obs["extension"] = doc["extension"]
+        add_de_profile(bp_obs, PROFILE.OBSERVATION_DE, PROFILE.ISIK_OBSERVATION_VITALS)
+        observations.append(bp_obs)
+
+    # ── Heart rate ────────────────────────────────────────────────────────────
+    if hr_val is not None:
+        hr_obs: dict = {
+            "resourceType": "Observation",
+            "id":           str(uuid4()),
+            **base,
+            "code": {"coding": [{"system": "http://loinc.org",
+                                 "code": "8867-4", "display": "Heart rate"}]},
+            "valueQuantity": {"value": hr_val, "unit": "/min",
+                              "system": "http://unitsofmeasure.org", "code": "/min"},
+        }
+        add_de_profile(hr_obs, PROFILE.OBSERVATION_DE, PROFILE.ISIK_OBSERVATION_VITALS)
+        observations.append(hr_obs)
+
+    # ── Body weight ───────────────────────────────────────────────────────────
+    if wt_val is not None:
+        wt_obs: dict = {
+            "resourceType": "Observation",
+            "id":           str(uuid4()),
+            **base,
+            "code": {"coding": [{"system": "http://loinc.org",
+                                 "code": "29463-7", "display": "Body weight"}]},
+            "valueQuantity": {"value": wt_val, "unit": "kg",
+                              "system": "http://unitsofmeasure.org", "code": "kg"},
+        }
+        add_de_profile(wt_obs, PROFILE.OBSERVATION_DE, PROFILE.ISIK_OBSERVATION_VITALS)
+        observations.append(wt_obs)
+
+    return observations
+
+
+# ─── FHIR Composition ──────────────────────────────────────────────────────────
+
+_SECTION_META: dict[str, tuple[str, str, str]] = {
+    # resourceType → (section title, LOINC code, display)
+    "Observation":       ("Vitalzeichen",   "8716-3",  "Vital signs"),
+    "Encounter":         ("Besuche",        "46240-8", "History of encounters"),
+    "Condition":         ("Diagnosen",      "11450-4", "Problem list"),
+    "DocumentReference": ("Dokumente",      "46209-3", "Provider orders"),
+}
+
+
+def build_composition(
+    patient_id: str,
+    *,
+    author_ref: str,
+    title: str = "Morafek CareMate — Patientenakte",
+    section_entries: list[dict] | None = None,
+) -> dict:
+    """
+    Build a FHIR R4 Composition resource.
+
+    FHIR R4 §3.3 requires a Composition as the *first* entry in every
+    document Bundle. Without it the server is non-conformant — validators
+    (gematik Referenzvalidator, HAPI) will reject the Bundle.
+
+    Parameters
+    ----------
+    patient_id      : patient MongoDB ObjectId string
+    author_ref      : FHIR reference for the document author,
+                      e.g. "Practitioner/abc" or "Patient/abc".
+    title           : human-readable document title
+    section_entries : the other Bundle entries (used to auto-build sections)
+    """
+    from collections import defaultdict
+
+    comp_id = str(uuid4())
+
+    # Auto-group entries by resourceType → Composition sections
+    by_type: dict[str, list[dict]] = defaultdict(list)
+    for entry in (section_entries or []):
+        rt = entry.get("resource", {}).get("resourceType", "Unknown")
+        by_type[rt].append({"reference": entry.get("fullUrl", "")})
+
+    sections = []
+    for rt, refs in by_type.items():
+        title_str, loinc_code, loinc_display = _SECTION_META.get(
+            rt, (rt, "11450-4", "Problem list")
+        )
+        sections.append({
+            "title": title_str,
+            "code": {"coding": [{"system": "http://loinc.org",
+                                 "code": loinc_code, "display": loinc_display}]},
+            "entry": refs,
+        })
+
+    return {
+        "resourceType": "Composition",
+        "id":           comp_id,
+        "status":       "final",
+        "type": {"coding": [{
+            "system":  "http://loinc.org",
+            "code":    "60591-5",
+            "display": "Patient summary Document",
+        }]},
+        "subject": {"reference": f"Patient/{patient_id}"},
+        "date":    _now_iso(),
+        "author":  [{"reference": author_ref}],
+        "title":   title,
+        "section": sections,
+    }
+
+
+# ─── Conformant document Bundle ────────────────────────────────────────────────
+
+def build_document_bundle(
+    patient_id: str,
+    entries: list[dict],
+    *,
+    author_ref: str,
+) -> dict:
+    """
+    Wrap a list of FHIR entries into a conformant R4 document Bundle.
+
+    Fixes vs. the previous implementation
+    ──────────────────────────────────────
+    • Adds    Bundle.identifier   — required by KBV and gematik ePA profiles
+    • Removes Bundle.total        — invalid for type=document (only for searchset)
+    • Prepends Composition entry  — FHIR R4 §3.3 hard requirement
+
+    Parameters
+    ----------
+    patient_id : patient MongoDB ObjectId string
+    entries    : FHIR Bundle entries (each a dict with 'fullUrl' + 'resource')
+    author_ref : passed through to build_composition()
+    """
+    bundle_id   = str(uuid4())
+    composition = build_composition(
+        patient_id,
+        author_ref=author_ref,
+        section_entries=entries,
+    )
+
+    return {
+        "resourceType": "Bundle",
+        "id":           bundle_id,
+        "meta": {
+            "profile": ["http://hl7.org/fhir/StructureDefinition/Bundle"],
+        },
+        # Bundle.identifier — persistent, globally unique ID for this document
+        "identifier": {
+            "system": "https://morafek.app/fhir/sid/bundle-id",
+            "value":  bundle_id,
+        },
+        "type":      "document",
+        "timestamp": _now_iso(),
+        # Composition MUST be first (FHIR R4 §3.3)
+        "entry": [
+            {"fullUrl": f"urn:uuid:{composition['id']}", "resource": composition},
+            *entries,
+        ],
+    }
+
+
+# ─── Practitioner LANR identifier helper ──────────────────────────────────────
+
 def build_lanr_identifier(lanr_value: str) -> dict:
     """
     Build a de.basisprofil.r4-compliant LANR identifier entry.
