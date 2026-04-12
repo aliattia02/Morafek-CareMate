@@ -1557,7 +1557,8 @@ def icd10_suggest(current_user):
         return jsonify({'error': 'AI service is not configured on this server'}), 503
     except Exception as e:
         logger.error("Gemini API error in icd10_suggest: %s", e)
-        return jsonify({'error': 'AI service temporarily unavailable'}), 502
+        # Include the real error detail so it's visible in the app (not just in Render logs)
+        return jsonify({'error': 'AI service temporarily unavailable', 'detail': str(e)}), 502
 
     # Strip fences as a safety net (response_mime_type makes this rare)
     raw = _strip_markdown_fences(raw)
@@ -1588,6 +1589,63 @@ def icd10_suggest(current_user):
         len(clean), str(current_user['_id'])
     )
     return jsonify({"suggestions": clean}), 200
+
+
+# ─── ICD-10 Connectivity Test (no auth — open in browser to diagnose) ────────
+#
+# GET /api/ehr/icd10-suggest/test
+# Returns the real Gemini error message so you can see exactly why it fails
+# without needing to dig through Render logs.
+# Safe to leave deployed — it only sends a harmless "ping" to Gemini.
+
+@ehr_routes.route('/api/ehr/icd10-suggest/test', methods=['GET'])
+def icd10_suggest_test():
+    """
+    Connectivity test — no auth required.
+    Open in a browser:  https://morafek-caremate.onrender.com/api/ehr/icd10-suggest/test
+
+    Returns JSON with status + the real error detail so you can diagnose the 502.
+    """
+    import os as _os_test
+    api_key = _os_test.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return jsonify({
+            "status": "error",
+            "step": "env",
+            "detail": "GEMINI_API_KEY is not set in Render environment variables",
+        }), 500
+
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash-latest"]
+    results = {}
+
+    try:
+        from google import genai as _genai_t
+        from google.genai import types as _types_t
+        client = _genai_t.Client(api_key=api_key)
+    except ImportError as e:
+        return jsonify({
+            "status": "error",
+            "step": "import",
+            "detail": f"google-genai package not installed or broken: {e}",
+        }), 500
+
+    for model in models_to_try:
+        try:
+            resp = client.models.generate_content(
+                model=model,
+                contents=[_types_t.Part.from_text(text="ping — reply with one word: ok")],
+                config=_types_t.GenerateContentConfig(max_output_tokens=10),
+            )
+            results[model] = {"ok": True, "response": resp.text.strip() if resp.text else "(empty)"}
+        except Exception as exc:
+            results[model] = {"ok": False, "error": str(exc)}
+
+    any_ok = any(v["ok"] for v in results.values())
+    return jsonify({
+        "status": "ok" if any_ok else "error",
+        "key_prefix": api_key[:8] + "…",   # show first 8 chars to confirm correct key
+        "models": results,
+    }), 200 if any_ok else 502
 
 
 # ─── FHIR R4 Bundle Export ────────────────────────────────────────────────────
