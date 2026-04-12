@@ -1542,7 +1542,7 @@ def icd10_suggest(current_user):
             contents=contents,
             config=_types.GenerateContentConfig(
                 temperature=0.1,
-                max_output_tokens=1024,
+                max_output_tokens=2048,
                 response_mime_type="application/json",
             ),
         )
