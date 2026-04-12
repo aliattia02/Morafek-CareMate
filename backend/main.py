@@ -67,24 +67,20 @@ def create_app():
         from routes.clinic_routes     import clinic_routes
 
         # ── German FHIR additions ─────────────────────────────────────────
-        # metadata_bp   → GET /metadata  (FHIR CapabilityStatement, no auth)
-        # fhir_patient_bp → GET /fhir/Patient/{id}
-        #                   GET /fhir/Patient?...  (searchset Bundle)
-        #                   PUT /api/patient/fhir-identifiers
-        from routes.metadata_route     import metadata_bp
-        from routes.fhir_patient_route import fhir_patient_bp
+        # metadata_bp → GET /metadata  (FHIR CapabilityStatement, no auth)
+        # FHIR Patient endpoints (read + search + fhir-identifiers) are now
+        # part of patient_routes — no separate fhir_patient_route module needed.
+        from routes.metadata_route import metadata_bp
 
         blueprints = [
             (auth_routes,       ''),
             (doctor_routes,     ''),
-            (patient_routes,    ''),
+            (patient_routes,    ''),   # includes /fhir/Patient/* and /api/patient/fhir-identifiers
             (ehr_routes,        ''),
             (upload_routes,     ''),
             (monitoring_routes, ''),
             (clinic_routes,     ''),
-            # ── German FHIR layer ─────────────────────────────────────────
             (metadata_bp,       ''),   # /metadata — must be unauthenticated
-            (fhir_patient_bp,   ''),   # /fhir/Patient/*
         ]
 
         for blueprint, url_prefix in blueprints:
@@ -96,8 +92,6 @@ def create_app():
         raise
 
     # ── MongoDB startup indexes ───────────────────────────────────────────────
-    # Idempotent — MongoDB silently ignores index-already-exists.
-    # Called after blueprints so mongo.db is guaranteed to be bound.
     _ensure_mongo_indexes(logger)
 
     return app
@@ -107,16 +101,10 @@ def _ensure_mongo_indexes(logger):
     """
     Create MongoDB indexes required by the German FHIR layer.
     All calls are idempotent — safe to run on every restart.
-
-    patient_fhir_identifiers
-      • unique on patient_id  — one record per patient
-      • sparse on gkv_kvid    — fast GKV lookup; sparse because most patients
-                                won't have entered their GKV number initially
     """
     try:
         from pymongo import ASCENDING
 
-        # patient_fhir_identifiers
         mongo.db.patient_fhir_identifiers.create_index(
             [("patient_id", ASCENDING)],
             unique=True,
@@ -128,8 +116,6 @@ def _ensure_mongo_indexes(logger):
             name="idx_gkv_kvid_sparse",
         )
 
-        # ehr_vitals / ehr_visits / ehr_conditions — improve search performance
-        # for ISiK search parameter queries (patient + date filtering).
         for coll_name in ("ehr_vitals", "ehr_visits", "ehr_conditions"):
             mongo.db[coll_name].create_index(
                 [("patient_id", ASCENDING)],
@@ -139,8 +125,6 @@ def _ensure_mongo_indexes(logger):
         logger.info("MongoDB indexes ensured for German FHIR layer")
 
     except Exception as exc:
-        # Index creation failure is non-fatal — log and continue.
-        # The app works without the indexes; searches are just slower.
         logger.warning(f"Could not ensure MongoDB indexes: {exc}")
 
 
