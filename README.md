@@ -55,7 +55,6 @@ Use the demo accounts below, or tap the **"Demo Account"** banner on the login s
 | 🧑 Patient | `test1` | `4444` |
 | 👨‍⚕️ Doctor | `testd1` | `4444` |
 
-> **Note:** The backend runs on a free Render instance and may take ~30 seconds to wake up on first load. A progress banner will appear while it starts.
 
 ---
 
