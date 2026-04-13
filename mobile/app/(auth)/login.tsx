@@ -263,6 +263,31 @@ export default function LoginScreen() {
               </Link>
             </View>
 
+            {/* ── Test Credentials ── */}
+            <TouchableOpacity
+              style={testCredStyles.box}
+              onPress={() => {
+                setUsername(userType === 'doctor' ? 'testd1' : 'test1');
+                setPassword('4444');
+                setValidationErrors({});
+              }}
+              activeOpacity={0.75}
+              disabled={busy}
+            >
+              <View style={testCredStyles.row}>
+                <Text style={testCredStyles.title}>
+                  🧪 Demo {userType === 'doctor' ? 'Doctor' : 'Patient'} Account
+                </Text>
+                <View style={testCredStyles.fillBadge}>
+                  <Text style={testCredStyles.fillBadgeText}>Tap to fill</Text>
+                </View>
+              </View>
+              <Text style={testCredStyles.cred}>
+                Username: <Text style={testCredStyles.credVal}>{userType === 'doctor' ? 'testd1' : 'test1'}</Text>
+                {'   '}Password: <Text style={testCredStyles.credVal}>4444</Text>
+              </Text>
+            </TouchableOpacity>
+
             {/* Wake-up banner */}
             {isWakingUp && (
               <WakeUpBanner message={wakeProgress.message} percent={wakeProgress.percent} />
@@ -320,6 +345,51 @@ export default function LoginScreen() {
     </SafeAreaView>
   );
 }
+
+// ─── Test credentials box ─────────────────────────────────────────────────────
+
+const testCredStyles = StyleSheet.create({
+  box: {
+    backgroundColor: '#FFF8E1',
+    borderWidth: 1,
+    borderColor: '#FFD54F',
+    borderRadius: E.radiusSm,
+    padding: 12,
+    marginBottom: E.padSm,
+    borderStyle: 'dashed',
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  title: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#5D4037',
+  },
+  fillBadge: {
+    backgroundColor: '#FFD54F',
+    borderRadius: 99,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  fillBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#4E342E',
+  },
+  cred: {
+    fontSize: 12,
+    color: '#6D4C41',
+  },
+  credVal: {
+    fontWeight: '700',
+    color: '#3E2723',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+});
 
 // ─── Web-native input style (plain JS object, not StyleSheet) ─────────────────
 // Using a raw <input> guarantees full-width on web regardless of how the

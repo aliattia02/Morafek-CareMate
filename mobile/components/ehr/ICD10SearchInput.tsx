@@ -14,14 +14,25 @@
  * • Selecting a result fills both the code AND description fields in the
  *   parent form via the `onSelect` callback.
  *
+ * Fix (web Expo)
+ * ──────────────
+ * On web, clicking the ✨ KI button blurs the TextInput, which fired
+ * the onBlur → setTimeout(dismissList, 150) race — closing the list
+ * before the AI response arrived. Fixed by:
+ *   1. aiLoadingRef — a ref (not state) so the onBlur timeout always
+ *      reads the current value without stale-closure issues.
+ *   2. handleAIAssist re-calls setShowList(true) after results arrive.
+ *   3. onBlur respects aiLoadingRef and skips dismissal while loading.
+ *
  * Props
  * ────────
- * value        – current ICD-10 code string (controlled)
- * onSelect     – called when the user picks a result: { code, description }
+ * value          – current ICD-10 code string (controlled)
+ * onSelect       – called when the user picks a result: { code, description }
  * chiefComplaint – forwarded to the AI-assist endpoint
  * diagnosisHint  – free-text the doctor has typed so far (used by AI-assist)
- * placeholder  – input placeholder (default: "e.g. I10, Hypertonie")
- * style        – optional outer container style override
+ * placeholder    – input placeholder (default: "z.B. I10, Hypertonie…")
+ * style          – optional outer container style override
+ * aiAssist       – show AI-Assist button (default: true)
  */
 
 import React, {
@@ -29,7 +40,6 @@ import React, {
   useEffect,
   useRef,
   useCallback,
-  useMemo,
 } from 'react';
 import {
   View,
@@ -154,20 +164,27 @@ export default function ICD10SearchInput({
   style,
   aiAssist       = true,
 }: Props) {
-  const [query,        setQuery]        = useState(value);
-  const [results,      setResults]      = useState<ICD10Entry[]>([]);
-  const [aiResults,    setAiResults]    = useState<AISuggestion[] | null>(null);
-  const [showList,     setShowList]     = useState(false);
-  const [aiLoading,    setAiLoading]    = useState(false);
-  const [aiError,      setAiError]      = useState<string | null>(null);
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [query,     setQuery]     = useState(value);
+  const [results,   setResults]   = useState<ICD10Entry[]>([]);
+  const [aiResults, setAiResults] = useState<AISuggestion[] | null>(null);
+  const [showList,  setShowList]  = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError,   setAiError]   = useState<string | null>(null);
+
+  const debounceRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /**
+   * aiLoadingRef mirrors aiLoading state as a ref so the onBlur
+   * setTimeout callback always reads the live value — not a stale closure.
+   * This is the core fix for the web "no KI suggestions" bug.
+   */
+  const aiLoadingRef = useRef(false);
 
   // Sync external value → internal query when parent resets the field
   useEffect(() => {
     setQuery(value);
   }, [value]);
 
-  // ── Local search with debounce ──────────────────────────────────────────────
+  // ── Local search with debounce ────────────────────────────────────────────
   const handleChangeText = useCallback((text: string) => {
     setQuery(text);
     setAiResults(null);
@@ -188,9 +205,23 @@ export default function ICD10SearchInput({
     }, DEBOUNCE_MS);
   }, []);
 
-  // ── AI Assist ──────────────────────────────────────────────────────────────
+  // ── AI Assist ─────────────────────────────────────────────────────────────
+  //
+  // BUG FIX: On web, clicking this button fires onBlur on the TextInput,
+  // which schedules dismissList after 150 ms. The AI call takes longer, so
+  // the dropdown was being closed before results arrived.
+  //
+  // Solution:
+  //   • Set aiLoadingRef.current = true synchronously before the request so
+  //     the onBlur timeout skips dismissal.
+  //   • Re-call setShowList(true) after results arrive in case onBlur already
+  //     fired before the ref was set (very fast clicks / slow JS thread).
+  //   • Clear the ref in finally so normal blur-to-close resumes afterwards.
   const handleAIAssist = useCallback(async () => {
+    // On native this dismisses the keyboard; on web it's a no-op — that's fine.
     Keyboard.dismiss();
+
+    aiLoadingRef.current = true;
     setAiLoading(true);
     setAiError(null);
     setAiResults(null);
@@ -200,21 +231,26 @@ export default function ICD10SearchInput({
       const res = await apiClient.post<{ suggestions: AISuggestion[] }>(
         API.EHR.ICD10_SUGGEST,
         {
-          chief_complaint:  chiefComplaint,
-          diagnosis_hint:   diagnosisHint || query,
+          chief_complaint: chiefComplaint,
+          diagnosis_hint:  diagnosisHint || query,
         }
       );
-      setAiResults(res.data.suggestions ?? []);
+      const suggestions = res.data.suggestions ?? [];
+      setAiResults(suggestions);
+      // Re-open in case onBlur fired and closed the list while we were waiting
+      setShowList(true);
     } catch (err: unknown) {
       setAiError(
         err instanceof Error ? err.message : 'AI-Vorschläge nicht verfügbar'
       );
+      setShowList(false);
     } finally {
+      aiLoadingRef.current = false;
       setAiLoading(false);
     }
   }, [chiefComplaint, diagnosisHint, query]);
 
-  // ── Select ─────────────────────────────────────────────────────────────────
+  // ── Select ────────────────────────────────────────────────────────────────
   const handleSelect = useCallback(
     (item: ICD10Entry | AISuggestion) => {
       const code = 'code' in item ? item.code : item.c;
@@ -233,7 +269,7 @@ export default function ICD10SearchInput({
     setShowList(false);
   }, []);
 
-  // ── Render list items ──────────────────────────────────────────────────────
+  // ── Render list items ─────────────────────────────────────────────────────
   const listData: (ICD10Entry | AISuggestion)[] = aiResults ?? results;
 
   return (
@@ -259,8 +295,13 @@ export default function ICD10SearchInput({
             if (results.length > 0) setShowList(true);
           }}
           onBlur={() => {
-            // short delay lets a tap on a result register first
-            setTimeout(dismissList, 150);
+            // FIX: skip dismissal while the AI request is in flight.
+            // Using a ref (not state) avoids stale-closure issues inside setTimeout.
+            setTimeout(() => {
+              if (!aiLoadingRef.current) {
+                dismissList();
+              }
+            }, 150);
           }}
           accessibilityLabel="ICD-10-GM Suche"
         />
@@ -325,7 +366,6 @@ export default function ICD10SearchInput({
             keyboardShouldPersistTaps="always"
             style={styles.list}
             ItemSeparatorComponent={() => <View style={styles.separator} />}
-            // Performance on large lists
             initialNumToRender={10}
             maxToRenderPerBatch={10}
             windowSize={5}
@@ -421,17 +461,18 @@ const styles = StyleSheet.create({
     ...Platform.select({
       ios:     { shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.12, shadowRadius: 8 },
       android: { elevation: 8 },
+      web:     { boxShadow: '0 4px 16px rgba(0,0,0,0.12)' },
     }),
   },
   dropdownHeader: {
-    flexDirection:   'row',
-    alignItems:      'center',
-    justifyContent:  'space-between',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.background,
+    flexDirection:        'row',
+    alignItems:           'center',
+    justifyContent:       'space-between',
+    paddingHorizontal:    spacing.md,
+    paddingVertical:      spacing.xs,
+    borderBottomWidth:    1,
+    borderBottomColor:    colors.border,
+    backgroundColor:      colors.background,
     borderTopLeftRadius:  borderRadius.md,
     borderTopRightRadius: borderRadius.md,
   },
@@ -451,20 +492,20 @@ const styles = StyleSheet.create({
 
   // Result row
   resultRow: {
-    flexDirection:  'row',
-    alignItems:     'flex-start',
-    gap:            spacing.sm,
-    paddingVertical:  spacing.sm,
+    flexDirection:     'row',
+    alignItems:        'flex-start',
+    gap:               spacing.sm,
+    paddingVertical:   spacing.sm,
     paddingHorizontal: spacing.md,
   },
   resultBadge: {
-    backgroundColor:  colors.primary + '15',
-    borderRadius:     4,
+    backgroundColor:   colors.primary + '15',
+    borderRadius:      4,
     paddingHorizontal: 6,
-    paddingVertical:  2,
-    alignSelf:        'flex-start',
-    marginTop:        2,
-    flexShrink:       0,
+    paddingVertical:   2,
+    alignSelf:         'flex-start',
+    marginTop:         2,
+    flexShrink:        0,
   },
   resultCode: {
     ...typography.small,
@@ -488,8 +529,8 @@ const styles = StyleSheet.create({
   },
 
   separator: {
-    height:          1,
-    backgroundColor: colors.border,
+    height:           1,
+    backgroundColor:  colors.border,
     marginHorizontal: spacing.md,
   },
 });
