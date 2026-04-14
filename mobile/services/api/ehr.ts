@@ -33,6 +33,7 @@ export interface VisitResponse {
   diagnosis_text: string;
   notes: string;
   doctor_id: string;
+  encounter_fhir_id?: string;
 }
 
 export interface MessageResponse {

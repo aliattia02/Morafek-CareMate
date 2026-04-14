@@ -3,7 +3,31 @@
  */
 
 import { Platform } from 'react-native';
-import type { VitalResponse } from '@/services/api/ehr';
+import type {
+  VitalResponse,
+  VisitResponse,
+  ExerciseResponse,
+  DocumentResponse,
+  MessageResponse,
+} from '@/services/api/ehr';
+
+export interface ConditionRow {
+  id: string;
+  icd10_code: string;
+  icd10_text: string;
+  clinical_status: string;
+  encounter_id: string;
+  onset_date: string;
+}
+
+export interface PatientFhirIdentifiers {
+  patient_id: string;
+  gkv_kvid: string;
+  phone: string;
+  street: string;
+  postal_code: string;
+  city: string;
+}
 
 let db: any;
 
@@ -62,7 +86,55 @@ export function initDB() {
       diagnosis_icd10 TEXT,
       diagnosis_text TEXT,
       notes TEXT,
-      doctor_id TEXT
+      doctor_id TEXT,
+      encounter_fhir_id TEXT
+    );
+    CREATE TABLE IF NOT EXISTS conditions (
+      id TEXT PRIMARY KEY,
+      icd10_code TEXT,
+      icd10_text TEXT,
+      clinical_status TEXT,
+      encounter_id TEXT,
+      onset_date TEXT
+    );
+    CREATE TABLE IF NOT EXISTS exercises (
+      id TEXT PRIMARY KEY,
+      doctor_id TEXT,
+      title TEXT,
+      description TEXT,
+      category TEXT,
+      frequency TEXT,
+      duration_minutes INTEGER,
+      repetitions INTEGER,
+      sets INTEGER,
+      video_url TEXT,
+      image_url TEXT,
+      notes TEXT,
+      done INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS documents (
+      id TEXT PRIMARY KEY,
+      category TEXT,
+      description TEXT,
+      url TEXT,
+      created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS messages (
+      id TEXT PRIMARY KEY,
+      sender_id TEXT,
+      receiver_id TEXT,
+      sender_type TEXT,
+      body TEXT,
+      read INTEGER DEFAULT 0,
+      created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS patient_fhir_identifiers (
+      patient_id TEXT PRIMARY KEY,
+      gkv_kvid TEXT,
+      phone TEXT,
+      street TEXT,
+      postal_code TEXT,
+      city TEXT
     );
     CREATE TABLE IF NOT EXISTS pending_vitals (
       local_id TEXT PRIMARY KEY,
@@ -139,4 +211,182 @@ export function getPendingVitals(): PendingVital[] {
 export function deletePendingVital(localId: string) {
   if (Platform.OS === 'web') return;
   db.runSync(`DELETE FROM pending_vitals WHERE local_id = ?`, [localId]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Visits
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function cacheVisits(visits: VisitResponse[]) {
+  if (Platform.OS === 'web') return;
+
+  for (const v of visits) {
+    db.runSync(
+      `INSERT OR REPLACE INTO visits
+        (id, visit_date, chief_complaint, diagnosis_icd10, diagnosis_text, notes, doctor_id, encounter_fhir_id)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      [
+        v.id,
+        v.visit_date,
+        v.chief_complaint,
+        v.diagnosis_icd10,
+        v.diagnosis_text,
+        v.notes,
+        v.doctor_id,
+        v.encounter_fhir_id ?? null,
+      ]
+    );
+  }
+}
+
+export function getCachedVisits(): VisitResponse[] {
+  if (Platform.OS === 'web') return [];
+
+  return db.getAllSync(`SELECT * FROM visits ORDER BY visit_date DESC`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Conditions
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function cacheConditions(conditions: ConditionRow[]) {
+  if (Platform.OS === 'web') return;
+
+  for (const c of conditions) {
+    db.runSync(
+      `INSERT OR REPLACE INTO conditions VALUES (?,?,?,?,?,?)`,
+      [c.id, c.icd10_code, c.icd10_text, c.clinical_status, c.encounter_id, c.onset_date]
+    );
+  }
+}
+
+export function getCachedConditions(): ConditionRow[] {
+  if (Platform.OS === 'web') return [];
+
+  return db.getAllSync(`SELECT * FROM conditions ORDER BY onset_date DESC`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Exercises
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function cacheExercises(exercises: ExerciseResponse[]) {
+  if (Platform.OS === 'web') return;
+
+  for (const e of exercises) {
+    db.runSync(
+      `INSERT OR REPLACE INTO exercises
+        (id, doctor_id, title, description, category, frequency,
+         duration_minutes, repetitions, sets, video_url, image_url, notes, done)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,COALESCE(
+         (SELECT done FROM exercises WHERE id = ?), 0
+       ))`,
+      [
+        e.id,
+        null,
+        e.title,
+        e.description,
+        e.category,
+        e.frequency,
+        e.duration_minutes ?? null,
+        e.repetitions ?? null,
+        e.sets ?? null,
+        e.video_url ?? null,
+        e.image_url ?? null,
+        e.notes ?? null,
+        e.id,
+      ]
+    );
+  }
+}
+
+export function getCachedExercises(): (ExerciseResponse & { done: boolean })[] {
+  if (Platform.OS === 'web') return [];
+
+  const rows = db.getAllSync(`SELECT * FROM exercises ORDER BY title ASC`);
+  return rows.map((r: any) => ({ ...r, done: r.done === 1 }));
+}
+
+export function markExerciseDoneLocal(exerciseId: string, done: boolean) {
+  if (Platform.OS === 'web') return;
+
+  db.runSync(`UPDATE exercises SET done = ? WHERE id = ?`, [done ? 1 : 0, exerciseId]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Documents
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function cacheDocuments(documents: DocumentResponse[]) {
+  if (Platform.OS === 'web') return;
+
+  for (const d of documents) {
+    db.runSync(
+      `INSERT OR REPLACE INTO documents VALUES (?,?,?,?,?)`,
+      [d.id, d.category, d.description, d.url, d.created_at]
+    );
+  }
+}
+
+export function getCachedDocuments(): DocumentResponse[] {
+  if (Platform.OS === 'web') return [];
+
+  return db.getAllSync(`SELECT * FROM documents ORDER BY created_at DESC`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Messages
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function cacheMessages(messages: MessageResponse[]) {
+  if (Platform.OS === 'web') return;
+
+  for (const m of messages) {
+    db.runSync(
+      `INSERT OR REPLACE INTO messages
+        (id, sender_id, receiver_id, sender_type, body, read, created_at)
+       VALUES (?,?,?,?,?,?,?)`,
+      // DB column is receiver_id; MessageResponse uses recipient_id
+      [m.id, m.sender_id, m.recipient_id, m.sender_type, m.body, m.read ? 1 : 0, m.created_at]
+    );
+  }
+}
+
+export function getCachedMessages(): MessageResponse[] {
+  if (Platform.OS === 'web') return [];
+
+  const rows = db.getAllSync(`SELECT * FROM messages ORDER BY created_at ASC`);
+  return rows.map((r: any) => ({
+    id: r.id,
+    sender_id: r.sender_id,
+    // DB column is receiver_id; map back to recipient_id for MessageResponse
+    recipient_id: r.receiver_id,
+    sender_type: r.sender_type as MessageResponse['sender_type'],
+    body: r.body,
+    read: r.read === 1,
+    created_at: r.created_at,
+  }));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Patient FHIR Identifiers
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function savePatientFhirIdentifiers(data: PatientFhirIdentifiers) {
+  if (Platform.OS === 'web') return;
+
+  db.runSync(
+    `INSERT OR REPLACE INTO patient_fhir_identifiers VALUES (?,?,?,?,?,?)`,
+    [data.patient_id, data.gkv_kvid, data.phone, data.street, data.postal_code, data.city]
+  );
+}
+
+export function getPatientFhirIdentifiers(patientId: string): PatientFhirIdentifiers | null {
+  if (Platform.OS === 'web') return null;
+
+  const rows = db.getAllSync(
+    `SELECT * FROM patient_fhir_identifiers WHERE patient_id = ?`,
+    [patientId]
+  );
+  return rows.length > 0 ? (rows[0] as PatientFhirIdentifiers) : null;
 }
