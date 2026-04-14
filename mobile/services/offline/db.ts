@@ -254,7 +254,9 @@ export function cacheConditions(conditions: ConditionRow[]) {
 
   for (const c of conditions) {
     db.runSync(
-      `INSERT OR REPLACE INTO conditions VALUES (?,?,?,?,?,?)`,
+      `INSERT OR REPLACE INTO conditions
+        (id, icd10_code, icd10_text, clinical_status, encounter_id, onset_date)
+       VALUES (?,?,?,?,?,?)`,
       [c.id, c.icd10_code, c.icd10_text, c.clinical_status, c.encounter_id, c.onset_date]
     );
   }
@@ -322,7 +324,9 @@ export function cacheDocuments(documents: DocumentResponse[]) {
 
   for (const d of documents) {
     db.runSync(
-      `INSERT OR REPLACE INTO documents VALUES (?,?,?,?,?)`,
+      `INSERT OR REPLACE INTO documents
+        (id, category, description, url, created_at)
+       VALUES (?,?,?,?,?)`,
       [d.id, d.category, d.description, d.url, d.created_at]
     );
   }
@@ -376,7 +380,9 @@ export function savePatientFhirIdentifiers(data: PatientFhirIdentifiers) {
   if (Platform.OS === 'web') return;
 
   db.runSync(
-    `INSERT OR REPLACE INTO patient_fhir_identifiers VALUES (?,?,?,?,?,?)`,
+    `INSERT OR REPLACE INTO patient_fhir_identifiers
+      (patient_id, gkv_kvid, phone, street, postal_code, city)
+     VALUES (?,?,?,?,?,?)`,
     [data.patient_id, data.gkv_kvid, data.phone, data.street, data.postal_code, data.city]
   );
 }
