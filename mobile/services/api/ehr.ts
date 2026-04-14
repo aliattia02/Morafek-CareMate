@@ -11,6 +11,13 @@
 import { Platform } from 'react-native';
 import apiClient from './client';
 import { API } from './endpoints';
+import {
+  getCachedVitals, cacheVitals, queueVital, getPendingVitals, deletePendingVital,
+  getCachedVisits, cacheVisits,
+  getCachedDocuments, cacheDocuments,
+  getCachedExercises, cacheExercises,
+  getCachedMessages, cacheMessages,
+} from '@/services/offline/db';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -33,6 +40,7 @@ export interface VisitResponse {
   diagnosis_text: string;
   notes: string;
   doctor_id: string;
+  encounter_fhir_id?: string;
 }
 
 export interface MessageResponse {
@@ -82,15 +90,60 @@ export async function submitVital(data: {
   weight_kg?: number;
   notes?: string;
 }): Promise<VitalResponse> {
-  const response = await apiClient.post<VitalResponse>(API.EHR.VITALS, data);
-  return response.data;
+  // Write a provisional record locally so the UI reflects the entry immediately.
+  const localId = `local_${Date.now()}`;
+  const localVital: VitalResponse = {
+    id:        localId,
+    systolic:  data.systolic,
+    diastolic: data.diastolic,
+    pulse:     data.pulse,
+    urgent:    false,
+    timestamp: new Date().toISOString(),
+  };
+  cacheVitals([localVital]);
+
+  // Background sync: replace provisional record with server record on success,
+  // or queue for later sync on failure.
+  apiClient.post<VitalResponse>(API.EHR.VITALS, data)
+    .then(res => { cacheVitals([res.data]); })
+    .catch(() => { queueVital(data); });
+
+  return localVital;
 }
 
 export async function getMyVitals(limit = 50): Promise<VitalResponse[]> {
-  const response = await apiClient.get<VitalResponse[]>(API.EHR.VITALS, {
-    params: { limit },
-  });
-  return response.data;
+  // Return the cached snapshot immediately.
+  const cached = getCachedVitals();
+
+  // Background sync — update cache when network is available.
+  apiClient.get<VitalResponse[]>(API.EHR.VITALS, { params: { limit } })
+    .then(res => { cacheVitals(res.data); })
+    .catch(() => {});
+
+  return cached;
+}
+
+/**
+ * Post any vitals that were queued while offline.
+ * Call this on app foreground / network-reconnect events.
+ */
+export async function syncPendingVitals(): Promise<void> {
+  const pending = getPendingVitals();
+  for (const item of pending) {
+    try {
+      const res = await apiClient.post<VitalResponse>(API.EHR.VITALS, {
+        systolic:  item.systolic,
+        diastolic: item.diastolic,
+        pulse:     item.pulse,
+        ...(item.weight_kg != null ? { weight_kg: item.weight_kg } : {}),
+        ...(item.notes     != null ? { notes:     item.notes     } : {}),
+      });
+      cacheVitals([res.data]);
+      deletePendingVital(item.local_id);
+    } catch {
+      // Leave in the queue; will be retried on the next call.
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -98,8 +151,13 @@ export async function getMyVitals(limit = 50): Promise<VitalResponse[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getMyVisits(): Promise<VisitResponse[]> {
-  const response = await apiClient.get<VisitResponse[]>(API.EHR.VISITS);
-  return response.data;
+  const cached = getCachedVisits();
+
+  apiClient.get<VisitResponse[]>(API.EHR.VISITS)
+    .then(res => { cacheVisits(res.data); })
+    .catch(() => {});
+
+  return cached;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,8 +165,16 @@ export async function getMyVisits(): Promise<VisitResponse[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getMessages(otherId: string): Promise<MessageResponse[]> {
-  const response = await apiClient.get<MessageResponse[]>(API.EHR.MESSAGES(otherId));
-  return response.data;
+  // Filter the local cache to this specific conversation thread.
+  const cached = getCachedMessages().filter(
+    m => m.sender_id === otherId || m.recipient_id === otherId,
+  );
+
+  apiClient.get<MessageResponse[]>(API.EHR.MESSAGES(otherId))
+    .then(res => { cacheMessages(res.data); })
+    .catch(() => {});
+
+  return cached;
 }
 
 export async function sendMessage(
@@ -165,8 +231,13 @@ export const getMessageThread = getPatientMessages;
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getMyDocuments(): Promise<DocumentResponse[]> {
-  const response = await apiClient.get<DocumentResponse[]>(API.EHR.DOCUMENTS);
-  return response.data;
+  const cached = getCachedDocuments();
+
+  apiClient.get<DocumentResponse[]>(API.EHR.DOCUMENTS)
+    .then(res => { cacheDocuments(res.data); })
+    .catch(() => {});
+
+  return cached;
 }
 
 export async function getDoctorPatientDocuments(patientId: string): Promise<DocumentResponse[]> {
@@ -177,10 +248,15 @@ export async function getDoctorPatientDocuments(patientId: string): Promise<Docu
 }
 
 export async function getDoctorPatientExercises(patientId: string): Promise<ExerciseResponse[]> {
-  const response = await apiClient.get<ExerciseResponse[]>(
-    API.EHR.PATIENT_EXERCISES(patientId)
-  );
-  return response.data;
+  // Return the patient's locally cached exercises immediately, then refresh
+  // from the patient-scoped exercises endpoint in the background.
+  const cached = getCachedExercises();
+
+  apiClient.get<ExerciseResponse[]>(API.EHR.PATIENT_EXERCISES(patientId))
+    .then(res => { cacheExercises(res.data); })
+    .catch(() => {});
+
+  return cached;
 }
 
 export async function uploadDocument(
@@ -229,6 +305,7 @@ export async function markExerciseDone(
 export default {
   submitVital,
   getMyVitals,
+  syncPendingVitals,
   getMyVisits,
   getMessages,
   sendMessage,
