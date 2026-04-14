@@ -73,7 +73,8 @@ export default function PatientHomeScreen() {
     let cachedVisits: VisitResponse[] = [];
     try {
       cachedVisits = getCachedVisits();
-    } catch {
+    } catch (e) {
+      console.warn('[home] getCachedVisits unavailable:', e);
       cachedVisits = [];
     }
     if (cachedVitals.length > 0 || cachedVisits.length > 0) {
@@ -92,8 +93,9 @@ export default function PatientHomeScreen() {
       if (vitals.length > 0) {
         cacheVitals(vitals);
       }
-    } catch {
+    } catch (e) {
       // Network unavailable — cached data is already showing, nothing to do
+      console.warn('[home] Network fetch failed, using cache:', e);
     } finally {
       setLoading(false);
     }
