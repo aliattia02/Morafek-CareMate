@@ -245,8 +245,12 @@ export default function PatientHomeScreen() {
           <TouchableOpacity
             style={styles.debugButton}
             onPress={async () => {
-              await submitVital({ systolic: 120, diastolic: 80, pulse: 72 });
-              loadData();
+              try {
+                await submitVital({ systolic: 120, diastolic: 80, pulse: 72 });
+                loadData();
+              } catch (e) {
+                Alert.alert('Debug Error', String(e));
+              }
             }}
           >
             <Text style={styles.debugButtonText}>Debug: Save test vital</Text>
