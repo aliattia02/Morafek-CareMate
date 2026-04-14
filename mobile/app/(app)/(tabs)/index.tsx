@@ -21,7 +21,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/store/auth.store';
 import { E, ET } from '@/constants/elderlyTheme';
 import { getMyVitals, getMyVisits, type VitalResponse, type VisitResponse } from '@/services/api/ehr';
-import { initDB, cacheVitals, getCachedVitals } from '@/services/offline/db';
+import { initDB, cacheVitals, getCachedVitals, getCachedVisits } from '@/services/offline/db';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -66,26 +66,34 @@ export default function PatientHomeScreen() {
   }
 
   const loadData = useCallback(async () => {
+    setError(null);
+
+    // Step 1: show cached data immediately so the UI is never blank
+    const cachedVitals = getCachedVitals();
+    let cachedVisits: VisitResponse[] = [];
     try {
-      setError(null);
-      setUsingCache(false);
+      cachedVisits = getCachedVisits();
+    } catch {
+      cachedVisits = [];
+    }
+    if (cachedVitals.length > 0 || cachedVisits.length > 0) {
+      setVital(cachedVitals[0] ?? null);
+      setVisit(cachedVisits[0] ?? null);
+      setUsingCache(true);
+      setLoading(false);
+    }
+
+    // Step 2: attempt a network refresh in the background
+    try {
       const [vitals, visits] = await Promise.all([getMyVitals(1), getMyVisits()]);
       setVital(vitals[0] ?? null);
       setVisit(visits[0] ?? null);
-      // Cache the latest vitals for offline use
+      setUsingCache(false);
       if (vitals.length > 0) {
         cacheVitals(vitals);
       }
-    } catch (err: unknown) {
-      // Fall back to cached data when network is unavailable
-      const cached = getCachedVitals();
-      if (cached.length > 0) {
-        setVital(cached[0]);
-        setUsingCache(true);
-      } else {
-        const message = err instanceof Error ? err.message : 'Failed to load data';
-        setError(message);
-      }
+    } catch {
+      // Network unavailable — cached data is already showing, nothing to do
     } finally {
       setLoading(false);
     }
