@@ -11,8 +11,6 @@ import {
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Input } from '@/components/ui';
-import apiClient from '@/services/api/client';
-import API from '@/services/api/endpoints';
 import { E, ET } from '@/constants/elderlyTheme';
 import { queueVital, getPendingVitals, deletePendingVital } from '@/services/offline/db';
 import { submitVital } from '@/services/api/ehr';
@@ -83,7 +81,7 @@ export default function VitalsScreen() {
       // Attempt to sync any previously queued vitals first
       await syncPendingVitals();
 
-      const response = await apiClient.post(API.EHR.VITALS, {
+      const response = await submitVital({
         systolic:  sys,
         diastolic: dia,
         pulse:     parseInt(pulse),
@@ -91,7 +89,7 @@ export default function VitalsScreen() {
         notes:     notes || undefined,
       });
 
-      if (response?.data?.urgent) {
+      if (response?.urgent) {
         setSubmitStatus('urgent');
         setSubmitMessage('⚠️ Critical reading — please contact your doctor');
       } else {
