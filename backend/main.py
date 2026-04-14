@@ -57,14 +57,17 @@ def create_app():
             return jsonify({"error": "Internal server error"}), 500
 
     # ── Register blueprints ───────────────────────────────────────────────────
+    # EHR data is now local-first on the patient device (Plan B).
+    # This server handles auth, avatar upload, and FHIR metadata only.
+    # MongoDB stores users collection only.
     try:
         from routes.auth_routes       import auth_routes
-        from routes.doctor_routes     import doctor_routes
+        # from routes.doctor_routes     import doctor_routes     # Plan B: not needed
         from routes.patient_routes    import patient_routes
-        from routes.ehr_routes        import ehr_routes
+        # from routes.ehr_routes        import ehr_routes         # Plan B: not needed
         from routes.upload_routes     import upload_routes
-        from routes.monitoring_routes import monitoring_routes
-        from routes.clinic_routes     import clinic_routes
+        # from routes.monitoring_routes import monitoring_routes  # Plan B: not needed
+        # from routes.clinic_routes     import clinic_routes      # Plan B: not needed
 
         # ── German FHIR additions ─────────────────────────────────────────
         # metadata_bp → GET /metadata  (FHIR CapabilityStatement, no auth)
@@ -73,14 +76,10 @@ def create_app():
         from routes.metadata_route import metadata_bp
 
         blueprints = [
-            (auth_routes,       ''),
-            (doctor_routes,     ''),
-            (patient_routes,    ''),   # includes /fhir/Patient/* and /api/patient/fhir-identifiers
-            (ehr_routes,        ''),
-            (upload_routes,     ''),
-            (monitoring_routes, ''),
-            (clinic_routes,     ''),
-            (metadata_bp,       ''),   # /metadata — must be unauthenticated
+            (auth_routes,    ''),
+            (patient_routes, ''),   # /api/patient/profile + /fhir/Patient/* + /api/patient/fhir-identifiers
+            (upload_routes,  ''),
+            (metadata_bp,    ''),   # /metadata — must be unauthenticated
         ]
 
         for blueprint, url_prefix in blueprints:
@@ -116,11 +115,8 @@ def _ensure_mongo_indexes(logger):
             name="idx_gkv_kvid_sparse",
         )
 
-        for coll_name in ("ehr_vitals", "ehr_visits", "ehr_conditions"):
-            mongo.db[coll_name].create_index(
-                [("patient_id", ASCENDING)],
-                name=f"idx_{coll_name}_patient_id",
-            )
+        # Plan B: EHR collections (ehr_vitals, ehr_visits, ehr_conditions) are
+        # no longer stored in MongoDB — indexes removed accordingly.
 
         logger.info("MongoDB indexes ensured for German FHIR layer")
 

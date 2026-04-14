@@ -261,6 +261,30 @@ export default function ProfileScreen() {
                   ? <ActivityIndicator size="small" color={E.colors.primary} />
                   : <Text style={styles.arrow}>›</Text>}
               </TouchableOpacity>
+              <View style={styles.divider} />
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/ehr/share-bundle')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>🔑</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>Share with doctor</Text>
+                  <Text style={styles.linkSub}>Give your doctor an encrypted copy of your records</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+              <View style={styles.divider} />
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/ehr/import-bundle')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>📥</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>Import from doctor</Text>
+                  <Text style={styles.linkSub}>Receive and save the doctor's signed update</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
             </View>
           </>
         )}
