@@ -392,7 +392,7 @@ export default function ImportBundleScreen() {
 
                 {summary.skipped > 0 && (
                   <Text style={styles.skippedNote}>
-                    {summary.skipped} unrecognised{' '}
+                    {summary.skipped} unrecognized{' '}
                     {summary.skipped === 1 ? 'entry' : 'entries'} skipped.
                   </Text>
                 )}
