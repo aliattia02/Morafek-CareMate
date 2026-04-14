@@ -21,10 +21,10 @@ Morafek CareMate is a **Personal Health Record (PHR)** app that connects patient
 
 1. [Overview](#-overview)
 2. [Demo](#-try-it-now)
-3. [Features](#-features)
-4. [Tech Stack](#️-tech-stack)
-5. [Getting Started](#-getting-started)
-6. [Screenshots](#-screenshots)
+3. [Screenshots](#-screenshots)
+4. [Features](#-features)
+5. [Tech Stack](#️-tech-stack)
+6. [Getting Started](#-getting-started)
 7. [Feature Status](#-feature-status)
 8. [Contributing](#-contributing)
 9. [License](#-license)
@@ -55,6 +55,77 @@ Use the demo accounts below, or tap the **"Demo Account"** banner on the login s
 | 🧑 Patient | `test1` | `4444` |
 | 👨‍⚕️ Doctor | `testd1` | `4444` |
 
+> **Note:** The backend runs on a free Render instance and may take ~30 seconds to wake up on first load. A progress banner will appear while it starts.
+
+---
+
+## 📱 Screenshots
+
+### Patient
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002400.png" width="200"/><br/>
+      <sub><b>Login</b></sub>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002411.png" width="200"/><br/>
+      <sub><b>Patient Home</b></sub>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002450.png" width="200"/><br/>
+      <sub><b>Record Vitals</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002423.png" width="200"/><br/>
+      <sub><b>Visit History</b></sub>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002506.png" width="200"/><br/>
+      <sub><b>Medical Profile</b></sub>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002439.png" width="200"/><br/>
+      <sub><b>Manage Doctors</b></sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="3">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002519.png" width="200"/><br/>
+      <sub><b>DSGVO Data Deletion</b></sub>
+    </td>
+  </tr>
+</table>
+
+</div>
+
+### Doctor
+
+<div align="center">
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002250.png" width="200"/><br/>
+      <sub><b>Doctor Dashboard</b></sub>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002332.png" width="200"/><br/>
+      <sub><b>Patient Vitals</b></sub>
+    </td>
+    <td align="center">
+      <img src="https://raw.githubusercontent.com/aliattia02/Morafek-CareMate/main/docs/screenshots/Screenshot%202026-04-14%20002346.png" width="200"/><br/>
+      <sub><b>Patient Messages</b></sub>
+    </td>
+  </tr>
+</table>
+
+</div>
 
 ---
 
@@ -158,12 +229,6 @@ npm start
 **Backend:** `MONGO_URI`, `SECRET_KEY`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `GOOGLE_API_KEY`
 
 **Mobile:** `EXPO_PUBLIC_API_URL` (your backend URL)
-
----
-
-## 📱 Screenshots
-
-> 📸 *Screenshots coming soon.*
 
 ---
 
