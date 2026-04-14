@@ -15,12 +15,13 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Linking,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/store/auth.store';
 import { E, ET } from '@/constants/elderlyTheme';
-import { getMyVitals, getMyVisits, type VitalResponse, type VisitResponse } from '@/services/api/ehr';
+import { getMyVitals, getMyVisits, submitVital, type VitalResponse, type VisitResponse } from '@/services/api/ehr';
 import { initDB, cacheVitals, getCachedVitals, getCachedVisits } from '@/services/offline/db';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -237,6 +238,28 @@ export default function PatientHomeScreen() {
           ) : (
             <Text style={styles.emptyTextSecondary}>No visits recorded</Text>
           )}
+        </View>
+
+        {/* REMOVE BEFORE PRODUCTION */}
+        <View style={styles.debugRow}>
+          <TouchableOpacity
+            style={styles.debugButton}
+            onPress={async () => {
+              await submitVital({ systolic: 120, diastolic: 80, pulse: 72 });
+              loadData();
+            }}
+          >
+            <Text style={styles.debugButtonText}>Debug: Save test vital</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.debugButton}
+            onPress={() => {
+              const results = getCachedVitals();
+              Alert.alert('Cache', `${results.length} vitals in local store`);
+            }}
+          >
+            <Text style={styles.debugButtonText}>Debug: Show cache</Text>
+          </TouchableOpacity>
         </View>
 
         {/* ── ACTION TILES ── */}
@@ -491,5 +514,27 @@ const styles = StyleSheet.create({
   sensorsSmall: {
     ...ET.small,
     marginTop: 4,
+  },
+  // Debug row — REMOVE BEFORE PRODUCTION
+  debugRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginHorizontal: 16,
+    marginBottom: 16,
+  },
+  debugButton: {
+    flex: 1,
+    height: 40,
+    backgroundColor: E.colors.surfaceAlt,
+    borderRadius: E.radiusSm,
+    borderWidth: 1,
+    borderColor: E.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  debugButtonText: {
+    ...ET.small,
+    color: E.colors.textSecondary,
+    fontWeight: '600',
   },
 });
