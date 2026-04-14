@@ -57,11 +57,39 @@ else {
           notes: params[5],
           created_at: params[6],
         });
+      } else if (query.includes('INSERT OR REPLACE INTO vitals')) {
+        const idx = vitals.findIndex((v) => v.id === params[0]);
+        const entry = {
+          id: params[0],
+          systolic: params[1],
+          diastolic: params[2],
+          pulse: params[3],
+          urgent: params[4],
+          timestamp: params[5],
+        };
+        if (idx !== -1) {
+          vitals[idx] = entry;
+        } else {
+          vitals.push(entry);
+        }
+      } else if (query.includes('INTO vitals')) {
+        vitals.push({
+          id: params[0],
+          systolic: params[1],
+          diastolic: params[2],
+          pulse: params[3],
+          urgent: params[4],
+          timestamp: params[5],
+        });
       }
     },
     getAllSync: (query: string) => {
       if (query.includes('pending_vitals')) return pendingVitals;
-      if (query.includes('vitals')) return vitals;
+      if (query.includes('FROM vitals')) {
+        return [...vitals]
+          .sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0))
+          .slice(0, 50);
+      }
       return [];
     },
   };
@@ -149,8 +177,6 @@ export function initDB() {
 }
 
 export function cacheVitals(vitals: VitalResponse[]) {
-  if (Platform.OS === 'web') return;
-
   for (const v of vitals) {
     db.runSync(
       `INSERT OR REPLACE INTO vitals VALUES (?,?,?,?,?,?)`,
@@ -160,8 +186,6 @@ export function cacheVitals(vitals: VitalResponse[]) {
 }
 
 export function getCachedVitals(): VitalResponse[] {
-  if (Platform.OS === 'web') return [];
-
   const rows = db.getAllSync(`
     SELECT * FROM vitals ORDER BY timestamp DESC LIMIT 50
   `);
