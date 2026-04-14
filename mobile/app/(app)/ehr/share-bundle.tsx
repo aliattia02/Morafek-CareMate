@@ -75,7 +75,12 @@ export default function ShareBundleScreen() {
         id:            user._id ?? '',
         first_name:    user.firstName ?? '',
         last_name:     user.lastName  ?? '',
-        date_of_birth: '',          // not stored in the auth token; left empty
+        // date_of_birth is not stored in the JWT / auth store; omitted here.
+        // buildLocalFhirBundle() accepts an empty string and simply omits the
+        // FHIR Patient.birthDate field rather than failing, so the bundle is
+        // still valid — it just lacks a birth date.  If this field becomes
+        // available in the auth store in the future, wire it in here.
+        date_of_birth: '',
         user_type:     user.user_type ?? 'patient',
       };
 
@@ -238,7 +243,7 @@ const styles = StyleSheet.create({
   content: {
     padding: spacing.md,
     paddingBottom: 40,
-    gap: 16,
+    gap: spacing.md,
   },
 
   // ── Info banner ──────────────────────────────────────────────────────────────
@@ -270,7 +275,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     padding: spacing.md,
-    gap: 8,
+    gap: spacing.sm,
     ...shadows.sm,
   },
   headerTitle: {
