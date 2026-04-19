@@ -20,6 +20,10 @@ export interface PZNSearchInputProps {
 
 const DEBOUNCE_MS = 200;
 const MAX_RESULTS = 8;
+const BLUR_DISMISS_DELAY_MS = 150;
+const INPUT_HEIGHT = 48;
+const INPUT_TO_LABEL_GAP = spacing.xs;
+const LABEL_LINE_HEIGHT = typography.small.lineHeight;
 
 function ResultRow({ item, onPress }: { item: PZNEntry; onPress: () => void }) {
   return (
@@ -96,7 +100,7 @@ export default function PZNSearchInput({
         editable={!disabled}
         autoCorrect={false}
         autoCapitalize="none"
-        onBlur={() => setTimeout(dismissList, 150)}
+        onBlur={() => setTimeout(dismissList, BLUR_DISMISS_DELAY_MS)}
         onFocus={() => {
           if (query.trim() && results.length > 0) setShowList(true);
         }}
@@ -123,6 +127,7 @@ export default function PZNSearchInput({
 }
 
 const DROPDOWN_MAX_HEIGHT = 320;
+const DROPDOWN_TOP_OFFSET = INPUT_HEIGHT + INPUT_TO_LABEL_GAP + LABEL_LINE_HEIGHT + spacing.sm;
 
 const styles = StyleSheet.create({
   container: {
@@ -135,7 +140,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   input: {
-    height: 48,
+    height: INPUT_HEIGHT,
     borderWidth: 1,
     borderColor: colors.border,
     borderRadius: borderRadius.md,
@@ -150,7 +155,7 @@ const styles = StyleSheet.create({
   },
   dropdown: {
     position: 'absolute',
-    top: 48 + 6 + 16 + spacing.sm,
+    top: DROPDOWN_TOP_OFFSET,
     left: 0,
     right: 0,
     zIndex: 999,

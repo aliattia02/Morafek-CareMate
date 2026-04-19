@@ -1,4 +1,4 @@
-import React, { forwardRef, useImperativeHandle, useMemo, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 import { Input } from '@/components/ui';
@@ -62,6 +62,7 @@ const MedicationPrescriptionPanel = forwardRef<MedicationPrescriptionPanelRef, P
 ) {
   const [enabled, setEnabled] = useState(false);
   const [errors, setErrors] = useState<FieldErrors>({});
+  const enabledRef = useRef(false);
 
   const [draft, setDraft] = useState<Draft>({
     pzn: '',
@@ -80,27 +81,36 @@ const MedicationPrescriptionPanel = forwardRef<MedicationPrescriptionPanelRef, P
     dosage_unit: 'Tablette',
     dosage_note: '',
   });
+  const draftRef = useRef(draft);
 
   const dosageLabel = useMemo(
     () => `${draft.dosage.morning}-${draft.dosage.noon}-${draft.dosage.evening}-${draft.dosage.night}`,
     [draft.dosage]
   );
 
-  const validate = (): CreateDoctorMedicationRequest | null => {
+  useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  const buildPayload = useCallback((currentDraft: Draft): CreateDoctorMedicationRequest | null => {
     const nextErrors: FieldErrors = {};
 
-    if (!/^\d{8}$/.test(draft.pzn.trim())) nextErrors.pzn = 'PZN muss 8-stellig sein';
-    if (!draft.trade_name.trim()) nextErrors.trade_name = 'Handelsname ist erforderlich';
-    if (!draft.active_substance.trim()) nextErrors.active_substance = 'Wirkstoff ist erforderlich';
-    if (!draft.form.trim()) nextErrors.form = 'Darreichungsform ist erforderlich';
-    if (!draft.strength.trim()) nextErrors.strength = 'Stärke ist erforderlich';
+    if (!/^\d{8}$/.test(currentDraft.pzn.trim())) nextErrors.pzn = 'PZN muss 8-stellig sein';
+    if (!currentDraft.trade_name.trim()) nextErrors.trade_name = 'Handelsname ist erforderlich';
+    if (!currentDraft.active_substance.trim()) nextErrors.active_substance = 'Wirkstoff ist erforderlich';
+    if (!currentDraft.form.trim()) nextErrors.form = 'Darreichungsform ist erforderlich';
+    if (!currentDraft.strength.trim()) nextErrors.strength = 'Stärke ist erforderlich';
 
-    if (!isValidDate(draft.start_date.trim())) {
+    if (!isValidDate(currentDraft.start_date.trim())) {
       nextErrors.start_date = 'Datum im Format JJJJ-MM-TT eingeben';
     }
 
-    const end = draft.end_date.trim();
-    if (!draft.is_chronic) {
+    const end = currentDraft.end_date.trim();
+    if (!currentDraft.is_chronic) {
       if (!end) {
         nextErrors.end_date = 'Enddatum ist erforderlich bei nicht chronischer Verordnung';
       } else if (!isValidDate(end)) {
@@ -108,42 +118,46 @@ const MedicationPrescriptionPanel = forwardRef<MedicationPrescriptionPanelRef, P
       }
     }
 
-    const totalDosage = draft.dosage.morning + draft.dosage.noon + draft.dosage.evening + draft.dosage.night;
+    const totalDosage =
+      currentDraft.dosage.morning +
+      currentDraft.dosage.noon +
+      currentDraft.dosage.evening +
+      currentDraft.dosage.night;
     if (totalDosage <= 0) nextErrors.dosage = 'Mindestens ein Dosierungs-Slot muss > 0 sein';
 
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return null;
 
     return {
-      pzn: draft.pzn.trim(),
-      trade_name: draft.trade_name.trim(),
-      active_substance: draft.active_substance.trim(),
-      form: draft.form.trim(),
-      strength: draft.strength.trim(),
-      norm_size: draft.norm_size,
-      aut_idem: draft.aut_idem,
-      coverage: draft.coverage,
-      is_chronic: draft.is_chronic,
-      start_date: draft.start_date.trim(),
-      end_date: draft.is_chronic ? undefined : end,
-      duration_days: draft.duration_days.trim() ? Number(draft.duration_days.trim()) : undefined,
-      dosage_morning: draft.dosage.morning,
-      dosage_noon: draft.dosage.noon,
-      dosage_evening: draft.dosage.evening,
-      dosage_night: draft.dosage.night,
-      dosage_unit: draft.dosage_unit,
-      dosage_note: draft.dosage_note.trim() || undefined,
+      pzn: currentDraft.pzn.trim(),
+      trade_name: currentDraft.trade_name.trim(),
+      active_substance: currentDraft.active_substance.trim(),
+      form: currentDraft.form.trim(),
+      strength: currentDraft.strength.trim(),
+      norm_size: currentDraft.norm_size,
+      aut_idem: currentDraft.aut_idem,
+      coverage: currentDraft.coverage,
+      is_chronic: currentDraft.is_chronic,
+      start_date: currentDraft.start_date.trim(),
+      end_date: currentDraft.is_chronic ? undefined : end,
+      duration_days: currentDraft.duration_days.trim() ? Number(currentDraft.duration_days.trim()) : undefined,
+      dosage_morning: currentDraft.dosage.morning,
+      dosage_noon: currentDraft.dosage.noon,
+      dosage_evening: currentDraft.dosage.evening,
+      dosage_night: currentDraft.dosage.night,
+      dosage_unit: currentDraft.dosage_unit,
+      dosage_note: currentDraft.dosage_note.trim() || undefined,
       is_active: true,
     };
-  };
+  }, []);
 
   useImperativeHandle(ref, () => ({
-    hasEnabledPrescription: () => enabled,
+    hasEnabledPrescription: () => enabledRef.current,
     getPayload: () => {
-      if (!enabled) return null;
-      return validate();
+      if (!enabledRef.current) return null;
+      return buildPayload(draftRef.current);
     },
-  }), [enabled, draft]);
+  }), [buildPayload]);
 
   const applyPZNSelection = (selection: PZNEntry) => {
     setDraft((prev) => {
@@ -168,7 +182,7 @@ const MedicationPrescriptionPanel = forwardRef<MedicationPrescriptionPanelRef, P
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Medikation (E‑Rezept)</Text>
+        <Text style={styles.headerTitle}>Medikation (E-Rezept)</Text>
         <TouchableOpacity
           style={[styles.toggleBtn, enabled && styles.toggleBtnEnabled]}
           onPress={() => setEnabled((p) => !p)}
