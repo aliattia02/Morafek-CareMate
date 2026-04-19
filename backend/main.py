@@ -62,6 +62,7 @@ def create_app():
         from routes.doctor_routes     import doctor_routes
         from routes.patient_routes    import patient_routes
         from routes.ehr_routes        import ehr_routes
+        from routes.medication_routes import medication_routes
         from routes.upload_routes     import upload_routes
         from routes.monitoring_routes import monitoring_routes
         from routes.clinic_routes     import clinic_routes
@@ -77,6 +78,7 @@ def create_app():
             (doctor_routes,     ''),
             (patient_routes,    ''),   # includes /fhir/Patient/* and /api/patient/fhir-identifiers
             (ehr_routes,        ''),
+            (medication_routes, ''),
             (upload_routes,     ''),
             (monitoring_routes, ''),
             (clinic_routes,     ''),
@@ -121,6 +123,35 @@ def _ensure_mongo_indexes(logger):
                 [("patient_id", ASCENDING)],
                 name=f"idx_{coll_name}_patient_id",
             )
+
+        mongo.db.ehr_medications.create_index(
+            [("patient_id", ASCENDING), ("active", ASCENDING)],
+            name="idx_ehr_medications_patient_active",
+        )
+        mongo.db.ehr_medications.create_index(
+            [("doctor_id", ASCENDING)],
+            name="idx_ehr_medications_doctor_id",
+        )
+
+        mongo.db.ehr_medication_plans.create_index(
+            [("medication_id", ASCENDING)],
+            unique=True,
+            name="idx_ehr_medication_plans_medication_id_unique",
+        )
+        mongo.db.ehr_medication_plans.create_index(
+            [("patient_id", ASCENDING)],
+            name="idx_ehr_medication_plans_patient_id",
+        )
+
+        mongo.db.ehr_medication_intakes.create_index(
+            [("patient_id", ASCENDING), ("medication_id", ASCENDING), ("intake_date", ASCENDING), ("time_slot", ASCENDING)],
+            unique=True,
+            name="idx_ehr_medication_intakes_unique_slot",
+        )
+        mongo.db.ehr_medication_intakes.create_index(
+            [("patient_id", ASCENDING), ("confirmed_at", ASCENDING)],
+            name="idx_ehr_medication_intakes_patient_confirmed_at",
+        )
 
         logger.info("MongoDB indexes ensured for German FHIR layer")
 
