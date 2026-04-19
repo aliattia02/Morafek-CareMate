@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
@@ -88,7 +88,7 @@ def _not_implemented(route_name: str):
             {
                 "error": "Not Implemented",
                 "route": route_name,
-                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             }
         ),
         501,
@@ -98,27 +98,27 @@ def _not_implemented(route_name: str):
 def _parse_required_string(data: dict, field: str):
     value = data.get(field)
     if value is None or str(value).strip() == "":
-        return None, jsonify({"error": f"Missing required field: {field}"}), 400
-    return str(value).strip(), None, None
+        return None
+    return str(value).strip()
 
 
 def _parse_required_bool(data: dict, field: str):
     value = data.get(field)
     if not isinstance(value, bool):
-        return None, jsonify({"error": f"{field} must be boolean"}), 400
-    return value, None, None
+        return None
+    return value
 
 
 def _parse_required_int(data: dict, field: str):
     if field not in data:
-        return None, jsonify({"error": f"Missing required field: {field}"}), 400
+        return None
     try:
         value = int(data.get(field))
     except (TypeError, ValueError):
-        return None, jsonify({"error": f"{field} must be an integer"}), 400
+        return None
     if value < 0:
-        return None, jsonify({"error": f"{field} must be >= 0"}), 400
-    return value, None, None
+        return None
+    return value
 
 
 def _validate_yyyy_mm_dd(value: str, field: str):
@@ -140,9 +140,9 @@ def create_medication(current_user):
     if not data:
         return jsonify({"error": "Missing request body"}), 400
 
-    patient_id, err, code = _parse_required_string(data, "patient_id")
-    if err:
-        return err, code
+    patient_id = _parse_required_string(data, "patient_id")
+    if patient_id is None:
+        return jsonify({"error": "Missing required field: patient_id"}), 400
 
     try:
         ObjectId(patient_id)
@@ -151,47 +151,51 @@ def create_medication(current_user):
 
     has_access, err, code = check_doctor_patient_access(current_user, patient_id)
     if not has_access:
-        return jsonify(err), code
+        if isinstance(err, dict):
+            return jsonify(err), code
+        if isinstance(err, str):
+            return jsonify({"message": err}), code
+        return jsonify({"message": "Unauthorized access"}), (code or 403)
 
-    pzn, err, code = _parse_required_string(data, "pzn")
-    if err:
-        return err, code
+    pzn = _parse_required_string(data, "pzn")
+    if pzn is None:
+        return jsonify({"error": "Missing required field: pzn"}), 400
     if not (len(pzn) == 8 and pzn.isdigit()):
         return jsonify({"error": "pzn must be an 8-digit string"}), 400
 
-    trade_name, err, code = _parse_required_string(data, "trade_name")
-    if err:
-        return err, code
-    active_substance, err, code = _parse_required_string(data, "active_substance")
-    if err:
-        return err, code
-    form, err, code = _parse_required_string(data, "form")
-    if err:
-        return err, code
-    strength, err, code = _parse_required_string(data, "strength")
-    if err:
-        return err, code
-    norm_size, err, code = _parse_required_string(data, "norm_size")
-    if err:
-        return err, code
+    trade_name = _parse_required_string(data, "trade_name")
+    if trade_name is None:
+        return jsonify({"error": "Missing required field: trade_name"}), 400
+    active_substance = _parse_required_string(data, "active_substance")
+    if active_substance is None:
+        return jsonify({"error": "Missing required field: active_substance"}), 400
+    form = _parse_required_string(data, "form")
+    if form is None:
+        return jsonify({"error": "Missing required field: form"}), 400
+    strength = _parse_required_string(data, "strength")
+    if strength is None:
+        return jsonify({"error": "Missing required field: strength"}), 400
+    norm_size = _parse_required_string(data, "norm_size")
+    if norm_size is None:
+        return jsonify({"error": "Missing required field: norm_size"}), 400
     if norm_size not in {"N1", "N2", "N3"}:
         return jsonify({"error": "norm_size must be one of: N1, N2, N3"}), 400
 
-    aut_idem, err, code = _parse_required_bool(data, "aut_idem")
-    if err:
-        return err, code
-    coverage, err, code = _parse_required_string(data, "coverage")
-    if err:
-        return err, code
+    aut_idem = _parse_required_bool(data, "aut_idem")
+    if aut_idem is None:
+        return jsonify({"error": "aut_idem must be boolean"}), 400
+    coverage = _parse_required_string(data, "coverage")
+    if coverage is None:
+        return jsonify({"error": "Missing required field: coverage"}), 400
     if coverage not in {"GKV", "PKV", "Selbstzahler"}:
         return jsonify({"error": "coverage must be one of: GKV, PKV, Selbstzahler"}), 400
 
-    is_chronic, err, code = _parse_required_bool(data, "is_chronic")
-    if err:
-        return err, code
-    start_date, err, code = _parse_required_string(data, "start_date")
-    if err:
-        return err, code
+    is_chronic = _parse_required_bool(data, "is_chronic")
+    if is_chronic is None:
+        return jsonify({"error": "is_chronic must be boolean"}), 400
+    start_date = _parse_required_string(data, "start_date")
+    if start_date is None:
+        return jsonify({"error": "Missing required field: start_date"}), 400
     date_err = _validate_yyyy_mm_dd(start_date, "start_date")
     if date_err:
         return date_err
@@ -199,28 +203,30 @@ def create_medication(current_user):
     end_date_raw = data.get("end_date")
     end_date = str(end_date_raw).strip() if end_date_raw not in (None, "") else None
     if end_date:
+        if is_chronic:
+            return jsonify({"error": "end_date must be null when is_chronic is true"}), 400
         date_err = _validate_yyyy_mm_dd(end_date, "end_date")
         if date_err:
             return date_err
     elif not is_chronic:
         return jsonify({"error": "end_date is required when is_chronic is false"}), 400
 
-    dosage_morning, err, code = _parse_required_int(data, "dosage_morning")
-    if err:
-        return err, code
-    dosage_noon, err, code = _parse_required_int(data, "dosage_noon")
-    if err:
-        return err, code
-    dosage_evening, err, code = _parse_required_int(data, "dosage_evening")
-    if err:
-        return err, code
-    dosage_night, err, code = _parse_required_int(data, "dosage_night")
-    if err:
-        return err, code
+    dosage_morning = _parse_required_int(data, "dosage_morning")
+    if dosage_morning is None:
+        return jsonify({"error": "dosage_morning must be an integer >= 0"}), 400
+    dosage_noon = _parse_required_int(data, "dosage_noon")
+    if dosage_noon is None:
+        return jsonify({"error": "dosage_noon must be an integer >= 0"}), 400
+    dosage_evening = _parse_required_int(data, "dosage_evening")
+    if dosage_evening is None:
+        return jsonify({"error": "dosage_evening must be an integer >= 0"}), 400
+    dosage_night = _parse_required_int(data, "dosage_night")
+    if dosage_night is None:
+        return jsonify({"error": "dosage_night must be an integer >= 0"}), 400
 
-    dosage_unit, err, code = _parse_required_string(data, "dosage_unit")
-    if err:
-        return err, code
+    dosage_unit = _parse_required_string(data, "dosage_unit")
+    if dosage_unit is None:
+        return jsonify({"error": "Missing required field: dosage_unit"}), 400
     if dosage_unit not in {"Tablette", "ml", "IE", "Hub", "Tropfen"}:
         return jsonify({"error": "dosage_unit must be one of: Tablette, ml, IE, Hub, Tropfen"}), 400
 
@@ -243,6 +249,8 @@ def create_medication(current_user):
         visit = current_app.mongo.db.ehr_visits.find_one({"_id": ObjectId(visit_id), "patient_id": patient_id})
         if not visit:
             return jsonify({"error": "Visit not found for patient"}), 404
+        if visit.get("doctor_id") and visit.get("doctor_id") != str(current_user["_id"]):
+            return jsonify({"error": "Unauthorized visit reference"}), 403
 
     doc = {
         "patient_id": patient_id,
@@ -267,12 +275,15 @@ def create_medication(current_user):
         "dosage_unit": dosage_unit,
         "dosage_note": str(data.get("dosage_note", "")).strip(),
         "is_active": bool(data.get("is_active", True)),
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
     }
 
     result = medications_col.insert_one(doc)
-    doc["_id"] = str(result.inserted_id)
-    return jsonify(doc), 201
+
+    response_doc = dict(doc)
+    response_doc["_id"] = str(result.inserted_id)
+    response_doc["created_at"] = doc["created_at"].isoformat().replace("+00:00", "Z")
+    return jsonify(response_doc), 201
 
 
 @medication_routes.route("/doctor/patient/<patient_id>", methods=["GET"])
