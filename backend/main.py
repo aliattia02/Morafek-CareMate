@@ -62,6 +62,7 @@ def create_app():
         from routes.doctor_routes     import doctor_routes
         from routes.patient_routes    import patient_routes
         from routes.ehr_routes        import ehr_routes
+        from routes.medication_routes import medication_routes
         from routes.upload_routes     import upload_routes
         from routes.monitoring_routes import monitoring_routes
         from routes.clinic_routes     import clinic_routes
@@ -77,6 +78,7 @@ def create_app():
             (doctor_routes,     ''),
             (patient_routes,    ''),   # includes /fhir/Patient/* and /api/patient/fhir-identifiers
             (ehr_routes,        ''),
+            (medication_routes, '/api/medications'),
             (upload_routes,     ''),
             (monitoring_routes, ''),
             (clinic_routes,     ''),
@@ -121,6 +123,10 @@ def _ensure_mongo_indexes(logger):
                 [("patient_id", ASCENDING)],
                 name=f"idx_{coll_name}_patient_id",
             )
+
+        # Medication module indexes
+        from routes.medication_routes import ensure_medication_indexes
+        ensure_medication_indexes()
 
         logger.info("MongoDB indexes ensured for German FHIR layer")
 
