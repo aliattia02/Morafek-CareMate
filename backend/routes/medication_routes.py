@@ -374,15 +374,18 @@ def confirm_medication_intake(current_user, medication_id=None):
         return err_resp
 
     data = request.get_json() or {}
-    status = str(data.get("status", "taken")).strip().lower()
+    status_raw = data.get("status", "taken")
+    status = str(status_raw).strip().lower() if status_raw not in (None, "") else "taken"
     if status not in {"pending", "taken", "skipped"}:
         return jsonify({"error": "status must be one of: pending, taken, skipped"}), 400
 
-    note = str(data.get("note", "")).strip()
+    note_raw = data.get("note", "")
+    note = str(note_raw).strip() if note_raw not in (None, "") else ""
     now_utc = datetime.now(timezone.utc)
 
     intake_doc = None
-    intake_id = str(data.get("intake_id", "")).strip()
+    intake_id_raw = data.get("intake_id", "")
+    intake_id = str(intake_id_raw).strip() if intake_id_raw not in (None, "") else ""
 
     if intake_id:
         try:
@@ -394,22 +397,36 @@ def confirm_medication_intake(current_user, medication_id=None):
         if not intake_doc:
             return jsonify({"error": "Intake not found"}), 404
     else:
-        effective_medication_id = medication_id or str(data.get("medication_id", "")).strip()
+        med_id_raw = medication_id if medication_id not in (None, "") else data.get("medication_id", "")
+        effective_medication_id = str(med_id_raw).strip() if med_id_raw not in (None, "") else ""
         if not effective_medication_id:
             return jsonify({"error": "Provide intake_id or medication_id"}), 400
 
-        slot = str(data.get("slot", "")).strip().lower()
+        slot_raw = data.get("slot", "")
+        slot = str(slot_raw).strip().lower() if slot_raw not in (None, "") else ""
         if slot not in {"morning", "noon", "evening", "night"}:
             return jsonify({"error": "slot must be one of: morning, noon, evening, night"}), 400
 
-        date_value = str(data.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))).strip()
+        date_raw = data.get("date", "")
+        date_value = (
+            str(date_raw).strip()
+            if date_raw not in (None, "")
+            else datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        )
         date_err = _validate_yyyy_mm_dd(date_value, "date")
         if date_err:
             return date_err
 
-        medication = medications_col.find_one(
-            {"_id": ObjectId(effective_medication_id), "patient_id": patient_id}
-        ) if ObjectId.is_valid(effective_medication_id) else None
+        medication = None
+        if ObjectId.is_valid(effective_medication_id):
+            try:
+                medication_obj_id = ObjectId(effective_medication_id)
+            except (InvalidId, TypeError):
+                medication_obj_id = None
+            if medication_obj_id:
+                medication = medications_col.find_one(
+                    {"_id": medication_obj_id, "patient_id": patient_id}
+                )
         if not medication:
             return jsonify({"error": "Medication not found"}), 404
 
