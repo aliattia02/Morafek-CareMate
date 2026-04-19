@@ -94,6 +94,21 @@ const API = {
     // Doctors only — protected by token_required + user_type check on backend.
     ICD10_SUGGEST: v('/api/ehr/icd10-suggest'),
   },
+  MEDICATIONS: {
+    // Doctor-facing
+    DOCTOR_PATIENT: (patientId: string) => v(`/api/medications/patient/${patientId}`),
+    DOCTOR_PATIENT_MED: (patientId: string, medicationId: string) =>
+      v(`/api/medications/patient/${patientId}/${medicationId}`),
+    DOCTOR_PATIENT_VISIT: (patientId: string, visitId: string) =>
+      v(`/api/medications/patient/${patientId}/visit/${visitId}`),
+
+    // Patient-facing
+    MY: v('/api/medications/my'),
+    TODAY: v('/api/medications/today'),
+    INTAKE: (intakeId: string) => v(`/api/medications/intake/${intakeId}`),
+    ADHERENCE: v('/api/medications/adherence'),
+    HISTORY: v('/api/medications/history'),
+  },
 } as const;
 
 // Named export for direct usage

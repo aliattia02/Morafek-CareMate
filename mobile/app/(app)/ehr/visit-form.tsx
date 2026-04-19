@@ -15,7 +15,7 @@
  *   logic, web-compatible success/error banners) is unchanged.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -31,9 +31,13 @@ import { Card, Input, Button } from '@/components/ui';
 import { useAuthStore }        from '@/store/auth.store';
 import { apiClient }           from '@/services/api/client';
 import { API }                 from '@/services/api/endpoints';
+import { createDoctorMedication } from '@/services/api/medications';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 import ICD10SearchInput, { ICD10Selection } from '@/components/ehr/ICD10SearchInput';
+import MedicationPrescriptionPanel, {
+  MedicationPrescriptionPanelRef,
+} from '@/components/ehr/MedicationPrescriptionPanel';
 
 const todayISO = (): string => new Date().toISOString().split('T')[0];
 
@@ -54,6 +58,7 @@ export default function VisitFormScreen() {
   const [submitting,     setSubmitting]     = useState(false);
   const [successMsg,     setSuccessMsg]     = useState<string | null>(null);
   const [submitError,    setSubmitError]    = useState<string | null>(null);
+  const medicationPanelRef = useRef<MedicationPrescriptionPanelRef>(null);
 
   // Redirect non-doctors to home (must be in useEffect — cannot navigate during render)
   useEffect(() => {
@@ -92,20 +97,44 @@ export default function VisitFormScreen() {
       return;
     }
 
+    let medicationPayload = null;
+    if (medicationPanelRef.current?.hasEnabledPrescription()) {
+      medicationPayload = medicationPanelRef.current.getPayload();
+      if (!medicationPayload) {
+        setSubmitError('Bitte prüfen Sie die Medikationsangaben.');
+        return;
+      }
+    }
+
     try {
       setSubmitting(true);
       setSubmitError(null);
 
-      await apiClient.post(API.EHR.PATIENT_VISITS(patient_id), {
+      const visitRes = await apiClient.post<{ id?: string; _id?: string }>(
+        API.EHR.PATIENT_VISITS(patient_id),
+        {
         chief_complaint: chiefComplaint.trim(),
         diagnosis_icd10: diagnosisIcd10.trim(),
         diagnosis_text:  diagnosisText.trim(),
         notes:           notes.trim() || undefined,
         visit_date:      visitDate.trim() || todayISO(),
-      });
+        }
+      );
+
+      const visitId = visitRes.data?.id ?? visitRes.data?._id;
+      if (medicationPayload) {
+        await createDoctorMedication(patient_id, {
+          ...medicationPayload,
+          visit_id: visitId || undefined,
+        });
+      }
 
       const name = patient_name ? ` für ${patient_name}` : '';
-      setSuccessMsg(`✅  Besuch${name} wurde erfolgreich gespeichert.`);
+      setSuccessMsg(
+        medicationPayload
+          ? `✅  Besuch${name} und Medikation wurden erfolgreich gespeichert.`
+          : `✅  Besuch${name} wurde erfolgreich gespeichert.`
+      );
       setTimeout(() => router.back(), 1500);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Fehler beim Speichern';
@@ -192,6 +221,11 @@ export default function VisitFormScreen() {
               placeholder="Diagnose beschreiben (oder aus ICD-Suche übernehmen)"
               error={errors.diagnosisText}
               required
+            />
+
+            <MedicationPrescriptionPanel
+              ref={medicationPanelRef}
+              startDateDefault={visitDate}
             />
 
             {/* ── Visit Date ── */}
