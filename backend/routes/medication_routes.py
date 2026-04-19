@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
 from flask import Blueprint, jsonify, current_app, request
-from pymongo import ASCENDING
+from pymongo import ASCENDING, ReturnDocument
 from werkzeug.local import LocalProxy
 
 from routes.doctor_routes import check_doctor_patient_access
@@ -127,6 +127,41 @@ def _validate_yyyy_mm_dd(value: str, field: str):
     except (ValueError, TypeError):
         return jsonify({"error": f"Invalid {field} format. Use YYYY-MM-DD"}), 400
     return None
+
+
+def _serialize_datetime(value):
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return value
+
+
+def _serialize_medication_doc(doc: dict):
+    out = dict(doc)
+    out["_id"] = str(out.get("_id"))
+    out["created_at"] = _serialize_datetime(out.get("created_at"))
+    return out
+
+
+def _serialize_intake_doc(doc: dict):
+    out = dict(doc)
+    out["_id"] = str(out.get("_id"))
+    out["confirmed_at"] = _serialize_datetime(out.get("confirmed_at"))
+    return out
+
+
+def _require_patient_user(current_user):
+    if current_user.get("user_type") != "patient":
+        return None, (jsonify({"error": "Unauthorized access"}), 403)
+    return str(current_user["_id"]), None
+
+
+def _dosage_label(med: dict):
+    return (
+        f"{int(med.get('dosage_morning', 0))}-"
+        f"{int(med.get('dosage_noon', 0))}-"
+        f"{int(med.get('dosage_evening', 0))}-"
+        f"{int(med.get('dosage_night', 0))}"
+    )
 
 
 @medication_routes.route("/patient/", methods=["POST"], strict_slashes=False)
@@ -308,24 +343,176 @@ def deactivate_medication(current_user, patient_id, medication_id):
 
 
 @medication_routes.route("/patient", methods=["GET"])
+@medication_routes.route("/my", methods=["GET"], strict_slashes=False)
 @token_required
 @api_error_handler
 def list_own_medications(current_user):
-    return _not_implemented("list_own_medications")
+    patient_id, err_resp = _require_patient_user(current_user)
+    if err_resp:
+        return err_resp
+
+    docs = list(
+        medications_col.find({"patient_id": patient_id, "is_active": True}).sort("trade_name", ASCENDING)
+    )
+
+    result = []
+    for doc in docs:
+        med = _serialize_medication_doc(doc)
+        med["dosage_label"] = _dosage_label(doc)
+        result.append(med)
+
+    return jsonify(result), 200
 
 
 @medication_routes.route("/patient/<medication_id>/intake", methods=["POST"])
+@medication_routes.route("/intake/", methods=["POST"], strict_slashes=False)
 @token_required
 @api_error_handler
-def confirm_medication_intake(current_user, medication_id):
-    return _not_implemented("confirm_medication_intake")
+def confirm_medication_intake(current_user, medication_id=None):
+    patient_id, err_resp = _require_patient_user(current_user)
+    if err_resp:
+        return err_resp
+
+    data = request.get_json() or {}
+    status = str(data.get("status", "taken")).strip().lower()
+    if status not in {"pending", "taken", "skipped"}:
+        return jsonify({"error": "status must be one of: pending, taken, skipped"}), 400
+
+    note = str(data.get("note", "")).strip()
+    now_utc = datetime.now(timezone.utc)
+
+    intake_doc = None
+    intake_id = str(data.get("intake_id", "")).strip()
+
+    if intake_id:
+        try:
+            intake_obj_id = ObjectId(intake_id)
+        except (InvalidId, TypeError):
+            return jsonify({"error": "Invalid intake_id"}), 400
+
+        intake_doc = med_intakes_col.find_one({"_id": intake_obj_id, "patient_id": patient_id})
+        if not intake_doc:
+            return jsonify({"error": "Intake not found"}), 404
+    else:
+        effective_medication_id = medication_id or str(data.get("medication_id", "")).strip()
+        if not effective_medication_id:
+            return jsonify({"error": "Provide intake_id or medication_id"}), 400
+
+        slot = str(data.get("slot", "")).strip().lower()
+        if slot not in {"morning", "noon", "evening", "night"}:
+            return jsonify({"error": "slot must be one of: morning, noon, evening, night"}), 400
+
+        date_value = str(data.get("date", datetime.now(timezone.utc).strftime("%Y-%m-%d"))).strip()
+        date_err = _validate_yyyy_mm_dd(date_value, "date")
+        if date_err:
+            return date_err
+
+        medication = medications_col.find_one(
+            {"_id": ObjectId(effective_medication_id), "patient_id": patient_id}
+        ) if ObjectId.is_valid(effective_medication_id) else None
+        if not medication:
+            return jsonify({"error": "Medication not found"}), 404
+
+        intake_doc = med_intakes_col.find_one_and_update(
+            {
+                "patient_id": patient_id,
+                "medication_id": effective_medication_id,
+                "date": date_value,
+                "slot": slot,
+            },
+            {
+                "$setOnInsert": {
+                    "status": "pending",
+                    "confirmed_at": None,
+                    "note": "",
+                }
+            },
+            upsert=True,
+            return_document=ReturnDocument.AFTER,
+        )
+
+    updates = {
+        "status": status,
+        "note": note,
+        "confirmed_at": now_utc if status in {"taken", "skipped"} else None,
+    }
+    med_intakes_col.update_one({"_id": intake_doc["_id"], "patient_id": patient_id}, {"$set": updates})
+    updated = med_intakes_col.find_one({"_id": intake_doc["_id"], "patient_id": patient_id})
+    return jsonify(_serialize_intake_doc(updated)), 200
 
 
 @medication_routes.route("/patient/intakes", methods=["GET"])
+@medication_routes.route("/today", methods=["GET"], strict_slashes=False)
 @token_required
 @api_error_handler
 def list_own_medication_intakes(current_user):
-    return _not_implemented("list_own_medication_intakes")
+    patient_id, err_resp = _require_patient_user(current_user)
+    if err_resp:
+        return err_resp
+
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    meds = list(
+        medications_col.find(
+            {
+                "patient_id": patient_id,
+                "is_active": True,
+                "start_date": {"$lte": today},
+                "$or": [{"is_chronic": True}, {"end_date": {"$gte": today}}],
+            }
+        ).sort("trade_name", ASCENDING)
+    )
+
+    slots = {"morning": [], "noon": [], "evening": [], "night": []}
+
+    for med in meds:
+        medication_id = str(med["_id"])
+        for slot in ("morning", "noon", "evening", "night"):
+            dosage = int(med.get(f"dosage_{slot}", 0) or 0)
+            if dosage <= 0:
+                continue
+
+            intake = med_intakes_col.find_one_and_update(
+                {
+                    "medication_id": medication_id,
+                    "patient_id": patient_id,
+                    "date": today,
+                    "slot": slot,
+                },
+                {
+                    "$setOnInsert": {
+                        "status": "pending",
+                        "confirmed_at": None,
+                        "note": "",
+                    }
+                },
+                upsert=True,
+                return_document=ReturnDocument.AFTER,
+            )
+
+            slots[slot].append(
+                {
+                    "medication": {
+                        "id": medication_id,
+                        "trade_name": med.get("trade_name", ""),
+                        "active_substance": med.get("active_substance", ""),
+                        "dosage_label": _dosage_label(med),
+                    },
+                    "intake_id": str(intake["_id"]),
+                    "status": intake.get("status", "pending"),
+                    "dosage": dosage,
+                    "unit": med.get("dosage_unit", ""),
+                }
+            )
+
+    all_items = [item for slot_items in slots.values() for item in slot_items]
+    summary = {
+        "total": len(all_items),
+        "taken": sum(1 for item in all_items if item.get("status") == "taken"),
+        "pending": sum(1 for item in all_items if item.get("status") == "pending"),
+        "skipped": sum(1 for item in all_items if item.get("status") == "skipped"),
+    }
+
+    return jsonify({"date": today, "slots": slots, "summary": summary}), 200
 
 
 @medication_routes.route("/doctor/patient/<patient_id>/intakes", methods=["GET"])
