@@ -3,9 +3,10 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 import { Input } from '@/components/ui';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
-import PZNSearchInput, { PZNSelection } from '@/components/ehr/PZNSearchInput';
+import PZNSearchInput from '@/components/ehr/PZNSearchInput';
 import DosageBuilder, { DosageValue } from '@/components/ehr/DosageBuilder';
 import { CreateDoctorMedicationRequest, CoverageType, DosageUnit, NormSize } from '@/services/api/medications';
+import { PZNEntry } from '@/constants/pzn_data';
 
 interface Props {
   startDateDefault?: string;
@@ -144,16 +145,23 @@ const MedicationPrescriptionPanel = forwardRef<MedicationPrescriptionPanelRef, P
     },
   }), [enabled, draft]);
 
-  const applyPZNSelection = (selection: PZNSelection) => {
-    setDraft((prev) => ({
-      ...prev,
-      pzn: selection.pzn,
-      trade_name: selection.tradeName,
-      active_substance: selection.activeSubstance,
-      form: selection.form,
-      strength: selection.strength,
-      norm_size: selection.normSize,
-    }));
+  const applyPZNSelection = (selection: PZNEntry) => {
+    setDraft((prev) => {
+      const resolvedUnit = DOSAGE_UNIT_OPTIONS.includes(selection.dosage_unit as DosageUnit)
+        ? (selection.dosage_unit as DosageUnit)
+        : prev.dosage_unit;
+
+      return {
+        ...prev,
+        pzn: selection.pzn,
+        trade_name: selection.trade_name,
+        active_substance: selection.active_substance,
+        form: selection.form,
+        strength: selection.strength,
+        norm_size: selection.norm_size,
+        dosage_unit: resolvedUnit,
+      };
+    });
     setErrors((prev) => ({ ...prev, pzn: '', trade_name: '', active_substance: '', form: '', strength: '' }));
   };
 
@@ -179,7 +187,7 @@ const MedicationPrescriptionPanel = forwardRef<MedicationPrescriptionPanelRef, P
       ) : (
         <>
           <View style={styles.searchWrapper}>
-            <PZNSearchInput value={draft.pzn} onSelect={applyPZNSelection} />
+            <PZNSearchInput onSelect={applyPZNSelection} />
             {errors.pzn ? <Text style={styles.errorText}>{errors.pzn}</Text> : null}
           </View>
 
