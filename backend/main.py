@@ -144,7 +144,7 @@ def _ensure_mongo_indexes(logger):
         )
 
         mongo.db.ehr_medication_intakes.create_index(
-            [("patient_id", ASCENDING), ("medication_id", ASCENDING), ("intake_date", ASCENDING), ("time_slot", ASCENDING)],
+            [("patient_id", ASCENDING), ("intake_date", ASCENDING), ("medication_id", ASCENDING), ("time_slot", ASCENDING)],
             unique=True,
             name="idx_ehr_medication_intakes_unique_slot",
         )

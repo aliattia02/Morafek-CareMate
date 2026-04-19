@@ -1,11 +1,13 @@
 from flask import Blueprint, request, jsonify
 from bson.objectid import ObjectId
+from bson.errors import InvalidId
 from datetime import datetime, timezone
 from utils.auth import token_required
 from utils.error_handler import api_error_handler
 from routes.doctor_routes import check_doctor_patient_access
 from config import mongo
 import logging
+import html
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +21,21 @@ def _now_iso() -> str:
 def _validate_iso_date(value: str, field: str):
     try:
         datetime.fromisoformat(str(value).replace('Z', '+00:00'))
-    except Exception:
+    except (ValueError, TypeError):
         return jsonify({'error': f'Invalid {field} format. Use ISO 8601 date or datetime.'}), 400
     return None
+
+
+def _sanitize_text(value) -> str:
+    return html.escape(str(value).strip(), quote=True)
+
+
+def _normalize_iso_to_ymd(value: str, field: str):
+    try:
+        parsed = datetime.fromisoformat(str(value).replace('Z', '+00:00'))
+        return parsed.date().isoformat(), None, None
+    except (ValueError, TypeError):
+        return None, jsonify({'error': f'Invalid {field} format. Use ISO 8601 date or datetime.'}), 400
 
 
 def _serialize_medication(doc: dict, plan: dict | None = None) -> dict:
@@ -51,7 +65,53 @@ def _serialize_medication(doc: dict, plan: dict | None = None) -> dict:
     }
 
 
-def _resolve_visit(patient_id: str, visit_id: str):
+def _serialize_intake(doc: dict) -> dict:
+    return {
+        'id': str(doc.get('_id')),
+        'medication_id': doc.get('medication_id', ''),
+        'patient_id': doc.get('patient_id', ''),
+        'doctor_id': doc.get('doctor_id', ''),
+        'taken': doc.get('taken', False),
+        'status': doc.get('status', 'skipped'),
+        'intake_date': doc.get('intake_date', ''),
+        'time_slot': doc.get('time_slot', ''),
+        'notes': doc.get('notes', ''),
+        'confirmed_at': doc.get('confirmed_at', ''),
+    }
+
+
+def _apply_intake_date_range_filter(query: dict, date_from: str | None, date_to: str | None):
+    if not date_from and not date_to:
+        return None
+
+    intake_range = {}
+
+    if date_from:
+        normalized_from, error_response, status = _normalize_iso_to_ymd(date_from, 'date_from')
+        if error_response:
+            return error_response, status
+        intake_range['$gte'] = normalized_from
+
+    if date_to:
+        normalized_to, error_response, status = _normalize_iso_to_ymd(date_to, 'date_to')
+        if error_response:
+            return error_response, status
+        intake_range['$lte'] = normalized_to
+
+    query['intake_date'] = intake_range
+    return None
+
+
+def _validate_intake_times(intake_times):
+    if intake_times is None:
+        return [], None
+    if not isinstance(intake_times, list) or any(not isinstance(x, str) for x in intake_times):
+        return None, (jsonify({'error': 'intake_times must be a string array'}), 400)
+    return [x.strip() for x in intake_times if x.strip()], None
+
+
+def _resolve_visit(patient_id: str, visit_id):
+    visit_id = str(visit_id).strip() if visit_id is not None else ''
     if not visit_id:
         return None
 
@@ -61,7 +121,7 @@ def _resolve_visit(patient_id: str, visit_id: str):
             '_id': ObjectId(visit_id),
             'patient_id': patient_id,
         })
-    except Exception:
+    except (InvalidId, TypeError):
         visit_doc = None
 
     if not visit_doc:
@@ -90,13 +150,13 @@ def create_medication(current_user, patient_id):
         if field not in data or str(data[field]).strip() == '':
             return jsonify({'error': f'Missing required field: {field}'}), 400
 
-    visit_doc = _resolve_visit(patient_id, str(data['visit_id']).strip())
+    visit_doc = _resolve_visit(patient_id, data['visit_id'])
     if not visit_doc:
         return jsonify({'error': 'Visit not found for patient'}), 404
 
     try:
         dose = float(data['dose'])
-    except Exception:
+    except (TypeError, ValueError):
         return jsonify({'error': 'dose must be numeric'}), 400
     if dose <= 0:
         return jsonify({'error': 'dose must be greater than zero'}), 400
@@ -111,11 +171,9 @@ def create_medication(current_user, patient_id):
         if date_error:
             return date_error
 
-    intake_times = data.get('intake_times', [])
-    if intake_times is None:
-        intake_times = []
-    if not isinstance(intake_times, list) or any(not isinstance(x, str) for x in intake_times):
-        return jsonify({'error': 'intake_times must be a string array'}), 400
+    intake_times, intake_times_error = _validate_intake_times(data.get('intake_times', []))
+    if intake_times_error:
+        return intake_times_error
 
     doctor_id = str(current_user['_id'])
     now_iso = _now_iso()
@@ -125,14 +183,14 @@ def create_medication(current_user, patient_id):
         'doctor_id': doctor_id,
         'visit_id': str(visit_doc['_id']),
         'visit_fhir_id': visit_doc.get('id', ''),
-        'medication_name': str(data['medication_name']).strip(),
+        'medication_name': _sanitize_text(data['medication_name']),
         'dose': dose,
-        'unit': str(data['unit']).strip(),
-        'route': str(data.get('route', 'oral')).strip(),
-        'frequency': str(data['frequency']).strip(),
+        'unit': _sanitize_text(data['unit']),
+        'route': _sanitize_text(data.get('route', 'oral')),
+        'frequency': _sanitize_text(data['frequency']),
         'start_date': str(data['start_date']).strip(),
         'end_date': str(end_date).strip() if end_date else None,
-        'instructions': str(data.get('instructions', '')).strip(),
+        'instructions': _sanitize_text(data.get('instructions', '')),
         'as_needed': bool(data.get('as_needed', False)),
         'active': bool(data.get('active', True)),
         'created_at': now_iso,
@@ -143,8 +201,8 @@ def create_medication(current_user, patient_id):
     plan_doc = {
         'medication_id': str(result.inserted_id),
         'patient_id': patient_id,
-        'intake_times': [x.strip() for x in intake_times if x.strip()],
-        'timezone': str(data.get('timezone', 'UTC')).strip() or 'UTC',
+        'intake_times': intake_times,
+        'timezone': _sanitize_text(data.get('timezone', 'UTC')) or 'UTC',
         'reminders_enabled': bool(data.get('reminders_enabled', True)),
         'created_at': now_iso,
         'updated_at': now_iso,
@@ -152,7 +210,7 @@ def create_medication(current_user, patient_id):
     mongo.db.ehr_medication_plans.insert_one(plan_doc)
 
     medication_doc['_id'] = result.inserted_id
-    logger.info('Medication prescription created for patient %s', patient_id)
+    logger.info('Medication prescription created')
     return jsonify(_serialize_medication(medication_doc, plan_doc)), 201
 
 
@@ -191,7 +249,7 @@ def update_medication(current_user, patient_id, medication_id):
 
     try:
         med_oid = ObjectId(medication_id)
-    except Exception:
+    except (InvalidId, TypeError):
         return jsonify({'error': 'Invalid medication ID'}), 400
 
     existing = mongo.db.ehr_medications.find_one({
@@ -204,27 +262,27 @@ def update_medication(current_user, patient_id, medication_id):
     updates = {'updated_at': _now_iso()}
 
     if 'visit_id' in data:
-        visit_doc = _resolve_visit(patient_id, str(data['visit_id']).strip())
+        visit_doc = _resolve_visit(patient_id, data['visit_id'])
         if not visit_doc:
             return jsonify({'error': 'Visit not found for patient'}), 404
         updates['visit_id'] = str(visit_doc['_id'])
         updates['visit_fhir_id'] = visit_doc.get('id', '')
     if 'medication_name' in data:
-        updates['medication_name'] = str(data['medication_name']).strip()
+        updates['medication_name'] = _sanitize_text(data['medication_name'])
     if 'dose' in data:
         try:
             dose = float(data['dose'])
-        except Exception:
+        except (TypeError, ValueError):
             return jsonify({'error': 'dose must be numeric'}), 400
         if dose <= 0:
             return jsonify({'error': 'dose must be greater than zero'}), 400
         updates['dose'] = dose
     if 'unit' in data:
-        updates['unit'] = str(data['unit']).strip()
+        updates['unit'] = _sanitize_text(data['unit'])
     if 'route' in data:
-        updates['route'] = str(data['route']).strip()
+        updates['route'] = _sanitize_text(data['route'])
     if 'frequency' in data:
-        updates['frequency'] = str(data['frequency']).strip()
+        updates['frequency'] = _sanitize_text(data['frequency'])
     if 'start_date' in data:
         date_error = _validate_iso_date(str(data['start_date']).strip(), 'start_date')
         if date_error:
@@ -239,7 +297,7 @@ def update_medication(current_user, patient_id, medication_id):
         else:
             updates['end_date'] = None
     if 'instructions' in data:
-        updates['instructions'] = str(data['instructions']).strip()
+        updates['instructions'] = _sanitize_text(data['instructions'])
     if 'as_needed' in data:
         updates['as_needed'] = bool(data['as_needed'])
     if 'active' in data:
@@ -249,14 +307,12 @@ def update_medication(current_user, patient_id, medication_id):
 
     plan_updates = {}
     if 'intake_times' in data:
-        intake_times = data.get('intake_times', [])
-        if intake_times is None:
-            intake_times = []
-        if not isinstance(intake_times, list) or any(not isinstance(x, str) for x in intake_times):
-            return jsonify({'error': 'intake_times must be a string array'}), 400
-        plan_updates['intake_times'] = [x.strip() for x in intake_times if x.strip()]
+        intake_times, intake_times_error = _validate_intake_times(data.get('intake_times', []))
+        if intake_times_error:
+            return intake_times_error
+        plan_updates['intake_times'] = intake_times
     if 'timezone' in data:
-        plan_updates['timezone'] = str(data['timezone']).strip() or 'UTC'
+        plan_updates['timezone'] = _sanitize_text(data['timezone']) or 'UTC'
     if 'reminders_enabled' in data:
         plan_updates['reminders_enabled'] = bool(data['reminders_enabled'])
     if plan_updates:
@@ -269,7 +325,7 @@ def update_medication(current_user, patient_id, medication_id):
 
     doc = mongo.db.ehr_medications.find_one({'_id': med_oid})
     plan = mongo.db.ehr_medication_plans.find_one({'medication_id': medication_id, 'patient_id': patient_id})
-    logger.info('Medication prescription updated for patient %s', patient_id)
+    logger.info('Medication prescription updated')
     return jsonify(_serialize_medication(doc, plan)), 200
 
 
@@ -283,7 +339,7 @@ def deactivate_medication(current_user, patient_id, medication_id):
 
     try:
         med_oid = ObjectId(medication_id)
-    except Exception:
+    except (InvalidId, TypeError):
         return jsonify({'error': 'Invalid medication ID'}), 400
 
     existing = mongo.db.ehr_medications.find_one({
@@ -297,7 +353,7 @@ def deactivate_medication(current_user, patient_id, medication_id):
         {'_id': med_oid},
         {'$set': {'active': False, 'updated_at': _now_iso()}},
     )
-    logger.info('Medication prescription deactivated for patient %s', patient_id)
+    logger.info('Medication prescription deactivated')
     return jsonify({'message': 'Medication deactivated'}), 200
 
 
@@ -333,7 +389,7 @@ def confirm_medication_intake(current_user, medication_id):
 
     try:
         med_oid = ObjectId(medication_id)
-    except Exception:
+    except (InvalidId, TypeError):
         return jsonify({'error': 'Invalid medication ID'}), 400
 
     medication = mongo.db.ehr_medications.find_one({
@@ -348,10 +404,10 @@ def confirm_medication_intake(current_user, medication_id):
     if 'taken' not in data or not isinstance(data['taken'], bool):
         return jsonify({'error': 'Missing required field: taken (boolean)'}), 400
 
-    intake_date = str(data.get('intake_date', datetime.now(timezone.utc).strftime('%Y-%m-%d'))).strip()
-    date_error = _validate_iso_date(intake_date, 'intake_date')
-    if date_error:
-        return date_error
+    raw_intake_date = str(data.get('intake_date', datetime.now(timezone.utc).strftime('%Y-%m-%d'))).strip()
+    intake_date, error_response, status = _normalize_iso_to_ymd(raw_intake_date, 'intake_date')
+    if error_response:
+        return error_response, status
 
     time_slot = str(data.get('time_slot', '')).strip()
 
@@ -370,9 +426,9 @@ def confirm_medication_intake(current_user, medication_id):
         'doctor_id': medication.get('doctor_id', ''),
         'taken': data['taken'],
         'status': 'taken' if data['taken'] else 'skipped',
-        'intake_date': intake_date[:10],
+        'intake_date': intake_date,
         'time_slot': time_slot,
-        'notes': str(data.get('notes', '')).strip(),
+        'notes': _sanitize_text(data.get('notes', '')),
         'confirmed_by': patient_id,
         'confirmed_at': now_iso,
         'updated_at': now_iso,
@@ -389,7 +445,7 @@ def confirm_medication_intake(current_user, medication_id):
         upsert=True,
     )
 
-    logger.info('Medication intake confirmed for patient %s', patient_id)
+    logger.info('Medication intake confirmed')
     return jsonify({'message': 'Medication intake recorded', 'intake': intake_doc}), 200
 
 
@@ -409,36 +465,12 @@ def get_own_medication_intakes(current_user):
 
     date_from = request.args.get('date_from')
     date_to = request.args.get('date_to')
-    if date_from:
-        date_error = _validate_iso_date(date_from, 'date_from')
-        if date_error:
-            return date_error
-    if date_to:
-        date_error = _validate_iso_date(date_to, 'date_to')
-        if date_error:
-            return date_error
-    if date_from or date_to:
-        query['intake_date'] = {}
-        if date_from:
-            query['intake_date']['$gte'] = date_from[:10]
-        if date_to:
-            query['intake_date']['$lte'] = date_to[:10]
+    range_error = _apply_intake_date_range_filter(query, date_from, date_to)
+    if range_error:
+        return range_error
 
     docs = list(mongo.db.ehr_medication_intakes.find(query).sort('confirmed_at', -1))
-    result = []
-    for d in docs:
-        result.append({
-            'id': str(d.get('_id')),
-            'medication_id': d.get('medication_id', ''),
-            'patient_id': d.get('patient_id', ''),
-            'taken': d.get('taken', False),
-            'status': d.get('status', 'skipped'),
-            'intake_date': d.get('intake_date', ''),
-            'time_slot': d.get('time_slot', ''),
-            'notes': d.get('notes', ''),
-            'confirmed_at': d.get('confirmed_at', ''),
-        })
-    return jsonify(result), 200
+    return jsonify([_serialize_intake(d) for d in docs]), 200
 
 
 @medication_routes.route('/api/doctor/patient/<patient_id>/medications/intakes', methods=['GET'])
@@ -457,33 +489,9 @@ def get_patient_medication_intakes(current_user, patient_id):
 
     date_from = request.args.get('date_from')
     date_to = request.args.get('date_to')
-    if date_from:
-        date_error = _validate_iso_date(date_from, 'date_from')
-        if date_error:
-            return date_error
-    if date_to:
-        date_error = _validate_iso_date(date_to, 'date_to')
-        if date_error:
-            return date_error
-    if date_from or date_to:
-        query['intake_date'] = {}
-        if date_from:
-            query['intake_date']['$gte'] = date_from[:10]
-        if date_to:
-            query['intake_date']['$lte'] = date_to[:10]
+    range_error = _apply_intake_date_range_filter(query, date_from, date_to)
+    if range_error:
+        return range_error
 
     docs = list(mongo.db.ehr_medication_intakes.find(query).sort('confirmed_at', -1))
-    result = []
-    for d in docs:
-        result.append({
-            'id': str(d.get('_id')),
-            'medication_id': d.get('medication_id', ''),
-            'patient_id': d.get('patient_id', ''),
-            'taken': d.get('taken', False),
-            'status': d.get('status', 'skipped'),
-            'intake_date': d.get('intake_date', ''),
-            'time_slot': d.get('time_slot', ''),
-            'notes': d.get('notes', ''),
-            'confirmed_at': d.get('confirmed_at', ''),
-        })
-    return jsonify(result), 200
+    return jsonify([_serialize_intake(d) for d in docs]), 200
