@@ -78,7 +78,7 @@ def create_app():
             (doctor_routes,     ''),
             (patient_routes,    ''),   # includes /fhir/Patient/* and /api/patient/fhir-identifiers
             (ehr_routes,        ''),
-            (medication_routes, ''),
+            (medication_routes, '/api/medications'),
             (upload_routes,     ''),
             (monitoring_routes, ''),
             (clinic_routes,     ''),
@@ -124,34 +124,9 @@ def _ensure_mongo_indexes(logger):
                 name=f"idx_{coll_name}_patient_id",
             )
 
-        mongo.db.ehr_medications.create_index(
-            [("patient_id", ASCENDING), ("active", ASCENDING)],
-            name="idx_ehr_medications_patient_active",
-        )
-        mongo.db.ehr_medications.create_index(
-            [("doctor_id", ASCENDING)],
-            name="idx_ehr_medications_doctor_id",
-        )
-
-        mongo.db.ehr_medication_plans.create_index(
-            [("medication_id", ASCENDING)],
-            unique=True,
-            name="idx_ehr_medication_plans_medication_id_unique",
-        )
-        mongo.db.ehr_medication_plans.create_index(
-            [("patient_id", ASCENDING)],
-            name="idx_ehr_medication_plans_patient_id",
-        )
-
-        mongo.db.ehr_medication_intakes.create_index(
-            [("patient_id", ASCENDING), ("intake_date", ASCENDING), ("medication_id", ASCENDING), ("time_slot", ASCENDING)],
-            unique=True,
-            name="idx_ehr_medication_intakes_unique_slot",
-        )
-        mongo.db.ehr_medication_intakes.create_index(
-            [("patient_id", ASCENDING), ("confirmed_at", ASCENDING)],
-            name="idx_ehr_medication_intakes_patient_confirmed_at",
-        )
+        # Medication module indexes
+        from routes.medication_routes import ensure_medication_indexes
+        ensure_medication_indexes()
 
         logger.info("MongoDB indexes ensured for German FHIR layer")
 

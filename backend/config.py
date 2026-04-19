@@ -186,3 +186,15 @@ def get_mongo():
 
 def get_logger():
     return logger
+
+
+def get_medications_collection():
+    return mongo.db.medications
+
+
+def get_med_schedules_collection():
+    return mongo.db.med_schedules
+
+
+def get_med_intakes_collection():
+    return mongo.db.med_intakes
