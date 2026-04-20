@@ -136,13 +136,19 @@ export interface MedicationHistoryResponse {
   total_pages?: number;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Doctor: create medication
+// FIX: backend route is POST /api/medications/patient/ (no patientId in URL).
+//      patient_id must be sent in the request body.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function createDoctorMedication(
   patientId: string,
   payload: CreateDoctorMedicationRequest
 ): Promise<MedicationRecord> {
   const response = await apiClient.post<MedicationRecord>(
-    API.MEDICATIONS.DOCTOR_PATIENT(patientId),
-    payload
+    API.MEDICATIONS.DOCTOR_CREATE,          // POST /api/medications/patient/
+    { ...payload, patient_id: patientId }   // patient_id goes in the body
   );
   return response.data;
 }
@@ -153,6 +159,12 @@ export async function prescribeMedication(
 ): Promise<MedicationRecord> {
   return createDoctorMedication(patientId, payload);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Doctor: list / update / delete
+// FIX: all three use DOCTOR_PATIENT(patientId) which now resolves to
+//      /api/medications/doctor/patient/:id  (note the /doctor/ prefix)
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getDoctorPatientMedications(
   patientId: string,
@@ -229,6 +241,10 @@ export async function getMedicationsByVisit(
   return getDoctorPatientVisitMedications(patientId, visitId);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Patient-facing
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function getMyMedications(): Promise<MedicationRecord[]> {
   const response = await apiClient.get<MedicationRecord[]>(API.MEDICATIONS.MY);
   return response.data;
@@ -243,11 +259,20 @@ export async function getTodaySchedule(): Promise<TodayMedicationResponse> {
   return getTodayMedications();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Intake confirmation
+// FIX: backend route is POST /api/medications/intake/ (no intakeId in URL).
+//      intake_id must be sent in the request body.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function confirmMedicationIntake(
   intakeId: string,
   payload: { status?: 'pending' | 'taken' | 'skipped'; note?: string }
 ): Promise<MedicationIntake> {
-  const response = await apiClient.post<MedicationIntake>(API.MEDICATIONS.INTAKE(intakeId), payload);
+  const response = await apiClient.post<MedicationIntake>(
+    API.MEDICATIONS.INTAKE,                  // POST /api/medications/intake/
+    { ...payload, intake_id: intakeId }      // intake_id goes in the body
+  );
   return response.data;
 }
 
@@ -258,6 +283,10 @@ export async function confirmIntake(
 ): Promise<MedicationIntake> {
   return confirmMedicationIntake(intakeId, { status, note });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adherence & history
+// ─────────────────────────────────────────────────────────────────────────────
 
 export async function getMedicationAdherence(
   params?: { period_days?: number }

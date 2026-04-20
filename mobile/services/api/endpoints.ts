@@ -28,6 +28,17 @@
  *   CALCULATIONS.CUMULATIVE_EFFECTS  → cumulative_effects_routes.py /api/cumulative-effects
  *   LIBRE.*             → libre_routes.py
  *   EHR.ICD10_SUGGEST   → ehr_routes.py  /api/ehr/icd10-suggest  (POST, doctors only)
+ *
+ * MEDICATIONS route notes (blueprint registered under /api/medications):
+ *   DOCTOR_CREATE       → POST   /api/medications/patient/           patient_id in body
+ *   DOCTOR_PATIENT      → GET    /api/medications/doctor/patient/:id
+ *   DOCTOR_PATIENT_MED  → PUT|DELETE /api/medications/doctor/patient/:id/:medId
+ *   DOCTOR_PATIENT_VISIT→ GET    /api/medications/doctor/patient/:id/visit/:visitId
+ *   MY                  → GET    /api/medications/my
+ *   TODAY               → GET    /api/medications/today
+ *   INTAKE              → POST   /api/medications/intake/            intake_id in body
+ *   ADHERENCE           → GET    /api/medications/adherence
+ *   HISTORY             → GET    /api/medications/history
  */
 
 // API version configuration
@@ -95,19 +106,37 @@ const API = {
     ICD10_SUGGEST: v('/api/ehr/icd10-suggest'),
   },
   MEDICATIONS: {
-    // Doctor-facing
-    DOCTOR_PATIENT: (patientId: string) => v(`/api/medications/patient/${patientId}`),
-    DOCTOR_PATIENT_MED: (patientId: string, medicationId: string) =>
-      v(`/api/medications/patient/${patientId}/${medicationId}`),
-    DOCTOR_PATIENT_VISIT: (patientId: string, visitId: string) =>
-      v(`/api/medications/patient/${patientId}/visit/${visitId}`),
+    // ── Doctor: create ───────────────────────────────────────────────────
+    // POST /api/medications/patient/   ← patient_id MUST be in the request body
+    // (no patientId path segment — the Flask route is /patient/ with no <patient_id>)
+    DOCTOR_CREATE: v('/api/medications/patient/'),
 
-    // Patient-facing
-    MY: v('/api/medications/my'),
-    TODAY: v('/api/medications/today'),
-    INTAKE: (intakeId: string) => v(`/api/medications/intake/${intakeId}`),
+    // ── Doctor: list / update / delete ──────────────────────────────────
+    // All three use the /doctor/ prefix that matches the registered Flask routes:
+    //   GET    /api/medications/doctor/patient/<patient_id>
+    //   PUT    /api/medications/doctor/patient/<patient_id>/<medication_id>
+    //   DELETE /api/medications/doctor/patient/<patient_id>/<medication_id>
+    DOCTOR_PATIENT: (patientId: string) =>
+      v(`/api/medications/doctor/patient/${patientId}`),
+
+    DOCTOR_PATIENT_MED: (patientId: string, medicationId: string) =>
+      v(`/api/medications/doctor/patient/${patientId}/${medicationId}`),
+
+    // GET /api/medications/doctor/patient/<patient_id>/visit/<visit_id>
+    // (new route added to medication_routes.py — see backend fix)
+    DOCTOR_PATIENT_VISIT: (patientId: string, visitId: string) =>
+      v(`/api/medications/doctor/patient/${patientId}/visit/${visitId}`),
+
+    // ── Patient-facing ───────────────────────────────────────────────────
+    MY:        v('/api/medications/my'),
+    TODAY:     v('/api/medications/today'),
+
+    // POST /api/medications/intake/   ← intake_id MUST be in the request body
+    // (no intakeId path segment — the Flask route is /intake/ with no <intake_id>)
+    INTAKE:    v('/api/medications/intake/'),
+
     ADHERENCE: v('/api/medications/adherence'),
-    HISTORY: v('/api/medications/history'),
+    HISTORY:   v('/api/medications/history'),
   },
 } as const;
 
@@ -129,4 +158,7 @@ export const logEndpoints = () => {
   console.log('EHR.VISITS:', API.EHR.VISITS);
   console.log('EHR.MESSAGES(id):', API.EHR.MESSAGES('example-id'));
   console.log('EHR.ICD10_SUGGEST:', API.EHR.ICD10_SUGGEST);
+  console.log('MEDICATIONS.DOCTOR_CREATE:', API.MEDICATIONS.DOCTOR_CREATE);
+  console.log('MEDICATIONS.DOCTOR_PATIENT(id):', API.MEDICATIONS.DOCTOR_PATIENT('example-id'));
+  console.log('MEDICATIONS.INTAKE:', API.MEDICATIONS.INTAKE);
 };

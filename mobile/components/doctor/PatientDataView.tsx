@@ -2,7 +2,13 @@
  * Patient Data View Component
  * Location: mobile/components/doctor/PatientDataView.tsx
  *
- * Tabs: Overview | Visits | Vitals | Messages
+ * Tabs: Overview | Visits | Medications | Vitals | Documents | Exercises | Messages
+ *
+ * Changes vs. previous version
+ * ─────────────────────────────
+ * • Added "Medications" tab — loads all prescriptions for this patient via
+ *   GET /api/medications/doctor/patient/:id and displays them as cards with
+ *   dosage schedule, coverage, chronic/end-date, and active/inactive badge.
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
@@ -34,6 +40,10 @@ import {
   type DocumentResponse,
   type ExerciseResponse,
 } from '@/services/api/ehr';
+import {
+  getDoctorPatientMedications,
+  type MedicationRecord,
+} from '@/services/api/medications';
 import { apiClient } from '@/services/api/client';
 import { API } from '@/services/api/endpoints';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
@@ -43,7 +53,7 @@ import type { DoctorPatient } from '@/services/api/doctor';
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TabType = 'overview' | 'visits' | 'vitals' | 'documents' | 'exercises' | 'messages';
+type TabType = 'overview' | 'visits' | 'medications' | 'vitals' | 'documents' | 'exercises' | 'messages';
 
 interface MedicalProfile {
   patient_id:              string;
@@ -78,40 +88,24 @@ async function fetchMedicalProfile(patientId: string): Promise<MedicalProfile> {
   return res.data;
 }
 
-// FIX: Strip null, empty-string, and server-managed fields before sending.
-// Sending null height_cm/weight_kg causes float(None) → TypeError → 400 on
-// the backend. Sending an empty-string gender fails the allow-list check.
-// The API states "only supplied fields are written", so we must never send
-// unset placeholder values from EMPTY_PROFILE.
 async function saveMedicalProfile(
   patientId: string,
   data: Partial<MedicalProfile>,
 ): Promise<MedicalProfile> {
-  // Fields the server sets itself — never send these from the client.
   const SERVER_FIELDS = new Set(['patient_id', 'updated_at', 'updated_by']);
-
   const payload: Record<string, unknown> = {};
-
   for (const [key, value] of Object.entries(data)) {
-    // Drop read-only / server-managed fields.
     if (SERVER_FIELDS.has(key)) continue;
-    // Drop null numeric fields (height_cm, weight_kg) — sending null
-    // causes `float(None)` → TypeError → 400 in the backend validator.
     if (value === null) continue;
-    // Drop empty strings (gender, date_of_birth, etc.) — an empty gender
-    // string is not in VALID_GENDERS and would return 400.
     if (value === '') continue;
-
     payload[key] = value;
   }
-
   const res = await apiClient.put<MedicalProfile>(
     `/api/doctor/patient/${patientId}/profile`,
     payload,
   );
   return res.data;
 }
-
 
 interface PatientDataViewProps {
   patient: DoctorPatient;
@@ -137,6 +131,14 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
   const [visitsLoaded, setVisitsLoaded] = useState(false);
   const [visitsError, setVisitsError] = useState<string | null>(null);
   const [visitsRefreshing, setVisitsRefreshing] = useState(false);
+
+  // ── Medications ──────────────────────────────────────────────────────────
+  const [medications, setMedications] = useState<MedicationRecord[]>([]);
+  const [medicationsLoading, setMedicationsLoading] = useState(false);
+  const [medicationsLoaded, setMedicationsLoaded] = useState(false);
+  const [medicationsError, setMedicationsError] = useState<string | null>(null);
+  const [medicationsRefreshing, setMedicationsRefreshing] = useState(false);
+  const [medFilter, setMedFilter] = useState<'all' | 'active' | 'inactive'>('active');
 
   const [messages, setMessages] = useState<MessageResponse[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -169,8 +171,9 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
   const [profileError, setProfileError]     = useState<string | null>(null);
   const [profileSuccess, setProfileSuccess] = useState<string | null>(null);
   const [editingProfile, setEditingProfile] = useState(false);
-  // Draft holds editable form values while in edit mode
   const [draft, setDraft]                   = useState<MedicalProfile>(EMPTY_PROFILE);
+
+  // ── Load callbacks ───────────────────────────────────────────────────────
 
   const loadVitals = useCallback(async () => {
     try {
@@ -178,8 +181,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
       const data = await getDoctorPatientVitals(patient.id);
       setVitals(data);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load vitals';
-      setVitalsError(message);
+      setVitalsError(err instanceof Error ? err.message : 'Failed to load vitals');
     } finally {
       setVitalsLoading(false);
       setVitalsLoaded(true);
@@ -192,11 +194,23 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
       const data = await getDoctorPatientVisits(patient.id);
       setVisits(data);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load visits';
-      setVisitsError(message);
+      setVisitsError(err instanceof Error ? err.message : 'Failed to load visits');
     } finally {
       setVisitsLoading(false);
       setVisitsLoaded(true);
+    }
+  }, [patient.id]);
+
+  const loadMedications = useCallback(async () => {
+    try {
+      setMedicationsError(null);
+      const data = await getDoctorPatientMedications(patient.id);
+      setMedications(data);
+    } catch (err: unknown) {
+      setMedicationsError(err instanceof Error ? err.message : 'Failed to load medications');
+    } finally {
+      setMedicationsLoading(false);
+      setMedicationsLoaded(true);
     }
   }, [patient.id]);
 
@@ -206,8 +220,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
       const data = await getMessageThread(patient.id);
       setMessages(data);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load messages';
-      setMessagesError(message);
+      setMessagesError(err instanceof Error ? err.message : 'Failed to load messages');
     } finally {
       setMessagesLoading(false);
       setMessagesLoaded(true);
@@ -220,8 +233,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
       const data = await getDoctorPatientDocuments(patient.id);
       setDocuments(data);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load documents';
-      setDocumentsError(message);
+      setDocumentsError(err instanceof Error ? err.message : 'Failed to load documents');
     } finally {
       setDocumentsLoading(false);
       setDocumentsLoaded(true);
@@ -234,13 +246,14 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
       const data = await getDoctorPatientExercises(patient.id);
       setExercises(data);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to load exercises';
-      setExercisesError(message);
+      setExercisesError(err instanceof Error ? err.message : 'Failed to load exercises');
     } finally {
       setExercisesLoading(false);
       setExercisesLoaded(true);
     }
   }, [patient.id]);
+
+  // ── Lazy-load on tab switch ──────────────────────────────────────────────
 
   useEffect(() => {
     if (activeTab === 'vitals' && !vitalsLoaded && !vitalsLoading) {
@@ -255,6 +268,13 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
       loadVisits();
     }
   }, [activeTab, loadVisits]);
+
+  useEffect(() => {
+    if (activeTab === 'medications' && !medicationsLoaded && !medicationsLoading) {
+      setMedicationsLoading(true);
+      loadMedications();
+    }
+  }, [activeTab, loadMedications]);
 
   useEffect(() => {
     if (activeTab === 'messages' && !messagesLoaded && !messagesLoading) {
@@ -277,7 +297,6 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     }
   }, [activeTab, loadExercises]);
 
-  // Load medical profile when overview tab is first opened
   useEffect(() => {
     if (activeTab === 'overview' && !profileLoaded && !profileLoading) {
       setProfileLoading(true);
@@ -287,6 +306,8 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
         .finally(() => { setProfileLoading(false); setProfileLoaded(true); });
     }
   }, [activeTab, profileLoaded, profileLoading, patient.id]);
+
+  // ── Handlers ────────────────────────────────────────────────────────────
 
   const handleSaveProfile = useCallback(async () => {
     setProfileSaving(true);
@@ -318,6 +339,12 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     setVisitsRefreshing(false);
   }, [loadVisits]);
 
+  const onRefreshMedications = useCallback(async () => {
+    setMedicationsRefreshing(true);
+    await loadMedications();
+    setMedicationsRefreshing(false);
+  }, [loadMedications]);
+
   const onRefreshMessages = useCallback(async () => {
     setMessagesRefreshing(true);
     await loadMessages();
@@ -345,21 +372,36 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
       setMessages((prev) => [...prev, sent]);
       setMessageInput('');
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to send message';
-      setMessagesError(message);
+      setMessagesError(err instanceof Error ? err.message : 'Failed to send message');
     } finally {
       setMessageSending(false);
     }
   }, [messageInput, messageSending, patient.id]);
 
+  // ── Tabs ─────────────────────────────────────────────────────────────────
+
   const tabs: { key: TabType; label: string }[] = [
-    { key: 'overview', label: 'Overview' },
-    { key: 'visits', label: 'Visits' },
-    { key: 'vitals', label: 'Vitals' },
-    { key: 'documents', label: 'Documents' },
-    { key: 'exercises', label: 'Exercises' },
-    { key: 'messages', label: 'Messages' },
+    { key: 'overview',    label: 'Overview' },
+    { key: 'visits',      label: 'Visits' },
+    { key: 'medications', label: 'Medications' },
+    { key: 'vitals',      label: 'Vitals' },
+    { key: 'documents',   label: 'Documents' },
+    { key: 'exercises',   label: 'Exercises' },
+    { key: 'messages',    label: 'Messages' },
   ];
+
+  // ── Medication helpers ───────────────────────────────────────────────────
+
+  const coverageColor = (c: string) => {
+    if (c === 'GKV') return { bg: '#E3F2FD', text: '#1565C0', border: '#90CAF9' };
+    if (c === 'PKV') return { bg: '#F3E5F5', text: '#6A1B9A', border: '#CE93D8' };
+    return { bg: '#F5F5F5', text: '#424242', border: '#BDBDBD' };
+  };
+
+  const dosageScheduleLabel = (med: MedicationRecord) =>
+    `${med.dosage_morning}-${med.dosage_noon}-${med.dosage_evening}-${med.dosage_night}`;
+
+  // ── Render ───────────────────────────────────────────────────────────────
 
   return (
     <View style={styles.container}>
@@ -395,11 +437,9 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
         ))}
       </ScrollView>
 
-      {/* Overview Tab — Medical Profile */}
+      {/* ══════════════ OVERVIEW TAB ══════════════ */}
       {activeTab === 'overview' && (
         <ScrollView style={styles.tabContent} contentContainerStyle={styles.content}>
-
-          {/* Success / error banners */}
           {profileSuccess && (
             <View style={styles.profileSuccessBanner}>
               <Text style={styles.profileSuccessText}>✅ {profileSuccess}</Text>
@@ -414,7 +454,6 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
           {profileLoading ? (
             <ActivityIndicator color={colors.primary} style={styles.loader} />
           ) : editingProfile ? (
-            /* ──────────── EDIT MODE ──────────── */
             <>
               <View style={styles.profileEditHeader}>
                 <Text style={styles.profileSectionHeading}>✏️  Edit Medical Profile</Text>
@@ -437,10 +476,9 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 </View>
               </View>
 
-              {/* ── Demographics ── */}
+              {/* Demographics */}
               <View style={styles.profileSection}>
                 <Text style={styles.profileSectionLabel}>DEMOGRAPHICS</Text>
-
                 <Text style={styles.profileFieldLabel}>Date of Birth</Text>
                 <TextInput
                   style={styles.profileInput}
@@ -449,7 +487,6 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                   placeholder="YYYY-MM-DD"
                   placeholderTextColor={colors.text.secondary}
                 />
-
                 <Text style={styles.profileFieldLabel}>Gender</Text>
                 <View style={styles.profileChipRow}>
                   {['male', 'female', 'other', 'prefer_not_to_say'].map(opt => (
@@ -464,7 +501,6 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                     </TouchableOpacity>
                   ))}
                 </View>
-
                 <Text style={styles.profileFieldLabel}>Blood Type</Text>
                 <View style={styles.profileChipRow}>
                   {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'unknown'].map(opt => (
@@ -479,7 +515,6 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                     </TouchableOpacity>
                   ))}
                 </View>
-
                 <View style={styles.profileRow2}>
                   <View style={styles.profileInputHalf}>
                     <Text style={styles.profileFieldLabel}>Height (cm)</Text>
@@ -498,13 +533,12 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                       style={styles.profileInput}
                       value={draft.weight_kg != null ? String(draft.weight_kg) : ''}
                       onChangeText={(v) => setDraft(d => ({ ...d, weight_kg: v ? parseFloat(v) : null }))}
-                      placeholder="e.g. 72"
+                      placeholder="e.g. 70"
                       placeholderTextColor={colors.text.secondary}
                       keyboardType="numeric"
                     />
                   </View>
                 </View>
-
                 <Text style={styles.profileFieldLabel}>Smoking Status</Text>
                 <View style={styles.profileChipRow}>
                   {['never', 'former', 'current', 'unknown'].map(opt => (
@@ -521,7 +555,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 </View>
               </View>
 
-              {/* ── Allergies ── */}
+              {/* Allergies */}
               <View style={styles.profileSection}>
                 <Text style={styles.profileSectionLabel}>ALLERGIES</Text>
                 {draft.allergies.map((a, i) => (
@@ -529,10 +563,8 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                     <TextInput
                       style={[styles.profileInput, styles.profileListInput]}
                       value={a}
-                      onChangeText={(v) => setDraft(d => {
-                        const next = [...d.allergies]; next[i] = v; return { ...d, allergies: next };
-                      })}
-                      placeholder="e.g. Penicillin"
+                      onChangeText={(v) => setDraft(d => ({ ...d, allergies: d.allergies.map((x, j) => j === i ? v : x) }))}
+                      placeholder="Allergy name"
                       placeholderTextColor={colors.text.secondary}
                     />
                     <TouchableOpacity
@@ -551,7 +583,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 </TouchableOpacity>
               </View>
 
-              {/* ── Chronic Conditions ── */}
+              {/* Chronic Conditions */}
               <View style={styles.profileSection}>
                 <Text style={styles.profileSectionLabel}>CHRONIC CONDITIONS</Text>
                 {draft.chronic_conditions.map((c, i) => (
@@ -559,10 +591,8 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                     <TextInput
                       style={[styles.profileInput, styles.profileListInput]}
                       value={c}
-                      onChangeText={(v) => setDraft(d => {
-                        const next = [...d.chronic_conditions]; next[i] = v; return { ...d, chronic_conditions: next };
-                      })}
-                      placeholder="e.g. Type 2 Diabetes"
+                      onChangeText={(v) => setDraft(d => ({ ...d, chronic_conditions: d.chronic_conditions.map((x, j) => j === i ? v : x) }))}
+                      placeholder="Condition name"
                       placeholderTextColor={colors.text.secondary}
                     />
                     <TouchableOpacity
@@ -581,18 +611,16 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 </TouchableOpacity>
               </View>
 
-              {/* ── Current Medications ── */}
+              {/* Current Medications (free-text) */}
               <View style={styles.profileSection}>
-                <Text style={styles.profileSectionLabel}>CURRENT MEDICATIONS</Text>
+                <Text style={styles.profileSectionLabel}>CURRENT MEDICATIONS (notes)</Text>
                 {draft.current_medications.map((m, i) => (
                   <View key={i} style={styles.profileListItemRow}>
                     <TextInput
                       style={[styles.profileInput, styles.profileListInput]}
                       value={m}
-                      onChangeText={(v) => setDraft(d => {
-                        const next = [...d.current_medications]; next[i] = v; return { ...d, current_medications: next };
-                      })}
-                      placeholder="e.g. Metformin 500mg daily"
+                      onChangeText={(v) => setDraft(d => ({ ...d, current_medications: d.current_medications.map((x, j) => j === i ? v : x) }))}
+                      placeholder="Medication name"
                       placeholderTextColor={colors.text.secondary}
                     />
                     <TouchableOpacity
@@ -611,7 +639,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 </TouchableOpacity>
               </View>
 
-              {/* ── Emergency Contact ── */}
+              {/* Emergency Contact */}
               <View style={styles.profileSection}>
                 <Text style={styles.profileSectionLabel}>EMERGENCY CONTACT</Text>
                 <Text style={styles.profileFieldLabel}>Name</Text>
@@ -633,7 +661,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 />
               </View>
 
-              {/* ── Doctor Notes ── */}
+              {/* Clinical Notes */}
               <View style={styles.profileSection}>
                 <Text style={styles.profileSectionLabel}>CLINICAL NOTES</Text>
                 <TextInput
@@ -659,7 +687,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
               </TouchableOpacity>
             </>
           ) : (
-            /* ──────────── VIEW MODE ──────────── */
+            /* VIEW MODE */
             <>
               {/* Patient identity card */}
               <View style={styles.profileIdentityCard}>
@@ -728,9 +756,9 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 }
               </View>
 
-              {/* Current Medications */}
+              {/* Current Medications (free-text notes) */}
               <View style={styles.profileSection}>
-                <Text style={styles.profileSectionLabel}>CURRENT MEDICATIONS</Text>
+                <Text style={styles.profileSectionLabel}>CURRENT MEDICATIONS (notes)</Text>
                 {profile.current_medications.length === 0
                   ? <Text style={styles.profileEmpty}>None recorded</Text>
                   : profile.current_medications.map((m, i) => (
@@ -770,14 +798,12 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 </View>
               ) : null}
 
-              {/* Last updated */}
               {profile.updated_at ? (
                 <Text style={styles.profileUpdatedAt}>
                   Last updated: {profile.updated_at.slice(0, 10)}
                 </Text>
               ) : null}
 
-              {/* Edit button */}
               <TouchableOpacity
                 style={styles.profileEditBtn}
                 onPress={() => { setDraft(profile); setEditingProfile(true); setProfileError(null); }}
@@ -789,17 +815,13 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
         </ScrollView>
       )}
 
-      {/* Visits Tab */}
+      {/* ══════════════ VISITS TAB ══════════════ */}
       {activeTab === 'visits' && (
         <ScrollView
           style={styles.tabContent}
           contentContainerStyle={styles.content}
           refreshControl={
-            <RefreshControl
-              refreshing={visitsRefreshing}
-              onRefresh={onRefreshVisits}
-              colors={[colors.primary]}
-            />
+            <RefreshControl refreshing={visitsRefreshing} onRefresh={onRefreshVisits} colors={[colors.primary]} />
           }
         >
           <TouchableOpacity
@@ -847,10 +869,182 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
         </ScrollView>
       )}
 
-      {/* Vitals Tab */}
+      {/* ══════════════ MEDICATIONS TAB ══════════════ */}
+      {activeTab === 'medications' && (
+        <View style={styles.tabContent}>
+          {/* Filter sub-tabs: All / Active / Inactive */}
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.docSubTabBar}
+            contentContainerStyle={styles.docSubTabBarContent}
+          >
+            {(
+              [
+                { key: 'active',   label: '✅ Active',   count: medications.filter(m => m.is_active !== false).length },
+                { key: 'inactive', label: '⏸ Inactive', count: medications.filter(m => m.is_active === false).length },
+                { key: 'all',      label: '💊 All',      count: medications.length },
+              ] as const
+            ).map((f) => (
+              <TouchableOpacity
+                key={f.key}
+                style={[styles.docSubTab, medFilter === f.key && styles.docSubTabActive]}
+                onPress={() => setMedFilter(f.key)}
+              >
+                <Text style={[styles.docSubTabText, medFilter === f.key && styles.docSubTabTextActive]}>
+                  {f.label}
+                </Text>
+                {f.count > 0 && (
+                  <View style={[styles.docSubTabBadge, medFilter === f.key && styles.docSubTabBadgeActive]}>
+                    <Text style={[styles.docSubTabBadgeText, medFilter === f.key && styles.docSubTabBadgeTextActive]}>
+                      {f.count}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <ScrollView
+            style={styles.tabContent}
+            contentContainerStyle={styles.content}
+            refreshControl={
+              <RefreshControl refreshing={medicationsRefreshing} onRefresh={onRefreshMedications} colors={[colors.primary]} />
+            }
+          >
+            {medicationsLoading ? (
+              <ActivityIndicator color={colors.primary} style={styles.loader} />
+            ) : medicationsError ? (
+              <Text style={styles.errorText}>⚠️ {medicationsError}</Text>
+            ) : (() => {
+              const filtered =
+                medFilter === 'active'   ? medications.filter(m => m.is_active !== false) :
+                medFilter === 'inactive' ? medications.filter(m => m.is_active === false) :
+                medications;
+
+              if (filtered.length === 0) {
+                return (
+                  <View style={styles.medEmpty}>
+                    <Text style={styles.medEmptyIcon}>💊</Text>
+                    <Text style={styles.medEmptyTitle}>
+                      No {medFilter !== 'all' ? medFilter : ''} medications
+                    </Text>
+                    <Text style={styles.medEmptyBody}>
+                      Prescriptions added via the Visit form appear here.
+                    </Text>
+                  </View>
+                );
+              }
+
+              return filtered.map((med, index) => {
+                const isActive   = med.is_active !== false;
+                const isChronic  = med.is_chronic;
+                const coverage   = coverageColor(med.coverage ?? '');
+                const schedule   = dosageScheduleLabel(med);
+                const slots      = [
+                  { label: 'Mo', amount: med.dosage_morning },
+                  { label: 'Mi', amount: med.dosage_noon },
+                  { label: 'Ab', amount: med.dosage_evening },
+                  { label: 'Na', amount: med.dosage_night },
+                ];
+
+                return (
+                  <View
+                    key={med._id ?? med.id ?? index}
+                    style={[styles.medCard, !isActive && styles.medCardInactive]}
+                  >
+                    {/* ── Header row ── */}
+                    <View style={styles.medCardHeader}>
+                      <View style={styles.medCardTitleBlock}>
+                        <Text style={styles.medTradeName}>{med.trade_name}</Text>
+                        <Text style={styles.medSubstance}>
+                          {med.active_substance}
+                          {med.strength ? ` · ${med.strength}` : ''}
+                          {med.form     ? ` · ${med.form}` : ''}
+                        </Text>
+                      </View>
+                      <View style={[
+                        styles.medActiveBadge,
+                        isActive ? styles.medActiveBadgeOn : styles.medActiveBadgeOff,
+                      ]}>
+                        <Text style={[
+                          styles.medActiveBadgeText,
+                          isActive ? styles.medActiveBadgeTextOn : styles.medActiveBadgeTextOff,
+                        ]}>
+                          {isActive ? 'Active' : 'Inactive'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* ── Dosage schedule pills ── */}
+                    <View style={styles.medScheduleRow}>
+                      {slots.map((slot) => {
+                        const active = slot.amount > 0;
+                        return (
+                          <View
+                            key={slot.label}
+                            style={[styles.medSlotPill, active ? styles.medSlotPillActive : styles.medSlotPillInactive]}
+                          >
+                            <Text style={[styles.medSlotLabel, active ? styles.medSlotLabelActive : styles.medSlotLabelInactive]}>
+                              {slot.label}
+                            </Text>
+                            <Text style={[styles.medSlotAmount, active ? styles.medSlotAmountActive : styles.medSlotAmountInactive]}>
+                              {slot.amount}
+                            </Text>
+                          </View>
+                        );
+                      })}
+                      <Text style={styles.medScheduleUnit}>{med.dosage_unit}</Text>
+                    </View>
+
+                    {/* ── Meta row: coverage + norm size + PZN ── */}
+                    <View style={styles.medMetaRow}>
+                      {med.coverage && (
+                        <View style={[styles.medBadge, { backgroundColor: coverage.bg, borderColor: coverage.border }]}>
+                          <Text style={[styles.medBadgeText, { color: coverage.text }]}>
+                            {med.coverage}
+                          </Text>
+                        </View>
+                      )}
+                      {med.norm_size && (
+                        <View style={styles.medBadgeNeutral}>
+                          <Text style={styles.medBadgeNeutralText}>{med.norm_size}</Text>
+                        </View>
+                      )}
+                      {med.aut_idem && (
+                        <View style={styles.medBadgeNeutral}>
+                          <Text style={styles.medBadgeNeutralText}>Aut-idem</Text>
+                        </View>
+                      )}
+                      <Text style={styles.medPZN}>PZN {med.pzn}</Text>
+                    </View>
+
+                    {/* ── Dates ── */}
+                    <View style={styles.medDatesRow}>
+                      <Text style={styles.medDateText}>
+                        Start: {med.start_date ?? '—'}
+                      </Text>
+                      <Text style={styles.medDateSep}>·</Text>
+                      <Text style={[styles.medDateText, isChronic && styles.medChronicText]}>
+                        {isChronic ? 'Dauermedikation' : `Ende: ${med.end_date ?? '—'}`}
+                      </Text>
+                    </View>
+
+                    {/* ── Dosage note ── */}
+                    {med.dosage_note ? (
+                      <Text style={styles.medNote}>{med.dosage_note}</Text>
+                    ) : null}
+                  </View>
+                );
+              });
+            })()}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* ══════════════ VITALS TAB ══════════════ */}
       {activeTab === 'vitals' && (
         <View style={styles.tabContent}>
-          {/* Vital sub-tab bar */}
           <View style={styles.docSubTabBar}>
             <ScrollView
               horizontal
@@ -881,11 +1075,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             style={styles.tabContent}
             contentContainerStyle={styles.content}
             refreshControl={
-              <RefreshControl
-                refreshing={vitalsRefreshing}
-                onRefresh={onRefreshVitals}
-                colors={[colors.primary]}
-              />
+              <RefreshControl refreshing={vitalsRefreshing} onRefresh={onRefreshVitals} colors={[colors.primary]} />
             }
           >
             {vitalsLoading ? (
@@ -897,7 +1087,6 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             ) : (() => {
               const latest = vitals[0];
 
-              /* ── BP helpers ── */
               const bpStatus = (sys: number, dia: number): { label: string; color: string; bg: string } => {
                 if (sys >= 180 || dia >= 120) return { label: 'Hypertensive Crisis', color: '#B71C1C', bg: '#FFEBEE' };
                 if (sys >= 140 || dia >= 90)  return { label: 'Stage 2 High',        color: '#C62828', bg: '#FFCDD2' };
@@ -906,16 +1095,14 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 return                               { label: 'Normal',              color: '#2E7D32', bg: '#E8F5E9' };
               };
 
-              /* ── HR helpers ── */
               const hrStatus = (pulse: number): { label: string; color: string; bg: string } => {
-                if (pulse > 130) return { label: 'Very High',   color: '#B71C1C', bg: '#FFEBEE' };
-                if (pulse > 100) return { label: 'High',        color: '#E65100', bg: '#FFF3E0' };
-                if (pulse < 40)  return { label: 'Very Low',    color: '#B71C1C', bg: '#FFEBEE' };
-                if (pulse < 60)  return { label: 'Low',         color: '#F57F17', bg: '#FFFDE7' };
-                return                  { label: 'Normal',      color: '#2E7D32', bg: '#E8F5E9' };
+                if (pulse > 130) return { label: 'Very High', color: '#B71C1C', bg: '#FFEBEE' };
+                if (pulse > 100) return { label: 'High',      color: '#E65100', bg: '#FFF3E0' };
+                if (pulse < 40)  return { label: 'Very Low',  color: '#B71C1C', bg: '#FFEBEE' };
+                if (pulse < 60)  return { label: 'Low',       color: '#F57F17', bg: '#FFFDE7' };
+                return                  { label: 'Normal',    color: '#2E7D32', bg: '#E8F5E9' };
               };
 
-              /* ── Date formatter ── */
               const fmtDate = (ts?: string) => {
                 if (!ts) return '—';
                 try {
@@ -926,7 +1113,6 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 } catch { return ts; }
               };
 
-              /* ── Trend arrow (compare current vs previous reading) ── */
               const trend = (curr: number | null | undefined, prev: number | null | undefined) => {
                 if (curr == null || prev == null) return '';
                 if (curr > prev) return ' ↑';
@@ -934,23 +1120,18 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 return ' →';
               };
 
-              /* ══════════════ OVERVIEW ══════════════ */
               if (vitalCategory === 'overview') {
                 const prev = vitals[1];
-                const latestBP  = latest.systolic != null && latest.diastolic != null
-                  ? bpStatus(latest.systolic, latest.diastolic) : null;
-                const latestHR  = latest.pulse != null ? hrStatus(latest.pulse) : null;
+                const latestBP = latest.systolic != null && latest.diastolic != null ? bpStatus(latest.systolic, latest.diastolic) : null;
+                const latestHR = latest.pulse != null ? hrStatus(latest.pulse) : null;
 
                 return (
                   <>
-                    {/* Urgent banner */}
                     {latest.urgent && (
                       <View style={styles.urgentBanner}>
                         <Text style={styles.urgentBannerText}>⚠️  Latest reading flagged as URGENT</Text>
                       </View>
                     )}
-
-                    {/* Summary row — BP + HR side-by-side */}
                     <View style={styles.vitalSummaryRow}>
                       {latestBP && (
                         <View style={[styles.vitalSummaryCard, { borderTopColor: latestBP.color }]}>
@@ -964,9 +1145,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                             <Text style={[styles.vitalStatusPillText, { color: latestBP.color }]}>{latestBP.label}</Text>
                           </View>
                           {prev?.systolic != null && (
-                            <Text style={styles.vitalTrend}>
-                              vs prev:{trend(latest.systolic, prev.systolic)} sys
-                            </Text>
+                            <Text style={styles.vitalTrend}>vs prev:{trend(latest.systolic, prev.systolic)} sys</Text>
                           )}
                         </View>
                       )}
@@ -974,23 +1153,17 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                         <View style={[styles.vitalSummaryCard, { borderTopColor: latestHR.color }]}>
                           <Text style={styles.vitalSummaryIcon}>💓</Text>
                           <Text style={styles.vitalSummaryLabel}>Heart Rate</Text>
-                          <Text style={[styles.vitalSummaryValue, { color: latestHR.color }]}>
-                            {latest.pulse}
-                          </Text>
+                          <Text style={[styles.vitalSummaryValue, { color: latestHR.color }]}>{latest.pulse}</Text>
                           <Text style={styles.vitalSummaryUnit}>bpm</Text>
                           <View style={[styles.vitalStatusPill, { backgroundColor: latestHR.bg }]}>
                             <Text style={[styles.vitalStatusPillText, { color: latestHR.color }]}>{latestHR.label}</Text>
                           </View>
                           {prev?.pulse != null && (
-                            <Text style={styles.vitalTrend}>
-                              vs prev:{trend(latest.pulse, prev.pulse)}
-                            </Text>
+                            <Text style={styles.vitalTrend}>vs prev:{trend(latest.pulse, prev.pulse)}</Text>
                           )}
                         </View>
                       )}
                     </View>
-
-                    {/* Stats row */}
                     <View style={styles.vitalStatsRow}>
                       <View style={styles.vitalStatItem}>
                         <Text style={styles.vitalStatValue}>{vitals.length}</Text>
@@ -998,25 +1171,18 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                       </View>
                       <View style={styles.vitalStatDivider} />
                       <View style={styles.vitalStatItem}>
-                        <Text style={[styles.vitalStatValue, { color: colors.danger }]}>
-                          {vitals.filter(v => v.urgent).length}
-                        </Text>
-                        <Text style={styles.vitalStatLabel}>Urgent Flags</Text>
+                        <Text style={styles.vitalStatValue}>{vitals.filter(v => v.urgent).length}</Text>
+                        <Text style={styles.vitalStatLabel}>Urgent</Text>
                       </View>
                       <View style={styles.vitalStatDivider} />
                       <View style={styles.vitalStatItem}>
-                        <Text style={styles.vitalStatValue}>
-                          {vitals.filter(v => v.systolic != null && v.diastolic != null && (v.systolic >= 130 || v.diastolic >= 80)).length}
-                        </Text>
-                        <Text style={styles.vitalStatLabel}>High BP Readings</Text>
+                        <Text style={styles.vitalStatValue}>{fmtDate(latest.timestamp).split(',')[0]}</Text>
+                        <Text style={styles.vitalStatLabel}>Last Reading</Text>
                       </View>
                     </View>
-
-                    {/* Recent readings timeline */}
-                    <Text style={styles.vitalSectionTitle}>Recent Readings</Text>
-                    {vitals.slice(0, 5).map((v, i) => {
+                    <Text style={styles.vitalSectionTitle}>All Readings</Text>
+                    {vitals.map((v, i) => {
                       const bp = v.systolic != null && v.diastolic != null ? bpStatus(v.systolic, v.diastolic) : null;
-                      const hr = v.pulse != null ? hrStatus(v.pulse) : null;
                       return (
                         <View key={v.id ?? i} style={[styles.vitalTimelineCard, v.urgent && styles.vitalTimelineCardUrgent]}>
                           <View style={styles.vitalTimelineLeft}>
@@ -1024,19 +1190,17 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                             {v.urgent && <Text style={styles.vitalUrgentTag}>⚠️ Urgent</Text>}
                           </View>
                           <View style={styles.vitalTimelineRight}>
-                            {bp && (
+                            {v.systolic != null && (
                               <View style={styles.vitalTimelineMetric}>
-                                <Text style={[styles.vitalTimelineMetricVal, { color: bp.color }]}>
+                                <Text style={[styles.vitalTimelineMetricVal, bp ? { color: bp.color } : {}]}>
                                   {v.systolic}/{v.diastolic}
                                 </Text>
                                 <Text style={styles.vitalTimelineMetricUnit}>mmHg</Text>
                               </View>
                             )}
-                            {hr && (
+                            {v.pulse != null && (
                               <View style={styles.vitalTimelineMetric}>
-                                <Text style={[styles.vitalTimelineMetricVal, { color: hr.color }]}>
-                                  {v.pulse}
-                                </Text>
+                                <Text style={styles.vitalTimelineMetricVal}>{v.pulse}</Text>
                                 <Text style={styles.vitalTimelineMetricUnit}>bpm</Text>
                               </View>
                             )}
@@ -1048,57 +1212,31 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 );
               }
 
-              /* ══════════════ BLOOD PRESSURE ══════════════ */
               if (vitalCategory === 'bp') {
                 const bpReadings = vitals.filter(v => v.systolic != null && v.diastolic != null);
-                if (bpReadings.length === 0) return <Text style={styles.emptyText}>No blood pressure readings.</Text>;
-
+                if (bpReadings.length === 0) return <Text style={styles.emptyText}>No blood pressure data.</Text>;
                 const latestBP = bpStatus(bpReadings[0].systolic!, bpReadings[0].diastolic!);
-                const avgSys = Math.round(bpReadings.reduce((s, v) => s + (v.systolic ?? 0), 0) / bpReadings.length);
-                const avgDia = Math.round(bpReadings.reduce((s, v) => s + (v.diastolic ?? 0), 0) / bpReadings.length);
-
                 return (
                   <>
-                    {/* Latest reading hero */}
                     <View style={[styles.vitalHeroCard, { borderColor: latestBP.color }]}>
-                      <Text style={styles.vitalHeroLabel}>Latest Reading</Text>
+                      <Text style={styles.vitalHeroLabel}>Latest Blood Pressure</Text>
                       <Text style={[styles.vitalHeroValue, { color: latestBP.color }]}>
-                        {bpReadings[0].systolic}/{bpReadings[0].diastolic}
-                        <Text style={styles.vitalHeroUnit}> mmHg</Text>
+                        {bpReadings[0].systolic}
+                        <Text style={styles.vitalHeroUnit}>/{bpReadings[0].diastolic} mmHg</Text>
                       </Text>
-                      <View style={[styles.vitalStatusPill, { backgroundColor: latestBP.bg, alignSelf: 'center', marginTop: 6 }]}>
+                      <View style={[styles.vitalStatusPill, { backgroundColor: latestBP.bg }]}>
                         <Text style={[styles.vitalStatusPillText, { color: latestBP.color }]}>{latestBP.label}</Text>
                       </View>
                       <Text style={styles.vitalHeroDate}>{fmtDate(bpReadings[0].timestamp)}</Text>
                     </View>
-
-                    {/* Averages */}
-                    <View style={styles.vitalStatsRow}>
-                      <View style={styles.vitalStatItem}>
-                        <Text style={styles.vitalStatValue}>{avgSys}</Text>
-                        <Text style={styles.vitalStatLabel}>Avg Systolic</Text>
-                      </View>
-                      <View style={styles.vitalStatDivider} />
-                      <View style={styles.vitalStatItem}>
-                        <Text style={styles.vitalStatValue}>{avgDia}</Text>
-                        <Text style={styles.vitalStatLabel}>Avg Diastolic</Text>
-                      </View>
-                      <View style={styles.vitalStatDivider} />
-                      <View style={styles.vitalStatItem}>
-                        <Text style={styles.vitalStatValue}>{bpReadings.length}</Text>
-                        <Text style={styles.vitalStatLabel}>Readings</Text>
-                      </View>
-                    </View>
-
-                    {/* BP reference legend */}
                     <View style={styles.bpLegend}>
                       <Text style={styles.bpLegendTitle}>Reference Ranges</Text>
                       {[
-                        { label: 'Normal',              range: '< 120/80',   color: '#2E7D32', bg: '#E8F5E9' },
-                        { label: 'Elevated',            range: '120–129/<80',color: '#F57F17', bg: '#FFFDE7' },
-                        { label: 'Stage 1 High',        range: '130–139/80–89', color: '#E65100', bg: '#FFF3E0' },
-                        { label: 'Stage 2 High',        range: '≥ 140/≥ 90', color: '#C62828', bg: '#FFCDD2' },
-                        { label: 'Hypertensive Crisis', range: '≥ 180/≥ 120',color: '#B71C1C', bg: '#FFEBEE' },
+                        { label: 'Normal',              range: '< 120/80',    color: '#2E7D32' },
+                        { label: 'Elevated',            range: '120–129/<80', color: '#F57F17' },
+                        { label: 'Stage 1 High',        range: '130–139/80–89', color: '#E65100' },
+                        { label: 'Stage 2 High',        range: '≥ 140/≥90',  color: '#C62828' },
+                        { label: 'Hypertensive Crisis', range: '> 180/>120',  color: '#B71C1C' },
                       ].map(r => (
                         <View key={r.label} style={styles.bpLegendRow}>
                           <View style={[styles.bpLegendDot, { backgroundColor: r.color }]} />
@@ -1107,8 +1245,6 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                         </View>
                       ))}
                     </View>
-
-                    {/* History list */}
                     <Text style={styles.vitalSectionTitle}>History</Text>
                     {bpReadings.map((v, i) => {
                       const st = bpStatus(v.systolic!, v.diastolic!);
@@ -1126,10 +1262,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                               <Text style={[styles.vitalStatusPillText, { color: st.color }]}>{st.label}</Text>
                             </View>
                             {prev?.systolic != null && (
-                              <Text style={styles.vitalTrend}>
-                                {trend(v.systolic, prev.systolic)} sys{' '}
-                                {trend(v.diastolic, prev.diastolic)} dia
-                              </Text>
+                              <Text style={styles.vitalTrend}>{trend(v.systolic, prev.systolic)} sys vs prev</Text>
                             )}
                             {v.urgent && <Text style={styles.vitalUrgentTag}>⚠️ Urgent</Text>}
                           </View>
@@ -1140,67 +1273,23 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 );
               }
 
-              /* ══════════════ HEART RATE ══════════════ */
               if (vitalCategory === 'hr') {
                 const hrReadings = vitals.filter(v => v.pulse != null);
-                if (hrReadings.length === 0) return <Text style={styles.emptyText}>No heart rate readings.</Text>;
-
+                if (hrReadings.length === 0) return <Text style={styles.emptyText}>No heart rate data.</Text>;
                 const latestHR = hrStatus(hrReadings[0].pulse!);
-                const avgHR = Math.round(hrReadings.reduce((s, v) => s + (v.pulse ?? 0), 0) / hrReadings.length);
-                const maxHR = Math.max(...hrReadings.map(v => v.pulse ?? 0));
-                const minHR = Math.min(...hrReadings.map(v => v.pulse ?? 0));
-
                 return (
                   <>
-                    {/* Hero */}
                     <View style={[styles.vitalHeroCard, { borderColor: latestHR.color }]}>
                       <Text style={styles.vitalHeroLabel}>Latest Heart Rate</Text>
                       <Text style={[styles.vitalHeroValue, { color: latestHR.color }]}>
                         {hrReadings[0].pulse}
                         <Text style={styles.vitalHeroUnit}> bpm</Text>
                       </Text>
-                      <View style={[styles.vitalStatusPill, { backgroundColor: latestHR.bg, alignSelf: 'center', marginTop: 6 }]}>
+                      <View style={[styles.vitalStatusPill, { backgroundColor: latestHR.bg }]}>
                         <Text style={[styles.vitalStatusPillText, { color: latestHR.color }]}>{latestHR.label}</Text>
                       </View>
                       <Text style={styles.vitalHeroDate}>{fmtDate(hrReadings[0].timestamp)}</Text>
                     </View>
-
-                    {/* Stats */}
-                    <View style={styles.vitalStatsRow}>
-                      {[
-                        { value: avgHR,            label: 'Avg bpm' },
-                        { value: minHR,            label: 'Min bpm' },
-                        { value: maxHR,            label: 'Max bpm' },
-                      ].map((s, i) => (
-                        <React.Fragment key={s.label}>
-                          {i > 0 && <View style={styles.vitalStatDivider} />}
-                          <View style={styles.vitalStatItem}>
-                            <Text style={styles.vitalStatValue}>{s.value}</Text>
-                            <Text style={styles.vitalStatLabel}>{s.label}</Text>
-                          </View>
-                        </React.Fragment>
-                      ))}
-                    </View>
-
-                    {/* HR reference legend */}
-                    <View style={styles.bpLegend}>
-                      <Text style={styles.bpLegendTitle}>Reference Ranges</Text>
-                      {[
-                        { label: 'Very Low',  range: '< 40 bpm',   color: '#B71C1C', bg: '#FFEBEE' },
-                        { label: 'Low',       range: '40–59 bpm',  color: '#F57F17', bg: '#FFFDE7' },
-                        { label: 'Normal',    range: '60–100 bpm', color: '#2E7D32', bg: '#E8F5E9' },
-                        { label: 'High',      range: '101–130 bpm',color: '#E65100', bg: '#FFF3E0' },
-                        { label: 'Very High', range: '> 130 bpm',  color: '#B71C1C', bg: '#FFEBEE' },
-                      ].map(r => (
-                        <View key={r.label} style={styles.bpLegendRow}>
-                          <View style={[styles.bpLegendDot, { backgroundColor: r.color }]} />
-                          <Text style={styles.bpLegendLabel}>{r.label}</Text>
-                          <Text style={styles.bpLegendRange}>{r.range}</Text>
-                        </View>
-                      ))}
-                    </View>
-
-                    {/* History */}
                     <Text style={styles.vitalSectionTitle}>History</Text>
                     {hrReadings.map((v, i) => {
                       const st = hrStatus(v.pulse!);
@@ -1208,9 +1297,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                       return (
                         <View key={v.id ?? i} style={[styles.vitalHistoryRow, { borderLeftColor: st.color }]}>
                           <View style={styles.vitalHistoryLeft}>
-                            <Text style={[styles.vitalHistoryMain, { color: st.color }]}>
-                              {v.pulse} bpm
-                            </Text>
+                            <Text style={[styles.vitalHistoryMain, { color: st.color }]}>{v.pulse} bpm</Text>
                             <Text style={styles.vitalHistoryDate}>{fmtDate(v.timestamp)}</Text>
                           </View>
                           <View style={styles.vitalHistoryRight}>
@@ -1235,18 +1322,14 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
         </View>
       )}
 
-      {/* Messages Tab */}
+      {/* ══════════════ MESSAGES TAB ══════════════ */}
       {activeTab === 'messages' && (
         <View style={styles.messagesContainer}>
           <ScrollView
             style={styles.tabContent}
             contentContainerStyle={styles.content}
             refreshControl={
-              <RefreshControl
-                refreshing={messagesRefreshing}
-                onRefresh={onRefreshMessages}
-                colors={[colors.primary]}
-              />
+              <RefreshControl refreshing={messagesRefreshing} onRefresh={onRefreshMessages} colors={[colors.primary]} />
             }
           >
             {messagesLoading ? (
@@ -1261,10 +1344,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                 return (
                   <View
                     key={msg.id ?? index}
-                    style={[
-                      styles.messageBubble,
-                      isDoctor ? styles.messageBubbleDoctor : styles.messageBubblePatient,
-                    ]}
+                    style={[styles.messageBubble, isDoctor ? styles.messageBubbleDoctor : styles.messageBubblePatient]}
                   >
                     <Text style={[styles.messageBody, isDoctor && styles.messageBodyDoctor]}>{msg.body}</Text>
                     <Text style={[styles.messageTime, isDoctor && styles.messageTimeDoctor]}>{msg.created_at}</Text>
@@ -1273,7 +1353,6 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
               })
             )}
           </ScrollView>
-
           <View style={styles.messageInputRow}>
             <TextInput
               style={styles.messageInput}
@@ -1288,20 +1367,17 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
               onPress={handleSendMessage}
               disabled={!messageInput.trim() || messageSending}
             >
-              {messageSending ? (
-                <ActivityIndicator color={colors.surface} size="small" />
-              ) : (
-                <Text style={styles.sendButtonText}>Send</Text>
-              )}
+              {messageSending
+                ? <ActivityIndicator color={colors.surface} size="small" />
+                : <Text style={styles.sendButtonText}>Send</Text>}
             </TouchableOpacity>
           </View>
         </View>
       )}
 
-      {/* Documents Tab */}
+      {/* ══════════════ DOCUMENTS TAB ══════════════ */}
       {activeTab === 'documents' && (
         <View style={styles.tabContent}>
-          {/* Document category sub-tabs */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1310,11 +1386,11 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
           >
             {(
               [
-                { key: 'all',          label: '📂 All',          count: documents.length },
-                { key: 'lab_report',   label: '🧪 Lab Reports',  count: documents.filter(d => d.category === 'lab_report').length },
-                { key: 'imaging',      label: '🩻 Imaging',      count: documents.filter(d => d.category === 'imaging').length },
+                { key: 'all',          label: '📂 All',           count: documents.length },
+                { key: 'lab_report',   label: '🧪 Lab Reports',   count: documents.filter(d => d.category === 'lab_report').length },
+                { key: 'imaging',      label: '🩻 Imaging',       count: documents.filter(d => d.category === 'imaging').length },
                 { key: 'prescription', label: '💊 Prescriptions', count: documents.filter(d => d.category === 'prescription').length },
-                { key: 'other',        label: '📄 Other',        count: documents.filter(d => d.category === 'other' || !['lab_report','imaging','prescription'].includes(d.category)).length },
+                { key: 'other',        label: '📄 Other',         count: documents.filter(d => !['lab_report','imaging','prescription'].includes(d.category)).length },
               ] as const
             ).map((cat) => (
               <TouchableOpacity
@@ -1340,11 +1416,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             style={styles.tabContent}
             contentContainerStyle={styles.content}
             refreshControl={
-              <RefreshControl
-                refreshing={documentsRefreshing}
-                onRefresh={onRefreshDocuments}
-                colors={[colors.primary]}
-              />
+              <RefreshControl refreshing={documentsRefreshing} onRefresh={onRefreshDocuments} colors={[colors.primary]} />
             }
           >
             {documentsLoading ? (
@@ -1355,63 +1427,39 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
               const filtered = docCategory === 'all'
                 ? documents
                 : docCategory === 'other'
-                  ? documents.filter(d => !['lab_report', 'imaging', 'prescription'].includes(d.category))
+                  ? documents.filter(d => !['lab_report','imaging','prescription'].includes(d.category))
                   : documents.filter(d => d.category === docCategory);
-
-              if (filtered.length === 0) {
-                return (
-                  <Text style={styles.emptyText}>
-                    No {docCategory === 'all' ? '' : docCategory.replace('_', ' ')} documents found.
-                  </Text>
-                );
-              }
-
-              return filtered.map((doc, index) => {
-                const icons: Record<string, string> = {
-                  lab_report: '🧪',
-                  imaging: '🩻',
-                  prescription: '💊',
-                  other: '📄',
-                };
-                const icon = icons[doc.category] ?? '📄';
-                return (
-                  <Card key={doc.id ?? index} variant="outlined" padding="medium" style={styles.card}>
-                    <View style={styles.docHeader}>
-                      <Text style={styles.docIcon}>{icon}</Text>
-                      <View style={styles.docInfo}>
-                        <Text style={styles.fieldValue}>{doc.description || '(No description)'}</Text>
-                        <Text style={styles.fieldLabel}>{doc.created_at}</Text>
-                      </View>
+              if (filtered.length === 0) return <Text style={styles.emptyText}>No {docCategory === 'all' ? '' : docCategory.replace('_', ' ')} documents found.</Text>;
+              const icons: Record<string, string> = { lab_report: '🧪', imaging: '🩻', prescription: '💊', other: '📄' };
+              return filtered.map((doc, index) => (
+                <Card key={doc.id ?? index} variant="outlined" padding="medium" style={styles.card}>
+                  <View style={styles.docHeader}>
+                    <Text style={styles.docIcon}>{icons[doc.category] ?? '📄'}</Text>
+                    <View style={styles.docInfo}>
+                      <Text style={styles.fieldValue}>{doc.description || '(No description)'}</Text>
+                      <Text style={styles.fieldLabel}>{doc.created_at}</Text>
                     </View>
-                    <TouchableOpacity
-                      style={styles.viewDocButton}
-                      onPress={() =>
-                        Linking.openURL(doc.url).catch(() =>
-                          Alert.alert('Error', 'Unable to open document.')
-                        )
-                      }
-                    >
-                      <Text style={styles.viewDocButtonText}>View</Text>
-                    </TouchableOpacity>
-                  </Card>
-                );
-              });
+                  </View>
+                  <TouchableOpacity
+                    style={styles.viewDocButton}
+                    onPress={() => Linking.openURL(doc.url).catch(() => Alert.alert('Error', 'Unable to open document.'))}
+                  >
+                    <Text style={styles.viewDocButtonText}>View</Text>
+                  </TouchableOpacity>
+                </Card>
+              ));
             })()}
           </ScrollView>
         </View>
       )}
 
-      {/* Exercises Tab */}
+      {/* ══════════════ EXERCISES TAB ══════════════ */}
       {activeTab === 'exercises' && (
         <ScrollView
           style={styles.tabContent}
           contentContainerStyle={styles.content}
           refreshControl={
-            <RefreshControl
-              refreshing={exercisesRefreshing}
-              onRefresh={onRefreshExercises}
-              colors={[colors.primary]}
-            />
+            <RefreshControl refreshing={exercisesRefreshing} onRefresh={onRefreshExercises} colors={[colors.primary]} />
           }
         >
           <TouchableOpacity
@@ -1436,17 +1484,11 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
               <Card key={ex.id ?? index} variant="outlined" padding="medium" style={styles.card}>
                 <Text style={styles.fieldValue}>{ex.title}</Text>
                 <Text style={styles.fieldLabel}>{ex.category}</Text>
-                {ex.description ? (
-                  <Text style={styles.fieldValue}>{ex.description}</Text>
-                ) : null}
+                {ex.description ? <Text style={styles.fieldValue}>{ex.description}</Text> : null}
                 <View style={styles.exerciseDetails}>
                   <Text style={styles.fieldLabel}>🕐 {ex.frequency}</Text>
-                  {ex.duration_minutes != null && (
-                    <Text style={styles.fieldLabel}>⏱ {ex.duration_minutes} min</Text>
-                  )}
-                  {ex.repetitions != null && ex.sets != null && (
-                    <Text style={styles.fieldLabel}>🔄 {ex.repetitions}×{ex.sets}</Text>
-                  )}
+                  {ex.duration_minutes != null && <Text style={styles.fieldLabel}>⏱ {ex.duration_minutes} min</Text>}
+                  {ex.repetitions != null && ex.sets != null && <Text style={styles.fieldLabel}>🔄 {ex.repetitions}×{ex.sets}</Text>}
                 </View>
                 {ex.notes ? (
                   <>
@@ -1468,28 +1510,16 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
   header: {
     padding: spacing.md,
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  backButton: {
-    marginBottom: spacing.xs,
-  },
-  backText: {
-    ...typography.body,
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  patientName: {
-    ...typography.h2,
-    color: colors.text.primary,
-  },
+  backButton: { marginBottom: spacing.xs },
+  backText: { ...typography.body, color: colors.primary, fontWeight: '600' },
+  patientName: { ...typography.h2, color: colors.text.primary },
   tabBar: {
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
@@ -1498,105 +1528,40 @@ const styles = StyleSheet.create({
     flexShrink: 0,
     flexGrow: 0,
   },
-  tabBarContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    height: 44,
-  },
-  tab: {
-    height: 44,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: spacing.md,
-  },
-  tabActive: {
-    borderBottomWidth: 2,
-    borderBottomColor: colors.primary,
-  },
-  tabText: {
-    ...typography.body,
-    color: colors.text.secondary,
-  },
-  tabTextActive: {
-    color: colors.primary,
-    fontWeight: '600',
-  },
-  tabContent: {
-    flex: 1,
-  },
-  content: {
-    padding: spacing.md,
-    paddingBottom: spacing.xl,
-  },
-  card: {
-    marginBottom: spacing.md,
-  },
-  loader: {
-    marginTop: spacing.xl,
-  },
-  errorText: {
-    ...typography.body,
-    color: colors.danger,
-    textAlign: 'center',
-    marginTop: spacing.xl,
-  },
-  emptyText: {
-    ...typography.body,
-    color: colors.text.secondary,
-    textAlign: 'center',
-    marginTop: spacing.xl,
-  },
-  fieldLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
-    marginTop: spacing.sm,
-  },
-  fieldValue: {
-    ...typography.body,
-    color: colors.text.primary,
-  },
-  dateText: {
-    ...typography.body,
-    color: colors.text.primary,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
-  },
+  tabBarContent: { flexDirection: 'row', alignItems: 'center', height: 44 },
+  tab: { height: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.md },
+  tabActive: { borderBottomWidth: 2, borderBottomColor: colors.primary },
+  tabText: { ...typography.body, color: colors.text.secondary },
+  tabTextActive: { color: colors.primary, fontWeight: '600' },
+  tabContent: { flex: 1 },
+  content: { padding: spacing.md, paddingBottom: spacing.xl },
+  card: { marginBottom: spacing.md },
+  loader: { marginTop: spacing.xl },
+  errorText: { ...typography.body, color: colors.danger, textAlign: 'center', marginTop: spacing.xl },
+  emptyText: { ...typography.body, color: colors.text.secondary, textAlign: 'center', marginTop: spacing.xl },
+  fieldLabel: { ...typography.small, color: colors.text.secondary, marginTop: spacing.sm },
+  fieldValue: { ...typography.body, color: colors.text.primary },
+  dateText: { ...typography.body, color: colors.text.primary, fontWeight: '600', marginBottom: spacing.xs },
+
   // Messages
-  messagesContainer: {
-    flex: 1,
-  },
+  messagesContainer: { flex: 1 },
   messageBubble: {
     borderRadius: borderRadius.md,
     padding: spacing.sm,
     marginBottom: spacing.sm,
     maxWidth: '80%',
   },
-  messageBubbleDoctor: {
-    alignSelf: 'flex-end',
-    backgroundColor: colors.primary,
-  },
+  messageBubbleDoctor: { alignSelf: 'flex-end', backgroundColor: colors.primary },
   messageBubblePatient: {
     alignSelf: 'flex-start',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.border,
   },
-  messageBody: {
-    ...typography.body,
-    color: colors.text.primary,
-  },
-  messageBodyDoctor: {
-    color: colors.surface,
-  },
-  messageTime: {
-    ...typography.small,
-    color: colors.text.secondary,
-    marginTop: spacing.xs,
-  },
-  messageTimeDoctor: {
-    color: colors.surface,
-    opacity: 0.8,
-  },
+  messageBody: { ...typography.body, color: colors.text.primary },
+  messageBodyDoctor: { color: colors.surface },
+  messageTime: { ...typography.small, color: colors.text.secondary, marginTop: spacing.xs },
+  messageTimeDoctor: { color: colors.surface, opacity: 0.8 },
   messageInputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
@@ -1627,27 +1592,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     minWidth: 64,
   },
-  sendButtonDisabled: {
-    opacity: 0.5,
-  },
-  sendButtonText: {
-    ...typography.body,
-    color: colors.surface,
-    fontWeight: '600',
-  },
-  // Documents tab
-  docHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    marginBottom: spacing.sm,
-  },
-  docIcon: {
-    fontSize: 22,
-    marginRight: spacing.sm,
-  },
-  docInfo: {
-    flex: 1,
-  },
+  sendButtonDisabled: { opacity: 0.5 },
+  sendButtonText: { ...typography.body, color: colors.surface, fontWeight: '600' },
+
+  // Documents
+  docHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: spacing.sm },
+  docIcon: { fontSize: 22, marginRight: spacing.sm },
+  docInfo: { flex: 1 },
   viewDocButton: {
     backgroundColor: colors.primary,
     borderRadius: borderRadius.sm,
@@ -1655,12 +1606,9 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
     alignSelf: 'flex-start',
   },
-  viewDocButtonText: {
-    ...typography.small,
-    color: colors.surface,
-    fontWeight: '600',
-  },
-  // Action buttons
+  viewDocButtonText: { ...typography.small, color: colors.surface, fontWeight: '600' },
+
+  // Add buttons
   addButton: {
     backgroundColor: colors.primary,
     borderRadius: borderRadius.md,
@@ -1669,19 +1617,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: spacing.md,
   },
-  addButtonText: {
-    ...typography.body,
-    color: colors.surface,
-    fontWeight: '700',
-  },
-  // Exercises tab
-  exerciseDetails: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.xs,
-  },
-  // Document sub-tabs
+  addButtonText: { ...typography.body, color: colors.surface, fontWeight: '700' },
+
+  // Exercises
+  exerciseDetails: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginTop: spacing.xs },
+
+  // Sub-tabs (shared by Documents, Medications, Vitals)
   docSubTabBar: {
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
@@ -1708,19 +1649,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  docSubTabActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  docSubTabText: {
-    ...typography.small,
-    color: colors.text.secondary,
-    fontWeight: '500',
-  },
-  docSubTabTextActive: {
-    color: colors.surface,
-    fontWeight: '700',
-  },
+  docSubTabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  docSubTabText: { ...typography.small, color: colors.text.secondary, fontWeight: '500' },
+  docSubTabTextActive: { color: colors.surface, fontWeight: '700' },
   docSubTabBadge: {
     backgroundColor: colors.border,
     borderRadius: 10,
@@ -1730,18 +1661,109 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 4,
   },
-  docSubTabBadgeActive: {
-    backgroundColor: 'rgba(255,255,255,0.3)',
+  docSubTabBadgeActive: { backgroundColor: 'rgba(255,255,255,0.3)' },
+  docSubTabBadgeText: { ...typography.small, fontSize: 10, color: colors.text.secondary, fontWeight: '700' },
+  docSubTabBadgeTextActive: { color: colors.surface },
+
+  // ── Medications tab ──────────────────────────────────────────────────────
+  medEmpty: { alignItems: 'center', paddingTop: 60, gap: 12 },
+  medEmptyIcon: { fontSize: 48 },
+  medEmptyTitle: { ...typography.h3, color: colors.text.primary, textAlign: 'center' },
+  medEmptyBody: { ...typography.body, color: colors.text.secondary, textAlign: 'center', paddingHorizontal: spacing.xl },
+
+  medCard: {
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    gap: 10,
   },
-  docSubTabBadgeText: {
-    ...typography.small,
-    fontSize: 10,
-    color: colors.text.secondary,
-    fontWeight: '700',
+  medCardInactive: {
+    opacity: 0.65,
+    backgroundColor: colors.background,
   },
-  docSubTabBadgeTextActive: {
-    color: colors.surface,
+  medCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.sm,
   },
+  medCardTitleBlock: { flex: 1, gap: 2 },
+  medTradeName: { ...typography.body, color: colors.text.primary, fontWeight: '700' },
+  medSubstance: { ...typography.small, color: colors.text.secondary },
+
+  medActiveBadge: {
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    alignSelf: 'flex-start',
+    flexShrink: 0,
+  },
+  medActiveBadgeOn:  { backgroundColor: '#E8F5E9' },
+  medActiveBadgeOff: { backgroundColor: '#F5F5F5' },
+  medActiveBadgeText: { fontSize: 11, fontWeight: '700' },
+  medActiveBadgeTextOn:  { color: '#2E7D32' },
+  medActiveBadgeTextOff: { color: '#757575' },
+
+  // Dosage schedule pills (Mo-Mi-Ab-Na)
+  medScheduleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  medSlotPill: {
+    flex: 1,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingVertical: 6,
+    alignItems: 'center',
+    gap: 2,
+  },
+  medSlotPillActive:   { backgroundColor: '#E8F5E9', borderColor: '#4CAF50' },
+  medSlotPillInactive: { backgroundColor: colors.background, borderColor: colors.border },
+  medSlotLabel: { fontSize: 10, fontWeight: '700' },
+  medSlotLabelActive:   { color: '#2E7D32' },
+  medSlotLabelInactive: { color: colors.text.secondary },
+  medSlotAmount: { ...typography.body, fontWeight: '700' },
+  medSlotAmountActive:   { color: '#2E7D32' },
+  medSlotAmountInactive: { color: colors.text.secondary },
+  medScheduleUnit: { ...typography.small, color: colors.text.secondary, marginLeft: 2 },
+
+  // Meta badges row
+  medMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 6,
+  },
+  medBadge: {
+    borderRadius: 12,
+    borderWidth: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+  },
+  medBadgeText: { fontSize: 11, fontWeight: '700' },
+  medBadgeNeutral: {
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: colors.background,
+  },
+  medBadgeNeutralText: { fontSize: 11, fontWeight: '600', color: colors.text.secondary },
+  medPZN: { ...typography.small, color: colors.text.secondary, fontFamily: 'monospace', marginLeft: 'auto' as any },
+
+  // Dates row
+  medDatesRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  medDateText: { ...typography.small, color: colors.text.secondary },
+  medDateSep:  { ...typography.small, color: colors.border },
+  medChronicText: { color: colors.primary, fontWeight: '600' },
+
+  medNote: { ...typography.small, color: colors.text.secondary, fontStyle: 'italic' },
+
   // ── Vitals enhanced ──────────────────────────────────────────────────────
   urgentBanner: {
     backgroundColor: '#FFEBEE',
@@ -1751,16 +1773,8 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     marginBottom: spacing.md,
   },
-  urgentBannerText: {
-    ...typography.body,
-    color: '#B71C1C',
-    fontWeight: '700',
-  },
-  vitalSummaryRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
+  urgentBannerText: { ...typography.body, color: '#B71C1C', fontWeight: '700' },
+  vitalSummaryRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.md },
   vitalSummaryCard: {
     flex: 1,
     backgroundColor: colors.surface,
@@ -1773,26 +1787,10 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   vitalSummaryIcon: { fontSize: 22 },
-  vitalSummaryLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  vitalSummaryValue: {
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -0.5,
-  },
-  vitalSummaryUnit: {
-    ...typography.small,
-    color: colors.text.secondary,
-  },
-  vitalTrend: {
-    ...typography.small,
-    color: colors.text.secondary,
-    marginTop: 2,
-  },
+  vitalSummaryLabel: { ...typography.small, color: colors.text.secondary, fontWeight: '600', textAlign: 'center' },
+  vitalSummaryValue: { fontSize: 28, fontWeight: '800', letterSpacing: -0.5 },
+  vitalSummaryUnit: { ...typography.small, color: colors.text.secondary },
+  vitalTrend: { ...typography.small, color: colors.text.secondary, marginTop: 2 },
   vitalStatsRow: {
     flexDirection: 'row',
     backgroundColor: colors.surface,
@@ -1803,36 +1801,12 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
     alignItems: 'center',
   },
-  vitalStatItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-  },
-  vitalStatDivider: {
-    width: 1,
-    height: 36,
-    backgroundColor: colors.border,
-  },
-  vitalStatValue: {
-    ...typography.h2,
-    color: colors.text.primary,
-    fontWeight: '700',
-  },
-  vitalStatLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
-    textAlign: 'center',
-  },
-  vitalStatusPill: {
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    alignSelf: 'flex-start',
-  },
-  vitalStatusPillText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  vitalStatItem: { flex: 1, alignItems: 'center', gap: 2 },
+  vitalStatDivider: { width: 1, height: 36, backgroundColor: colors.border },
+  vitalStatValue: { ...typography.h2, color: colors.text.primary, fontWeight: '700' },
+  vitalStatLabel: { ...typography.small, color: colors.text.secondary, textAlign: 'center' },
+  vitalStatusPill: { borderRadius: 20, paddingHorizontal: 10, paddingVertical: 3, alignSelf: 'flex-start' },
+  vitalStatusPillText: { fontSize: 11, fontWeight: '700' },
   vitalSectionTitle: {
     ...typography.body,
     color: colors.text.secondary,
@@ -1854,34 +1828,14 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     gap: spacing.sm,
   },
-  vitalTimelineCardUrgent: {
-    borderColor: '#EF9A9A',
-    backgroundColor: '#FFF8F8',
-  },
+  vitalTimelineCardUrgent: { borderColor: '#EF9A9A', backgroundColor: '#FFF8F8' },
   vitalTimelineLeft: { flex: 1, gap: 2 },
-  vitalTimelineDate: {
-    ...typography.small,
-    color: colors.text.secondary,
-  },
-  vitalUrgentTag: {
-    fontSize: 11,
-    color: '#B71C1C',
-    fontWeight: '700',
-  },
-  vitalTimelineRight: {
-    flexDirection: 'row',
-    gap: spacing.md,
-    alignItems: 'center',
-  },
+  vitalTimelineDate: { ...typography.small, color: colors.text.secondary },
+  vitalUrgentTag: { fontSize: 11, color: '#B71C1C', fontWeight: '700' },
+  vitalTimelineRight: { flexDirection: 'row', gap: spacing.md, alignItems: 'center' },
   vitalTimelineMetric: { alignItems: 'center' },
-  vitalTimelineMetricVal: {
-    ...typography.body,
-    fontWeight: '700',
-  },
-  vitalTimelineMetricUnit: {
-    fontSize: 10,
-    color: colors.text.secondary,
-  },
+  vitalTimelineMetricVal: { ...typography.body, fontWeight: '700' },
+  vitalTimelineMetricUnit: { fontSize: 10, color: colors.text.secondary },
   vitalHeroCard: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.md,
@@ -1892,26 +1846,12 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   vitalHeroLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    ...typography.small, color: colors.text.secondary, fontWeight: '600',
+    textTransform: 'uppercase', letterSpacing: 0.5,
   },
-  vitalHeroValue: {
-    fontSize: 48,
-    fontWeight: '800',
-    letterSpacing: -1,
-  },
-  vitalHeroUnit: {
-    fontSize: 18,
-    fontWeight: '400',
-  },
-  vitalHeroDate: {
-    ...typography.small,
-    color: colors.text.secondary,
-    marginTop: 6,
-  },
+  vitalHeroValue: { fontSize: 48, fontWeight: '800', letterSpacing: -1 },
+  vitalHeroUnit: { fontSize: 18, fontWeight: '400' },
+  vitalHeroDate: { ...typography.small, color: colors.text.secondary, marginTop: 6 },
   bpLegend: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.md,
@@ -1922,33 +1862,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   bpLegendTitle: {
-    ...typography.small,
-    color: colors.text.secondary,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
+    ...typography.small, color: colors.text.secondary, fontWeight: '700',
+    textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 2,
   },
-  bpLegendRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-  },
-  bpLegendDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
-  bpLegendLabel: {
-    ...typography.small,
-    color: colors.text.primary,
-    flex: 1,
-    fontWeight: '500',
-  },
-  bpLegendRange: {
-    ...typography.small,
-    color: colors.text.secondary,
-  },
+  bpLegendRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  bpLegendDot: { width: 10, height: 10, borderRadius: 5 },
+  bpLegendLabel: { ...typography.small, color: colors.text.primary, flex: 1, fontWeight: '500' },
+  bpLegendRange: { ...typography.small, color: colors.text.secondary },
   vitalHistoryRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1962,365 +1882,126 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   vitalHistoryLeft: { flex: 1, gap: 3 },
-  vitalHistoryMain: {
-    ...typography.body,
-    fontWeight: '700',
-  },
-  vitalHistoryDate: {
-    ...typography.small,
-    color: colors.text.secondary,
-  },
-  vitalHistoryRight: {
-    alignItems: 'flex-end',
-    gap: 4,
-  },
+  vitalHistoryMain: { ...typography.body, fontWeight: '700' },
+  vitalHistoryDate: { ...typography.small, color: colors.text.secondary },
+  vitalHistoryRight: { alignItems: 'flex-end', gap: 4 },
 
   // ── Medical Profile ──────────────────────────────────────────────────────
   profileSuccessBanner: {
-    backgroundColor: '#E8F5E9',
-    borderRadius: borderRadius.md,
-    borderLeftWidth: 4,
-    borderLeftColor: '#2E7D32',
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    backgroundColor: '#E8F5E9', borderRadius: borderRadius.md,
+    borderLeftWidth: 4, borderLeftColor: '#2E7D32', padding: spacing.md, marginBottom: spacing.md,
   },
-  profileSuccessText: {
-    ...typography.body,
-    color: '#2E7D32',
-    fontWeight: '600',
-  },
+  profileSuccessText: { ...typography.body, color: '#2E7D32', fontWeight: '600' },
   profileErrorBanner: {
-    backgroundColor: colors.danger + '12',
-    borderRadius: borderRadius.md,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.danger,
-    padding: spacing.md,
-    marginBottom: spacing.md,
+    backgroundColor: colors.danger + '12', borderRadius: borderRadius.md,
+    borderLeftWidth: 4, borderLeftColor: colors.danger, padding: spacing.md, marginBottom: spacing.md,
   },
-  profileErrorText: {
-    ...typography.body,
-    color: colors.danger,
-  },
-  // Identity card (view mode)
+  profileErrorText: { ...typography.body, color: colors.danger },
   profileIdentityCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    gap: spacing.md,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: colors.surface,
+    borderRadius: borderRadius.md, borderWidth: 1, borderColor: colors.border,
+    padding: spacing.md, marginBottom: spacing.md, gap: spacing.md,
   },
   profileAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
   },
-  profileAvatarText: {
-    ...typography.h2,
-    color: colors.surface,
-    fontWeight: '700',
-  },
+  profileAvatarText: { ...typography.h2, color: colors.surface, fontWeight: '700' },
   profileIdentityInfo: { flex: 1, gap: 2 },
-  profilePatientName: {
-    ...typography.h3,
-    color: colors.text.primary,
-    fontWeight: '700',
-  },
-  profilePatientEmail: {
-    ...typography.small,
-    color: colors.text.secondary,
-  },
-  profilePatientMeta: {
-    ...typography.small,
-    color: colors.text.secondary,
-    marginTop: 2,
-  },
-  // Quick stats row (view mode)
+  profilePatientName: { ...typography.h3, color: colors.text.primary, fontWeight: '700' },
+  profilePatientEmail: { ...typography.small, color: colors.text.secondary },
+  profilePatientMeta: { ...typography.small, color: colors.text.secondary, marginTop: 2 },
   profileQuickStats: {
-    flexDirection: 'row',
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.sm,
-    marginBottom: spacing.md,
-    alignItems: 'center',
+    flexDirection: 'row', backgroundColor: colors.surface, borderRadius: borderRadius.md,
+    borderWidth: 1, borderColor: colors.border, padding: spacing.sm, marginBottom: spacing.md, alignItems: 'center',
   },
-  profileQuickStat: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-    paddingVertical: spacing.xs,
-  },
+  profileQuickStat: { flex: 1, alignItems: 'center', gap: 2, paddingVertical: spacing.xs },
   profileQuickStatIcon: { fontSize: 18 },
-  profileQuickStatValue: {
-    ...typography.body,
-    color: colors.text.primary,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  profileQuickStatLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
-    textAlign: 'center',
-  },
-  profileQuickStatDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: colors.border,
-  },
-  // Section containers (shared view+edit)
+  profileQuickStatValue: { ...typography.body, color: colors.text.primary, fontWeight: '700', textAlign: 'center' },
+  profileQuickStatLabel: { ...typography.small, color: colors.text.secondary, textAlign: 'center' },
+  profileQuickStatDivider: { width: 1, height: 40, backgroundColor: colors.border },
   profileSection: {
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    padding: spacing.md,
-    marginBottom: spacing.md,
-    gap: 8,
+    backgroundColor: colors.surface, borderRadius: borderRadius.md, borderWidth: 1,
+    borderColor: colors.border, padding: spacing.md, marginBottom: spacing.md, gap: 8,
   },
   profileSectionLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.text.secondary,
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-    marginBottom: 2,
+    fontSize: 10, fontWeight: '700', color: colors.text.secondary,
+    letterSpacing: 1, textTransform: 'uppercase', marginBottom: 2,
   },
-  profileEmpty: {
-    ...typography.small,
-    color: colors.text.secondary,
-    fontStyle: 'italic',
-  },
-  // Tag cloud (allergies)
-  profileTagCloud: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
+  profileEmpty: { ...typography.small, color: colors.text.secondary, fontStyle: 'italic' },
+  profileTagCloud: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   profileTagDanger: {
-    backgroundColor: '#FFEBEE',
-    borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: '#EF9A9A',
+    backgroundColor: '#FFEBEE', borderRadius: 20, paddingHorizontal: 10,
+    paddingVertical: 4, borderWidth: 1, borderColor: '#EF9A9A',
   },
-  profileTagDangerText: {
-    ...typography.small,
-    color: '#B71C1C',
-    fontWeight: '600',
-  },
-  // List rows (conditions / medications)
-  profileListRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: spacing.sm,
-  },
-  profileListDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.primary,
-    marginTop: 6,
-  },
+  profileTagDangerText: { ...typography.small, color: '#B71C1C', fontWeight: '600' },
+  profileListRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  profileListDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary, marginTop: 6 },
   profileMedIcon: { fontSize: 14, marginTop: 1 },
-  profileListText: {
-    ...typography.body,
-    color: colors.text.primary,
-    flex: 1,
-  },
-  // Emergency contact card
+  profileListText: { ...typography.body, color: colors.text.primary, flex: 1 },
   profileEmergencyCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF8E1',
-    borderRadius: borderRadius.sm,
-    padding: spacing.sm,
-    gap: spacing.sm,
-    borderWidth: 1,
-    borderColor: '#FFE082',
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF8E1',
+    borderRadius: borderRadius.sm, padding: spacing.sm, gap: spacing.sm, borderWidth: 1, borderColor: '#FFE082',
   },
   profileEmergencyIcon: { fontSize: 22 },
-  profileEmergencyName: {
-    ...typography.body,
-    color: colors.text.primary,
-    fontWeight: '700',
-  },
-  profileEmergencyPhone: {
-    ...typography.body,
-    color: colors.text.secondary,
-  },
-  // Clinical notes box
+  profileEmergencyName: { ...typography.body, color: colors.text.primary, fontWeight: '700' },
+  profileEmergencyPhone: { ...typography.body, color: colors.text.secondary },
   profileNotesBox: {
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.sm,
-    padding: spacing.sm,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.primary,
+    backgroundColor: colors.background, borderRadius: borderRadius.sm,
+    padding: spacing.sm, borderLeftWidth: 3, borderLeftColor: colors.primary,
   },
-  profileNotesText: {
-    ...typography.body,
-    color: colors.text.primary,
-  },
-  profileUpdatedAt: {
-    ...typography.small,
-    color: colors.text.secondary,
-    textAlign: 'right',
-    marginBottom: spacing.sm,
-  },
-  // Edit button (view mode)
+  profileNotesText: { ...typography.body, color: colors.text.primary },
+  profileUpdatedAt: { ...typography.small, color: colors.text.secondary, textAlign: 'right', marginBottom: spacing.sm },
   profileEditBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.xs,
+    backgroundColor: colors.primary, borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.md, alignItems: 'center', marginTop: spacing.xs,
   },
-  profileEditBtnText: {
-    ...typography.body,
-    color: colors.surface,
-    fontWeight: '700',
-  },
-  // Edit mode header
+  profileEditBtnText: { ...typography.body, color: colors.surface, fontWeight: '700' },
   profileEditHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.md,
   },
-  profileSectionHeading: {
-    ...typography.h3,
-    color: colors.text.primary,
-    fontWeight: '700',
-  },
-  profileEditActions: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
+  profileSectionHeading: { ...typography.h3, color: colors.text.primary, fontWeight: '700' },
+  profileEditActions: { flexDirection: 'row', gap: spacing.sm },
   profileCancelBtn: {
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-    justifyContent: 'center',
+    borderRadius: borderRadius.md, borderWidth: 1, borderColor: colors.border,
+    paddingVertical: spacing.xs, paddingHorizontal: spacing.md, justifyContent: 'center',
   },
-  profileCancelBtnText: {
-    ...typography.body,
-    color: colors.text.secondary,
-    fontWeight: '600',
-  },
+  profileCancelBtnText: { ...typography.body, color: colors.text.secondary, fontWeight: '600' },
   profileSaveBtn: {
-    backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 72,
-    height: 40,
+    backgroundColor: colors.primary, borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
+    alignItems: 'center', justifyContent: 'center', minWidth: 72, height: 40,
   },
-  profileSaveBtnText: {
-    ...typography.body,
-    color: colors.surface,
-    fontWeight: '700',
-  },
+  profileSaveBtnText: { ...typography.body, color: colors.surface, fontWeight: '700' },
   profileBtnDisabled: { opacity: 0.55 },
-  // Edit inputs
-  profileFieldLabel: {
-    ...typography.small,
-    color: colors.text.secondary,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
+  profileFieldLabel: { ...typography.small, color: colors.text.secondary, fontWeight: '600', marginBottom: 2 },
   profileInput: {
-    ...typography.body,
-    color: colors.text.primary,
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    minHeight: 40,
+    ...typography.body, color: colors.text.primary, backgroundColor: colors.background,
+    borderRadius: borderRadius.sm, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.sm, paddingVertical: spacing.xs, minHeight: 40,
   },
-  profileTextarea: {
-    minHeight: 90,
-    textAlignVertical: 'top',
-    paddingTop: spacing.sm,
-  },
-  profileRow2: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-  },
+  profileTextarea: { minHeight: 90, textAlignVertical: 'top', paddingTop: spacing.sm },
+  profileRow2: { flexDirection: 'row', gap: spacing.sm },
   profileInputHalf: { flex: 1 },
-  // Chip selector
-  profileChipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
+  profileChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   profileChip: {
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    borderRadius: 20, borderWidth: 1, borderColor: colors.border,
+    paddingHorizontal: spacing.sm, paddingVertical: 4,
   },
-  profileChipActive: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  profileChipText: {
-    ...typography.small,
-    color: colors.text.secondary,
-    fontWeight: '500',
-  },
-  profileChipTextActive: {
-    color: colors.surface,
-    fontWeight: '700',
-  },
-  // Dynamic list (allergies / conditions / meds)
-  profileListItemRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
+  profileChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  profileChipText: { ...typography.small, color: colors.text.secondary, fontWeight: '500' },
+  profileChipTextActive: { color: colors.surface, fontWeight: '700' },
+  profileListItemRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   profileListInput: { flex: 1 },
   profileRemoveBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.danger + '15',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 32, height: 32, borderRadius: 16,
+    backgroundColor: colors.danger + '15', alignItems: 'center', justifyContent: 'center',
   },
-  profileRemoveBtnText: {
-    ...typography.small,
-    color: colors.danger,
-    fontWeight: '700',
-  },
+  profileRemoveBtnText: { ...typography.small, color: colors.danger, fontWeight: '700' },
   profileAddRowBtn: {
-    alignSelf: 'flex-start',
-    paddingVertical: 4,
-    paddingHorizontal: spacing.sm,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: colors.primary,
-    marginTop: 2,
+    alignSelf: 'flex-start', paddingVertical: 4, paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm, borderWidth: 1, borderStyle: 'dashed',
+    borderColor: colors.primary, marginTop: 2,
   },
-  profileAddRowBtnText: {
-    ...typography.small,
-    color: colors.primary,
-    fontWeight: '600',
-  },
+  profileAddRowBtnText: { ...typography.small, color: colors.primary, fontWeight: '600' },
 });

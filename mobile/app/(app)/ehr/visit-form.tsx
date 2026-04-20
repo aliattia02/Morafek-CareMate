@@ -4,18 +4,24 @@
  *
  * Changes vs. previous version
  * ─────────────────────────────
- * • Replaced the plain "ICD-10-GM Code" TextInput with the new
- *   <ICD10SearchInput> component that provides:
- *     – Live local search over all 14 370 ICD-10-GM 2026 terminal codes
- *     – ✨ AI-Assist button → POST /api/ehr/icd10-suggest returns ranked
- *       suggestions based on chief_complaint + diagnosis_hint
- *     – Auto-fills BOTH diagnosisIcd10 AND diagnosisText on selection
+ * • "Besuch speichern" now saves BOTH the visit AND all pending medication
+ *   prescriptions in a single button press:
+ *     1. POST /api/doctor/patient/:id/visits  → creates the visit, gets visitId
+ *     2. Calls MedicationPrescriptionPanel.triggerSaveAll(visitId) via ref
+ *        → POST /api/medications/patient/ for each pending prescription
+ *   The button is disabled once the visit is saved successfully to prevent
+ *   duplicate visit records.
  *
- * • The rest of the form (chief complaint, visit date, notes, submission
- *   logic, web-compatible success/error banners) is unchanged.
+ * • MedicationPrescriptionPanel receives hideInternalSaveButton={true} so the
+ *   panel's own "Alle speichern" button is hidden — there is now exactly one
+ *   save button on this screen.
+ *
+ * • Success message reflects both visit save and medication save results.
+ *
+ * • ICD-10-GM picker and all other fields are unchanged.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -34,7 +40,9 @@ import { API }                 from '@/services/api/endpoints';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 import ICD10SearchInput, { ICD10Selection } from '@/components/ehr/ICD10SearchInput';
-import MedicationPrescriptionPanel from '@/components/ehr/MedicationPrescriptionPanel';
+import MedicationPrescriptionPanel, {
+  type MedicationPrescriptionPanelRef,
+} from '@/components/ehr/MedicationPrescriptionPanel';
 
 const todayISO = (): string => new Date().toISOString().split('T')[0];
 
@@ -45,6 +53,9 @@ export default function VisitFormScreen() {
     patient_id?:   string;
     patient_name?: string;
   }>();
+
+  // Ref to the medication panel — lets us call triggerSaveAll after the visit is saved
+  const medicationPanelRef = useRef<MedicationPrescriptionPanelRef>(null);
 
   const [chiefComplaint, setChiefComplaint] = useState('');
   const [diagnosisIcd10, setDiagnosisIcd10] = useState('');
@@ -57,7 +68,7 @@ export default function VisitFormScreen() {
   const [submitError,    setSubmitError]    = useState<string | null>(null);
   const [createdVisitId, setCreatedVisitId] = useState<string | undefined>(undefined);
 
-  // Redirect non-doctors to home (must be in useEffect — cannot navigate during render)
+  // Redirect non-doctors to home
   useEffect(() => {
     if (user?.user_type !== 'doctor') {
       router.replace('/');
@@ -79,14 +90,13 @@ export default function VisitFormScreen() {
   // ── ICD-10 selection callback ────────────────────────────────────────────
   const handleICD10Select = ({ code, description }: ICD10Selection) => {
     setDiagnosisIcd10(code);
-    // Only overwrite diagnosisText if the doctor hasn't typed something custom
     if (!diagnosisText.trim() || diagnosisText === diagnosisIcd10) {
       setDiagnosisText(description);
       setErrors((prev) => ({ ...prev, diagnosisText: '' }));
     }
   };
 
-  // ── Submit ───────────────────────────────────────────────────────────────
+  // ── Submit — saves visit then medications in one button press ────────────
   const handleSubmit = async () => {
     if (!validate()) return;
     if (!patient_id) {
@@ -98,22 +108,45 @@ export default function VisitFormScreen() {
       setSubmitting(true);
       setSubmitError(null);
 
+      // ── Step 1: create the visit ─────────────────────────────────────────
       const visitRes = await apiClient.post<{ id?: string; _id?: string }>(
         API.EHR.PATIENT_VISITS(patient_id),
         {
-        chief_complaint: chiefComplaint.trim(),
-        diagnosis_icd10: diagnosisIcd10.trim(),
-        diagnosis_text:  diagnosisText.trim(),
-        notes:           notes.trim() || undefined,
-        visit_date:      visitDate.trim() || todayISO(),
+          chief_complaint: chiefComplaint.trim(),
+          diagnosis_icd10: diagnosisIcd10.trim(),
+          diagnosis_text:  diagnosisText.trim(),
+          notes:           notes.trim() || undefined,
+          visit_date:      visitDate.trim() || todayISO(),
         }
       );
 
       const visitId = visitRes.data?.id ?? visitRes.data?._id;
       setCreatedVisitId(visitId || undefined);
 
-      const name = patient_name ? ` für ${patient_name}` : '';
-      setSuccessMsg(`✅  Besuch${name} wurde erfolgreich gespeichert. Verordnungen können jetzt separat gespeichert werden.`);
+      const patientLabel = patient_name ? ` für ${patient_name}` : '';
+
+      // ── Step 2: save all pending medications using the new visitId ───────
+      const hasMeds = medicationPanelRef.current?.hasPendingMedications() ?? false;
+
+      if (hasMeds && visitId) {
+        const { savedCount, failedCount } =
+          await medicationPanelRef.current!.triggerSaveAll(visitId);
+
+        if (failedCount === 0) {
+          setSuccessMsg(
+            `✅  Besuch${patientLabel} und ${savedCount} Verordnung${savedCount !== 1 ? 'en' : ''} wurden gespeichert.`
+          );
+        } else {
+          // Visit saved but some meds failed — show partial success
+          setSuccessMsg(
+            `✅  Besuch${patientLabel} gespeichert. ${savedCount} Verordnung${savedCount !== 1 ? 'en' : ''} OK` +
+            (failedCount > 0 ? ` — ${failedCount} fehlgeschlagen (siehe Liste unten).` : '.')
+          );
+        }
+      } else {
+        // No medications pending — visit-only save
+        setSuccessMsg(`✅  Besuch${patientLabel} wurde erfolgreich gespeichert.`);
+      }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Fehler beim Speichern';
       setSubmitError(message);
@@ -121,6 +154,10 @@ export default function VisitFormScreen() {
       setSubmitting(false);
     }
   };
+
+  // ── Render ───────────────────────────────────────────────────────────────
+
+  const isVisitSaved = Boolean(successMsg);
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
@@ -166,18 +203,10 @@ export default function VisitFormScreen() {
               placeholder="Hauptgrund für den Besuch"
               error={errors.chiefComplaint}
               required
+              editable={!isVisitSaved}
             />
 
-            {/* ── ICD-10 Search (replaces plain TextInput) ── */}
-            {/*
-             *  The picker:
-             *    • queries the local ICD-10-GM 2026 database (14 370 codes)
-             *    • offers ✨ KI-Assist that calls POST /api/ehr/icd10-suggest
-             *    • on selection auto-fills code + description
-             *
-             *  It is wrapped in a View with zIndex so the dropdown floats
-             *  above sibling inputs.
-             */}
+            {/* ── ICD-10 Search ── */}
             <View style={styles.icdPickerWrapper}>
               <ICD10SearchInput
                 value={diagnosisIcd10}
@@ -199,11 +228,20 @@ export default function VisitFormScreen() {
               placeholder="Diagnose beschreiben (oder aus ICD-Suche übernehmen)"
               error={errors.diagnosisText}
               required
+              editable={!isVisitSaved}
             />
 
+            {/*
+             * MedicationPrescriptionPanel
+             * hideInternalSaveButton={true} — we drive saving from handleSubmit above.
+             * The panel still renders the prescription list and "Zur Liste hinzufügen" button.
+             * After the visit is saved the panel shows per-item "✓ Gespeichert" badges.
+             */}
             <MedicationPrescriptionPanel
+              ref={medicationPanelRef}
               patientId={patient_id ?? ''}
               visitId={createdVisitId}
+              hideInternalSaveButton
             />
 
             {/* ── Visit Date ── */}
@@ -213,6 +251,7 @@ export default function VisitFormScreen() {
               onChangeText={setVisitDate}
               placeholder="JJJJ-MM-TT"
               helperText="Format: JJJJ-MM-TT"
+              editable={!isVisitSaved}
             />
 
             {/* ── Notes ── */}
@@ -223,14 +262,21 @@ export default function VisitFormScreen() {
               placeholder="Zusätzliche Notizen (optional)"
               multiline
               numberOfLines={4}
+              editable={!isVisitSaved}
             />
 
             <View style={styles.buttonRow}>
               <Button
-                title={submitting ? 'Wird gespeichert…' : 'Besuch speichern'}
+                title={
+                  submitting
+                    ? 'Wird gespeichert…'
+                    : isVisitSaved
+                    ? 'Gespeichert ✓'
+                    : 'Besuch & Verordnungen speichern'
+                }
                 onPress={handleSubmit}
                 loading={submitting}
-                disabled={!!successMsg}
+                disabled={submitting || isVisitSaved}
                 fullWidth
               />
             </View>
@@ -261,7 +307,7 @@ const styles = StyleSheet.create({
   // ICD picker needs elevated zIndex so the dropdown floats over siblings
   icdPickerWrapper: {
     zIndex:    10,
-    elevation: 10,  // Android
+    elevation: 10,
   },
 
   // Success banner

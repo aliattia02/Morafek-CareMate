@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { forwardRef, useImperativeHandle, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 import { Input, Button } from '@/components/ui';
@@ -16,10 +16,32 @@ import {
 
 export type Medication = MedicationRecord;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Ref interface — exposed via useImperativeHandle so visit-form.tsx can trigger
+// a save-all after the visit has been created and the visitId is known.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface MedicationPrescriptionPanelRef {
+  /** Returns true when there are prescriptions waiting to be saved. */
+  hasPendingMedications: () => boolean;
+  /**
+   * Save all pending prescriptions using the supplied visitId.
+   * Called by visit-form.tsx immediately after the visit POST succeeds.
+   * Resolves once every prescription has either saved or failed.
+   */
+  triggerSaveAll: (visitId: string) => Promise<{ savedCount: number; failedCount: number }>;
+}
+
 export interface MedicationPrescriptionPanelProps {
   patientId: string;
   visitId?: string;
+  /** Called each time a medication is successfully saved to the backend. */
   onMedicationAdded?: (med: Medication) => void;
+  /**
+   * When true the "Alle speichern" button inside the panel is hidden.
+   * Set this to true in visit-form.tsx so the doctor only sees one save button.
+   */
+  hideInternalSaveButton?: boolean;
 }
 
 interface PrescriptionListItem {
@@ -64,11 +86,17 @@ function buildDosageLabel(dose: DosageValue, unit: string): string {
   return `${schedule} ${printableUnit}`;
 }
 
-export default function MedicationPrescriptionPanel({
-  patientId,
-  visitId,
-  onMedicationAdded,
-}: MedicationPrescriptionPanelProps) {
+// ─────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MedicationPrescriptionPanel = forwardRef<
+  MedicationPrescriptionPanelRef,
+  MedicationPrescriptionPanelProps
+>(function MedicationPrescriptionPanel(
+  { patientId, visitId, onMedicationAdded, hideInternalSaveButton = false },
+  ref
+) {
   const [currentDrug, setCurrentDrug] = useState<PZNEntry | null>(null);
   const [currentDosage, setCurrentDosage] = useState<DosageValue>(defaultDosage());
   const [currentUnit, setCurrentUnit] = useState<DosageUnit>('Tablette');
@@ -83,7 +111,67 @@ export default function MedicationPrescriptionPanel({
     [currentDrug, currentDosage]
   );
 
-  const unsavedCount = useMemo(() => prescriptionList.filter((item) => !item.saved).length, [prescriptionList]);
+  const unsavedCount = useMemo(
+    () => prescriptionList.filter((item) => !item.saved).length,
+    [prescriptionList]
+  );
+
+  // ── Expose imperative methods to parent (visit-form.tsx) ────────────────
+  useImperativeHandle(ref, () => ({
+    hasPendingMedications: () =>
+      prescriptionList.some((item) => !item.saved),
+
+    triggerSaveAll: async (externalVisitId: string) => {
+      const pending = prescriptionList.filter((item) => !item.saved);
+      if (pending.length === 0) return { savedCount: 0, failedCount: 0 };
+      if (!patientId) return { savedCount: 0, failedCount: pending.length };
+
+      setSaving(true);
+      setError(null);
+
+      let savedCount = 0;
+      let failedCount = 0;
+
+      for (const item of pending) {
+        try {
+          const saved = await prescribeMedication(patientId, {
+            ...item.payload,
+            visit_id: externalVisitId,
+          });
+
+          setPrescriptionList((prev) =>
+            prev.map((row) =>
+              row.localId === item.localId
+                ? { ...row, saved: true, saveError: undefined, savedMedication: saved }
+                : row
+            )
+          );
+          onMedicationAdded?.(saved);
+          savedCount++;
+        } catch (err: unknown) {
+          const message =
+            err instanceof Error ? err.message : 'Fehler beim Speichern der Medikation';
+          setPrescriptionList((prev) =>
+            prev.map((row) =>
+              row.localId === item.localId ? { ...row, saveError: message } : row
+            )
+          );
+          failedCount++;
+        }
+      }
+
+      if (failedCount > 0) {
+        setError(
+          `${failedCount} Verordnung${failedCount > 1 ? 'en' : ''} konnte${failedCount > 1 ? 'n' : ''} nicht gespeichert werden.`
+        );
+      }
+
+      setSaving(false);
+      return { savedCount, failedCount };
+    },
+  }));
+
+  // ── Internal handlers ───────────────────────────────────────────────────
 
   const applyPZNSelection = (entry: PZNEntry) => {
     setCurrentDrug(entry);
@@ -102,7 +190,6 @@ export default function MedicationPrescriptionPanel({
       setError('Bitte wählen Sie zuerst ein Medikament aus.');
       return;
     }
-
     if (getDosageTotal(currentDosage) <= 0) {
       setError('Mindestens ein Dosierungs-Slot muss größer als 0 sein.');
       return;
@@ -150,17 +237,15 @@ export default function MedicationPrescriptionPanel({
     setPrescriptionList((prev) => prev.filter((item) => item.localId !== localId));
   };
 
+  // Internal save — only used when hideInternalSaveButton is false (standalone use)
   const saveAll = async () => {
     const pending = prescriptionList.filter((item) => !item.saved);
     if (pending.length === 0 || saving) return;
-
-    if (!patientId) {
-      setError('Patienten-ID fehlt.');
-      return;
-    }
-
+    if (!patientId) { setError('Patienten-ID fehlt.'); return; }
     if (!visitId) {
-      setError('Bitte zuerst den Besuch speichern, damit die Verordnungen dem Besuch zugeordnet werden.');
+      setError(
+        'Bitte zuerst den Besuch speichern, damit die Verordnungen dem Besuch zugeordnet werden.'
+      );
       return;
     }
 
@@ -173,27 +258,30 @@ export default function MedicationPrescriptionPanel({
           ...item.payload,
           visit_id: visitId,
         });
-
-        setPrescriptionList((prev) => prev.map((row) => (
-          row.localId === item.localId
-            ? { ...row, saved: true, saveError: undefined, savedMedication: saved }
-            : row
-        )));
-
+        setPrescriptionList((prev) =>
+          prev.map((row) =>
+            row.localId === item.localId
+              ? { ...row, saved: true, saveError: undefined, savedMedication: saved }
+              : row
+          )
+        );
         onMedicationAdded?.(saved);
       } catch (err: unknown) {
-        const message = err instanceof Error ? err.message : 'Fehler beim Speichern der Medikation';
-        setPrescriptionList((prev) => prev.map((row) => (
-          row.localId === item.localId
-            ? { ...row, saveError: message }
-            : row
-        )));
+        const message =
+          err instanceof Error ? err.message : 'Fehler beim Speichern der Medikation';
+        setPrescriptionList((prev) =>
+          prev.map((row) =>
+            row.localId === item.localId ? { ...row, saveError: message } : row
+          )
+        );
         setError('Mindestens eine Medikation konnte nicht gespeichert werden. Bitte erneut versuchen.');
       }
     }
 
     setSaving(false);
   };
+
+  // ── Render ──────────────────────────────────────────────────────────────
 
   return (
     <View style={styles.container}>
@@ -207,12 +295,13 @@ export default function MedicationPrescriptionPanel({
         <View style={styles.drugCard}>
           <View style={styles.drugMain}>
             <Text style={styles.drugTitle}>{currentDrug.trade_name}</Text>
-            <Text style={styles.drugSubtitle}>{currentDrug.active_substance} • {currentDrug.strength}</Text>
+            <Text style={styles.drugSubtitle}>
+              {currentDrug.active_substance} • {currentDrug.strength}
+            </Text>
             <View style={styles.pznBadge}>
               <Text style={styles.pznText}>{currentDrug.pzn}</Text>
             </View>
           </View>
-
           <TouchableOpacity
             onPress={clearSelection}
             style={styles.clearButton}
@@ -258,54 +347,78 @@ export default function MedicationPrescriptionPanel({
 
       {prescriptionList.length > 0 && (
         <View style={styles.listSection}>
-          <Text style={styles.sectionTitle}>Verordnungen in diesem Besuch</Text>
+          <Text style={styles.sectionTitle}>
+            Verordnungen in diesem Besuch ({prescriptionList.length})
+          </Text>
 
           {prescriptionList.map((item) => {
-            const doseLabel = buildDosageLabel({
-              morning: item.payload.dosage_morning,
-              noon: item.payload.dosage_noon,
-              evening: item.payload.dosage_evening,
-              night: item.payload.dosage_night,
-            }, item.payload.dosage_unit);
+            const doseLabel = buildDosageLabel(
+              {
+                morning: item.payload.dosage_morning,
+                noon: item.payload.dosage_noon,
+                evening: item.payload.dosage_evening,
+                night: item.payload.dosage_night,
+              },
+              item.payload.dosage_unit
+            );
 
             return (
               <View key={item.localId} style={styles.listRow}>
                 <View style={styles.listMain}>
                   <Text style={styles.listTrade}>{item.payload.trade_name}</Text>
                   <Text style={styles.listDose}>{doseLabel}</Text>
-                  {item.saved ? <Text style={styles.savedText}>Gespeichert</Text> : null}
-                  {item.saveError ? <Text style={styles.rowErrorText}>{item.saveError}</Text> : null}
+                  {item.saved ? (
+                    <Text style={styles.savedText}>✓ Gespeichert</Text>
+                  ) : null}
+                  {item.saveError ? (
+                    <Text style={styles.rowErrorText}>{item.saveError}</Text>
+                  ) : null}
                 </View>
 
-                <TouchableOpacity
-                  onPress={() => removeFromList(item.localId)}
-                  disabled={saving}
-                  style={styles.trashButton}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Verordnung ${item.payload.trade_name} entfernen`}
-                >
-                  <Text style={styles.trashText}>🗑️</Text>
-                </TouchableOpacity>
+                {!item.saved && (
+                  <TouchableOpacity
+                    onPress={() => removeFromList(item.localId)}
+                    disabled={saving}
+                    style={styles.trashButton}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Verordnung ${item.payload.trade_name} entfernen`}
+                  >
+                    <Text style={styles.trashText}>🗑️</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             );
           })}
 
-          {!visitId && unsavedCount > 0 ? (
-            <Text style={styles.helperText}>Bitte zuerst den Besuch speichern, danach können Verordnungen gespeichert werden.</Text>
-          ) : null}
+          {/* Internal save button — only shown when not driven from outside */}
+          {!hideInternalSaveButton && (
+            <>
+              {!visitId && unsavedCount > 0 ? (
+                <Text style={styles.helperText}>
+                  Bitte zuerst den Besuch speichern, danach können Verordnungen gespeichert werden.
+                </Text>
+              ) : null}
 
-          <Button
-            title={saving ? 'Speichern…' : `Alle speichern${unsavedCount > 0 ? ` (${unsavedCount})` : ''}`}
-            onPress={saveAll}
-            loading={saving}
-            disabled={saving || unsavedCount === 0 || !visitId}
-            fullWidth
-          />
+              <Button
+                title={
+                  saving
+                    ? 'Speichern…'
+                    : `Alle speichern${unsavedCount > 0 ? ` (${unsavedCount})` : ''}`
+                }
+                onPress={saveAll}
+                loading={saving}
+                disabled={saving || unsavedCount === 0 || !visitId}
+                fullWidth
+              />
+            </>
+          )}
         </View>
       )}
     </View>
   );
-}
+});
+
+export default MedicationPrescriptionPanel;
 
 const styles = StyleSheet.create({
   container: {
@@ -336,9 +449,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: spacing.sm,
   },
-  drugMain: {
-    flex: 1,
-  },
+  drugMain: { flex: 1 },
   drugTitle: {
     ...typography.body,
     color: colors.text.primary,
@@ -399,9 +510,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  listMain: {
-    flex: 1,
-  },
+  listMain: { flex: 1 },
   listTrade: {
     ...typography.small,
     color: colors.text.primary,
@@ -431,9 +540,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.surfaceVariant,
   },
-  trashText: {
-    fontSize: 16,
-  },
+  trashText: { fontSize: 16 },
   helperText: {
     ...typography.small,
     color: colors.text.secondary,
