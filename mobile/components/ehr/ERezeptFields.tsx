@@ -38,9 +38,9 @@ export default function ERezeptFields({ value, onChange, disabled = false }: ERe
         onPress={() => setExpanded((p) => !p)}
         disabled={disabled}
         accessibilityRole="button"
-        accessibilityLabel="E-Rezept details"
+        accessibilityLabel="E-Rezept Details ein- oder ausklappen"
       >
-        <Text style={styles.headerTitle}>E-Rezept details</Text>
+        <Text style={styles.headerTitle}>E-Rezept Details</Text>
         <Text style={styles.chevron}>{expanded ? '▴' : '▾'}</Text>
       </TouchableOpacity>
 
@@ -80,7 +80,7 @@ export default function ERezeptFields({ value, onChange, disabled = false }: ERe
             })}
           </View>
 
-          <Text style={styles.sectionLabel}>Aut-Idem</Text>
+          <Text style={styles.sectionLabel}>Aut-idem (§129 SGB V)</Text>
           <View style={styles.optionRow}>
             <TouchableOpacity
               style={[styles.optionChip, value.aut_idem && styles.optionChipSelected, disabled && styles.optionChipDisabled]}
@@ -102,7 +102,7 @@ export default function ERezeptFields({ value, onChange, disabled = false }: ERe
           <View style={styles.optionRow}>
             <TouchableOpacity
               style={[styles.optionChip, value.is_chronic && styles.optionChipSelected, disabled && styles.optionChipDisabled]}
-              onPress={() => onChange({ is_chronic: true, end_date: null })}
+              onPress={() => onChange({ is_chronic: true, end_date: null, duration_days: null })}
               disabled={disabled}
             >
               <Text style={[styles.optionChipText, value.is_chronic && styles.optionChipTextSelected]}>Chronisch</Text>
@@ -116,30 +116,32 @@ export default function ERezeptFields({ value, onChange, disabled = false }: ERe
             </TouchableOpacity>
           </View>
 
-          <View style={styles.row2}>
-            <View style={styles.flex1}>
-              <Input
-                label="Dauer (Tage, optional)"
-                value={durationInputValue}
-                onChangeText={(txt) => {
-                  const clean = txt.replace(/[^0-9]/g, '');
-                  onChange({ duration_days: clean ? Number(clean) : null });
-                }}
-                keyboardType="numeric"
-                placeholder="z.B. 30"
-                editable={!disabled}
-              />
+          {!value.is_chronic && (
+            <View style={styles.row2}>
+              <View style={styles.flex1}>
+                <Input
+                  label="Dauer (Tage, optional)"
+                  value={durationInputValue}
+                  onChangeText={(txt) => {
+                    const clean = txt.replace(/[^0-9]/g, '');
+                    onChange({ duration_days: clean ? Number(clean) : null });
+                  }}
+                  keyboardType="numeric"
+                  placeholder="z.B. 30"
+                  editable={!disabled}
+                />
+              </View>
+              <View style={styles.flex1}>
+                <Input
+                  label="Enddatum"
+                  value={value.end_date ?? ''}
+                  onChangeText={(txt) => onChange({ end_date: txt || null })}
+                  placeholder="JJJJ-MM-TT"
+                  editable={!disabled}
+                />
+              </View>
             </View>
-            <View style={styles.flex1}>
-              <Input
-                label="Enddatum"
-                value={value.end_date ?? ''}
-                onChangeText={(txt) => onChange({ end_date: txt || null })}
-                placeholder={value.is_chronic ? 'nicht nötig' : 'JJJJ-MM-TT'}
-                editable={!disabled && !value.is_chronic}
-              />
-            </View>
-          </View>
+          )}
 
           <Input
             label="Dosierhinweis"
@@ -147,6 +149,8 @@ export default function ERezeptFields({ value, onChange, disabled = false }: ERe
             onChangeText={(txt) => onChange({ dosage_note: txt })}
             placeholder="z.B. nach dem Essen"
             editable={!disabled}
+            multiline
+            numberOfLines={3}
           />
         </View>
       )}
