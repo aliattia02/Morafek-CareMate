@@ -9,6 +9,11 @@ from utils.fhir_de import (
     build_observations_from_vitals_doc,
     build_document_bundle,
     build_isik_observation_vitals_fields,
+    build_kbv_medication_resource,
+    build_kbv_medication_request_resource,
+    build_medication_statement_resource,
+    validate_kbv_medication_resource,
+    validate_kbv_medication_request_resource,
 )
 from config import mongo
 import cloudinary.uploader
@@ -1679,6 +1684,9 @@ def fhir_export(current_user):
       - Encounter resources    (visits)
       - Condition resources    (diagnoses linked to visits)
       - DocumentReference resources (uploaded documents)
+      - Medication resources (KBV_PR_ERP_Medication_PZN)
+      - MedicationRequest resources (KBV_PR_ERP_Prescription)
+      - MedicationStatement resources (patient intake status)
 
     Conformance fixes applied vs. previous version:
       • Bundle.total removed   (invalid for type=document)
@@ -1777,6 +1785,52 @@ def fhir_export(current_user):
             'fullUrl':  f'urn:uuid:{resource["id"]}',
             'resource': resource,
         })
+
+    # ── Medications — KBV Medication + MedicationRequest + MedicationStatement ─
+    medication_docs = list(mongo.db.medications.find({'patient_id': patient_id}))
+    medication_ids = [str(doc['_id']) for doc in medication_docs]
+    intake_docs = list(
+        mongo.db.med_intakes.find({
+            'patient_id': patient_id,
+            'medication_id': {'$in': medication_ids},
+        })
+    ) if medication_ids else []
+
+    intakes_by_medication: dict[str, list[dict]] = {}
+    for intake_doc in intake_docs:
+        med_id = str(intake_doc.get('medication_id', ''))
+        if med_id:
+            intakes_by_medication.setdefault(med_id, []).append(intake_doc)
+
+    for med_doc in medication_docs:
+        medication_resource = build_kbv_medication_resource(med_doc)
+        medication_request = build_kbv_medication_request_resource(
+            med_doc,
+            patient_id=patient_id,
+        )
+        validate_kbv_medication_resource(medication_resource)
+        validate_kbv_medication_request_resource(medication_request)
+
+        entries.append({
+            'fullUrl': f'urn:uuid:{medication_resource["id"]}',
+            'resource': medication_resource,
+        })
+        entries.append({
+            'fullUrl': f'urn:uuid:{medication_request["id"]}',
+            'resource': medication_request,
+        })
+
+        med_id = str(med_doc['_id'])
+        for intake_doc in intakes_by_medication.get(med_id, []):
+            statement = build_medication_statement_resource(
+                intake_doc,
+                patient_id=patient_id,
+                medication_id=med_id,
+            )
+            entries.append({
+                'fullUrl': f'urn:uuid:{statement["id"]}',
+                'resource': statement,
+            })
 
     bundle = build_document_bundle(patient_id, entries, author_ref=author_ref)
     logger.info(
