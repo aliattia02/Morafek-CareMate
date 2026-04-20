@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import re
 from typing import Any
+import uuid
 from uuid import uuid4
 
 
@@ -684,22 +685,44 @@ def _parse_strength_text(strength_text: str) -> tuple[float, str] | None:
     return value, unit_part
 
 
-def build_kbv_medication_resource(medication_doc: dict) -> dict:
-    medication_id = str(medication_doc.get("_id") or medication_doc.get("id") or uuid4())
-    pzn = str(medication_doc.get("pzn", "") or "").strip()
+def _stable_fhir_uuid(mongo_id: Any) -> str:
+    source = str(mongo_id or uuid4())
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, source))
+
+
+def _normalize_iso_datetime(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return f"{raw}T00:00:00Z"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return raw
+
+
+def build_medication_resource(med: dict) -> dict:
+    medication_id = _stable_fhir_uuid(med.get("_id") or med.get("id"))
+    pzn = str(med.get("pzn", "") or "").strip()
     if not pzn:
         raise ValueError(f"Medication PZN is required for KBV medication export (id={medication_id}).")
-    trade_name = str(medication_doc.get("trade_name", "") or "").strip()
-    active_substance = str(medication_doc.get("active_substance", "") or "").strip()
-    form = str(medication_doc.get("form", "") or "").strip()
-    strength = str(medication_doc.get("strength", "") or "").strip()
-    norm_size = str(medication_doc.get("norm_size", "") or "").strip()
+    trade_name = str(med.get("trade_name", "") or "").strip()
+    active_substance = str(med.get("active_substance", "") or "").strip()
+    form = str(med.get("form", "") or "").strip()
+    strength = str(med.get("strength", "") or "").strip()
+    norm_size = str(med.get("norm_size", "") or "").strip()
 
     resource: dict[str, Any] = {
         "resourceType": "Medication",
         "id": medication_id,
         "meta": {"profile": [PROFILE.KBV_ERP_MEDICATION_PZN]},
-        "status": "active" if medication_doc.get("is_active", True) else "inactive",
+        "status": "active" if med.get("is_active", True) else "inactive",
         "code": {
             "coding": [{
                 "system": "http://fhir.de/CodeSystem/ifa/pzn",
@@ -727,56 +750,55 @@ def build_kbv_medication_resource(medication_doc: dict) -> dict:
             "url": "https://morafek.app/fhir/StructureDefinition/medication-norm-size",
             "valueString": norm_size,
         })
-    coverage = str(medication_doc.get("coverage", "") or "").strip()
+    coverage = str(med.get("coverage", "") or "").strip()
     if coverage:
         extensions.append({
             "url": "https://morafek.app/fhir/StructureDefinition/medication-coverage",
             "valueString": coverage,
         })
-    if "aut_idem" in medication_doc:
+    if "aut_idem" in med:
         extensions.append({
             "url": "https://morafek.app/fhir/StructureDefinition/medication-aut-idem",
-            "valueBoolean": bool(medication_doc.get("aut_idem", False)),
+            "valueBoolean": bool(med.get("aut_idem", False)),
         })
-    if "is_chronic" in medication_doc:
+    if "is_chronic" in med:
         extensions.append({
             "url": "https://morafek.app/fhir/StructureDefinition/medication-is-chronic",
-            "valueBoolean": bool(medication_doc.get("is_chronic", False)),
+            "valueBoolean": bool(med.get("is_chronic", False)),
         })
     if extensions:
         resource["extension"] = extensions
     return resource
 
 
-def build_kbv_medication_request_resource(
-    medication_doc: dict,
-    *,
-    patient_id: str,
-) -> dict:
-    medication_id = str(medication_doc.get("_id") or medication_doc.get("id") or uuid4())
-    request_id = f"rx-{medication_id}"
-    start_date = _normalize_fhir_date(medication_doc.get("start_date"))
-    end_date = _normalize_fhir_date(medication_doc.get("end_date"))
+def build_medication_request(med: dict) -> dict:
+    medication_id = _stable_fhir_uuid(med.get("_id") or med.get("id"))
+    request_id = _stable_fhir_uuid(med.get("_id") or med.get("id"))
+    patient_id = str(med.get("patient_id", "") or "").strip()
+    start_date = _normalize_iso_datetime(med.get("start_date"))
+    end_date = _normalize_iso_datetime(med.get("end_date"))
 
-    dosage_text = _build_dosage_text(medication_doc)
+    dosage_text = _build_dosage_text(med)
     resource: dict[str, Any] = {
         "resourceType": "MedicationRequest",
         "id": request_id,
         "meta": {"profile": [PROFILE.KBV_ERP_PRESCRIPTION]},
-        "status": "active" if medication_doc.get("is_active", True) else "completed",
+        "status": "active" if med.get("is_active", True) else "completed",
         "intent": "order",
         "medicationReference": {"reference": f"Medication/{medication_id}"},
-        "subject": {"reference": f"Patient/{patient_id}"},
     }
+    if patient_id:
+        resource["subject"] = {"reference": f"Patient/{patient_id}"}
     if dosage_text:
         resource["dosageInstruction"] = [{"text": dosage_text}]
 
-    if start_date:
-        resource["authoredOn"] = start_date
-    if medication_doc.get("doctor_id"):
-        resource["requester"] = {"reference": f"Practitioner/{medication_doc['doctor_id']}"}
-    if medication_doc.get("visit_id"):
-        resource["encounter"] = {"reference": f"Encounter/{medication_doc['visit_id']}"}
+    authored_on = _normalize_iso_datetime(med.get("created_at")) or start_date
+    if authored_on:
+        resource["authoredOn"] = authored_on
+    if med.get("doctor_id"):
+        resource["requester"] = {"reference": f"Practitioner/{med['doctor_id']}"}
+    if med.get("visit_id"):
+        resource["encounter"] = {"reference": f"Encounter/{med['visit_id']}"}
     if start_date or end_date:
         validity_period: dict[str, str] = {}
         if start_date:
@@ -785,6 +807,21 @@ def build_kbv_medication_request_resource(
             validity_period["end"] = end_date
         resource["dispenseRequest"] = {"validityPeriod": validity_period}
     return resource
+
+
+def build_kbv_medication_resource(medication_doc: dict) -> dict:
+    return build_medication_resource(medication_doc)
+
+
+def build_kbv_medication_request_resource(
+    medication_doc: dict,
+    *,
+    patient_id: str,
+) -> dict:
+    med = dict(medication_doc)
+    if patient_id:
+        med["patient_id"] = patient_id
+    return build_medication_request(med)
 
 
 def build_medication_statement_resource(
