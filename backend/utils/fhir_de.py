@@ -670,6 +670,80 @@ def _build_dosage_text(medication_doc: dict) -> str:
     return text
 
 
+_KBV_DARREICHUNGSFORM_SYSTEM = "https://fhir.kbv.de/CodeSystem/KBV_CS_SFHIR_KBV_DARREICHUNGSFORM"
+_KBV_DARREICHUNGSFORM_MAP = {
+    "tablette": "TAB",
+    "kapsel": "KAP",
+    "retardtablette": "RET",
+    "pflaster": "PFL",
+    "creme": "CRE",
+    "salbe": "SAL",
+    "gel": "GEL",
+    "lotion": "LOT",
+    "aerosol": "AER",
+    "spray": "SPR",
+    "tropfen": "TRO",
+    "lyophilisat": "LIO",
+    "sirup": "SIR",
+    "suspension": "SUS",
+    "emulsion": "EMU",
+    "lösung": "SOL",
+    "loesung": "SOL",
+    "injektion": "INJ",
+    "infusion": "INF",
+    "pulver": "PUL",
+    "granulat": "GRA",
+    "suppositorium": "SUP",
+    "zäpfchen": "ZAE",
+    "zaepfchen": "ZAE",
+    "vaginaltablette": "VAG",
+    "konzentrat": "KTR",
+}
+_SLOT_TIMING_WHEN = {
+    "morning": "MORN",
+    "noon": "NOON",
+    "evening": "EVE",
+    "night": "NIGHT",
+}
+_SLOT_DEFAULT_TIME = {
+    "morning": "08:00:00",
+    "noon": "12:00:00",
+    "evening": "18:00:00",
+    "night": "22:00:00",
+}
+
+
+def _build_dosage_label(medication_doc: dict) -> str:
+    dosage_values = [
+        int(medication_doc.get(f"dosage_{slot}") or 0)
+        for slot in ("morning", "noon", "evening", "night")
+    ]
+    return "-".join(str(value) for value in dosage_values)
+
+
+def _build_timing_when(medication_doc: dict) -> list[str]:
+    when_codes: list[str] = []
+    for slot, code in _SLOT_TIMING_WHEN.items():
+        if int(medication_doc.get(f"dosage_{slot}") or 0) > 0:
+            when_codes.append(code)
+    return when_codes
+
+
+def _derive_effective_datetime_from_intake(intake: dict) -> str | None:
+    confirmed_at = _normalize_iso_datetime(intake.get("confirmed_at"))
+    if confirmed_at:
+        return confirmed_at
+    date_value = str(intake.get("date", "") or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_value):
+        return (
+            _normalize_iso_datetime(intake.get("taken_at"))
+            or _normalize_iso_datetime(intake.get("created_at"))
+        )
+    slot = str(intake.get("slot", "") or "").strip().lower()
+    slot_time = _SLOT_DEFAULT_TIME.get(slot, "00:00:00")
+    return f"{date_value}T{slot_time}Z"
+
+
 def _parse_strength_text(strength_text: str) -> tuple[float, str] | None:
     match = re.match(r"^\s*(\d+(?:[.,]\d+)?)\s*(.+?)\s*$", strength_text or "")
     if not match:
@@ -720,6 +794,7 @@ def build_medication_resource(med: dict) -> dict:
     trade_name = str(med.get("trade_name", "") or "").strip()
     active_substance = str(med.get("active_substance", "") or "").strip()
     form = str(med.get("form", "") or "").strip()
+    form_code = _KBV_DARREICHUNGSFORM_MAP.get(form.lower())
     strength = str(med.get("strength", "") or "").strip()
     norm_size = str(med.get("norm_size", "") or "").strip()
 
@@ -739,7 +814,14 @@ def build_medication_resource(med: dict) -> dict:
     }
 
     if form:
-        resource["form"] = {"text": form}
+        form_coding: dict[str, Any] = {"text": form}
+        if form_code:
+            form_coding["coding"] = [{
+                "system": _KBV_DARREICHUNGSFORM_SYSTEM,
+                "code": form_code,
+                "display": form,
+            }]
+        resource["form"] = form_coding
     if active_substance:
         ingredient: dict[str, Any] = {"itemCodeableConcept": {"text": active_substance}}
         if strength:
@@ -750,27 +832,20 @@ def build_medication_resource(med: dict) -> dict:
         resource["ingredient"] = [ingredient]
 
     extensions: list[dict[str, Any]] = []
-    if norm_size:
-        extensions.append({
-            "url": "https://morafek.app/fhir/StructureDefinition/medication-norm-size",
-            "valueString": norm_size,
-        })
-    coverage = str(med.get("coverage", "") or "").strip()
-    if coverage:
-        extensions.append({
-            "url": "https://morafek.app/fhir/StructureDefinition/medication-coverage",
-            "valueString": coverage,
-        })
-    if "aut_idem" in med:
-        extensions.append({
-            "url": "https://morafek.app/fhir/StructureDefinition/medication-aut-idem",
-            "valueBoolean": bool(med.get("aut_idem", False)),
-        })
-    if "is_chronic" in med:
-        extensions.append({
-            "url": "https://morafek.app/fhir/StructureDefinition/medication-is-chronic",
-            "valueBoolean": bool(med.get("is_chronic", False)),
-        })
+    extensions.append({
+        "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Medication_Category",
+        "valueCodeableConcept": {
+            "text": "00",
+        },
+    })
+    extensions.append({
+        "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Medication_Vaccine",
+        "valueBoolean": bool(med.get("is_vaccine", False)),
+    })
+    extensions.append({
+        "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Medication_Normgroesse",
+        "valueCode": norm_size,
+    })
     if extensions:
         resource["extension"] = extensions
     return resource
@@ -784,7 +859,11 @@ def build_medication_request(med: dict) -> dict:
     start_date = _normalize_iso_datetime(med.get("start_date"))
     end_date = _normalize_iso_datetime(med.get("end_date"))
 
-    dosage_text = _build_dosage_text(med)
+    dosage_label = _build_dosage_label(med)
+    dosage_note = str(med.get("dosage_note", "") or "").strip()
+    timing_when = _build_timing_when(med)
+    coverage = str(med.get("coverage", "") or "").strip()
+    co_payment_code = {"GKV": "0", "PKV": "3", "Selbstzahler": "2"}.get(coverage, "2")
     resource: dict[str, Any] = {
         "resourceType": "MedicationRequest",
         "id": request_id,
@@ -792,11 +871,50 @@ def build_medication_request(med: dict) -> dict:
         "status": "active" if med.get("is_active", True) else "completed",
         "intent": "order",
         "medicationReference": {"reference": f"Medication/{medication_id}"},
+        "extension": [
+            {
+                "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_StatusCoPayment",
+                "valueCoding": {
+                    "system": "https://fhir.kbv.de/CodeSystem/KBV_CS_ERP_StatusCoPayment",
+                    "code": co_payment_code,
+                },
+            },
+            {
+                "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_EmergencyServicesFee",
+                "valueBoolean": bool(med.get("emergency_services_fee", False)),
+            },
+            {
+                "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_BVG",
+                "valueBoolean": bool(med.get("bvg", False)),
+            },
+            {
+                "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Multiple_Prescription",
+                "valueBoolean": bool(med.get("multiple_prescription", False)),
+            },
+        ],
+        "substitution": {
+            "allowedBoolean": bool(med.get("aut_idem", False)),
+        },
     }
     if patient_id:
         resource["subject"] = {"reference": f"Patient/{patient_id}"}
-    if dosage_text:
-        resource["dosageInstruction"] = [{"text": dosage_text}]
+    if dosage_label:
+        dosage_instruction: dict[str, Any] = {"text": dosage_label}
+        repeat: dict[str, Any] = {}
+        if timing_when:
+            repeat["when"] = timing_when
+        bounds_period: dict[str, str] = {}
+        if start_date:
+            bounds_period["start"] = start_date
+        if end_date and not bool(med.get("is_chronic", False)):
+            bounds_period["end"] = end_date
+        if bounds_period:
+            repeat["boundsPeriod"] = bounds_period
+        if repeat:
+            dosage_instruction["timing"] = {"repeat": repeat}
+        resource["dosageInstruction"] = [dosage_instruction]
+    if dosage_note:
+        resource["note"] = [{"text": dosage_note}]
 
     authored_on = _normalize_iso_datetime(med.get("created_at")) or start_date
     if authored_on:
@@ -805,11 +923,12 @@ def build_medication_request(med: dict) -> dict:
         resource["requester"] = {"reference": f"Practitioner/{med['doctor_id']}"}
     if med.get("visit_id"):
         resource["encounter"] = {"reference": f"Encounter/{med['visit_id']}"}
-    if start_date or end_date:
+    is_chronic = bool(med.get("is_chronic", False))
+    if start_date or (end_date and not is_chronic):
         validity_period: dict[str, str] = {}
         if start_date:
             validity_period["start"] = start_date
-        if end_date:
+        if end_date and not is_chronic:
             validity_period["end"] = end_date
         resource["dispenseRequest"] = {"validityPeriod": validity_period}
     return resource
@@ -835,22 +954,19 @@ def build_medication_statement(
     med: dict,
     patient_fhir_id: str,
 ) -> dict:
-    status_map = {"taken": "completed", "skipped": "not-taken", "pending": "in-progress"}
+    status_map = {"taken": "completed", "skipped": "not-taken", "pending": "intended"}
     intake_status = str(intake.get("status", "pending") or "pending").lower()
     slot = str(intake.get("slot", "") or "").strip().lower()
     intake_id = _stable_fhir_uuid(intake.get("_id") or intake.get("id"))
     medication_fhir_id = str(med.get("fhir_id", "") or "").strip()
     medication_id = medication_fhir_id or _stable_fhir_uuid(med.get("_id") or med.get("id"))
-    effective_date = (
-        _normalize_iso_datetime(intake.get("date"))
-        or _normalize_iso_datetime(intake.get("taken_at"))
-        or _normalize_iso_datetime(intake.get("created_at"))
-    )
+    effective_date = _derive_effective_datetime_from_intake(intake)
+    dose_value = int(med.get(f"dosage_{slot}", 0) or 0) if slot else 0
 
     resource: dict[str, Any] = {
         "resourceType": "MedicationStatement",
         "id": intake_id,
-        "status": status_map.get(intake_status, "in-progress"),
+        "status": status_map.get(intake_status, "intended"),
         "subject": {"reference": f"Patient/{patient_fhir_id}"},
         "medicationReference": {"reference": f"Medication/{medication_id}"},
         "informationSource": {"reference": f"Patient/{patient_fhir_id}"},
@@ -862,6 +978,12 @@ def build_medication_statement(
     if effective_date:
         resource["effectiveDateTime"] = effective_date
         resource["dateAsserted"] = effective_date
+    if dose_value > 0:
+        resource["dosage"] = [{
+            "doseQuantity": {
+                "value": dose_value,
+            }
+        }]
     note = str(intake.get("note", "") or "").strip()
     if note:
         resource["note"] = [{"text": note}]

@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from bson.objectid import ObjectId
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 from utils.auth import token_required
 from utils.error_handler import api_error_handler
@@ -1788,12 +1788,14 @@ def fhir_export(current_user):
         })
 
     # ── Medications — KBV Medication + MedicationRequest + MedicationStatement ─
-    medication_docs = list(mongo.db.medications.find({'patient_id': patient_id}))
+    medication_docs = list(mongo.db.medications.find({'patient_id': patient_id, 'is_active': True}))
     medication_ids = [str(doc['_id']) for doc in medication_docs]
+    intake_cutoff_date = (datetime.now(timezone.utc) - timedelta(days=90)).strftime('%Y-%m-%d')
     intake_docs = list(
         mongo.db.med_intakes.find({
             'patient_id': patient_id,
             'medication_id': {'$in': medication_ids},
+            'date': {'$gte': intake_cutoff_date},
         })
     ) if medication_ids else []
 
@@ -1836,6 +1838,7 @@ def fhir_export(current_user):
         )
 
     bundle = build_document_bundle(patient_id, entries, author_ref=author_ref)
+    bundle['total'] = len(bundle.get('entry', []))
     logger.info(
         'FHIR R4 document Bundle exported (%d entries, %d observations)',
         len(bundle['entry']),
