@@ -1830,18 +1830,9 @@ def fhir_export(current_user):
 
     med_validation = validate_medication_bundle_entries(entries)
     if not med_validation.get('valid', True):
-        error_samples = [
-            {
-                'field': err.get('field'),
-                'issue': err.get('issue'),
-            }
-            for err in med_validation.get('errors', [])[:10]
-            if isinstance(err, dict)
-        ]
         logger.warning(
-            'Medication structural validation failed (%d errors). Sample: %s',
+            'Medication structural validation failed with %d error(s).',
             len(med_validation.get('errors', [])),
-            error_samples,
         )
 
     bundle = build_document_bundle(patient_id, entries, author_ref=author_ref)
