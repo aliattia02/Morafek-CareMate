@@ -686,7 +686,11 @@ def _parse_strength_text(strength_text: str) -> tuple[float, str] | None:
 
 
 def _stable_fhir_uuid(mongo_id: Any) -> str:
-    source = str(mongo_id or uuid4())
+    if mongo_id in (None, ""):
+        raise ValueError("MongoDB _id is required to build stable FHIR UUID.")
+    source = str(mongo_id).strip()
+    if not source:
+        raise ValueError("MongoDB _id is required to build stable FHIR UUID.")
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, source))
 
 
@@ -708,10 +712,11 @@ def _normalize_iso_datetime(value: Any) -> str | None:
 
 
 def build_medication_resource(med: dict) -> dict:
-    medication_id = _stable_fhir_uuid(med.get("_id") or med.get("id"))
+    mongo_id = med.get("_id") or med.get("id")
+    medication_id = _stable_fhir_uuid(mongo_id)
     pzn = str(med.get("pzn", "") or "").strip()
     if not pzn:
-        raise ValueError(f"Medication PZN is required for KBV medication export (id={medication_id}).")
+        raise ValueError(f"Medication PZN is required for KBV medication export (mongo_id={mongo_id}).")
     trade_name = str(med.get("trade_name", "") or "").strip()
     active_substance = str(med.get("active_substance", "") or "").strip()
     form = str(med.get("form", "") or "").strip()
@@ -772,8 +777,9 @@ def build_medication_resource(med: dict) -> dict:
 
 
 def build_medication_request(med: dict) -> dict:
-    medication_id = _stable_fhir_uuid(med.get("_id") or med.get("id"))
-    request_id = _stable_fhir_uuid(med.get("_id") or med.get("id"))
+    mongo_id = med.get("_id") or med.get("id")
+    medication_id = _stable_fhir_uuid(mongo_id)
+    request_id = _stable_fhir_uuid(f"MedicationRequest:{mongo_id}")
     patient_id = str(med.get("patient_id", "") or "").strip()
     start_date = _normalize_iso_datetime(med.get("start_date"))
     end_date = _normalize_iso_datetime(med.get("end_date"))
@@ -833,7 +839,8 @@ def build_medication_statement(
     intake_status = str(intake.get("status", "pending") or "pending").lower()
     slot = str(intake.get("slot", "") or "").strip().lower()
     intake_id = _stable_fhir_uuid(intake.get("_id") or intake.get("id"))
-    medication_id = _stable_fhir_uuid(med.get("_id") or med.get("id"))
+    medication_fhir_id = str(med.get("fhir_id", "") or "").strip()
+    medication_id = medication_fhir_id or _stable_fhir_uuid(med.get("_id") or med.get("id"))
     effective_date = (
         _normalize_iso_datetime(intake.get("date"))
         or _normalize_iso_datetime(intake.get("taken_at"))
@@ -867,7 +874,7 @@ def build_medication_statement_resource(
     patient_id: str,
     medication_id: str,
 ) -> dict:
-    medication_stub = {"_id": medication_id}
+    medication_stub = {"fhir_id": medication_id}
     return build_medication_statement(intake_doc, medication_stub, patient_id)
 
 

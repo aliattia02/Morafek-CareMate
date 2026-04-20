@@ -1804,7 +1804,7 @@ def fhir_export(current_user):
 
     for med_doc in medication_docs:
         med_with_patient = dict(med_doc)
-        med_with_patient['patient_id'] = patient_id
+        med_with_patient.setdefault('patient_id', patient_id)
         medication_resource = build_medication_resource(med_with_patient)
         medication_request = build_medication_request(med_with_patient)
         validate_kbv_medication_resource(medication_resource)
