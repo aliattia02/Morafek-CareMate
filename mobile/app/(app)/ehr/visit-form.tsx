@@ -34,6 +34,7 @@ import { API }                 from '@/services/api/endpoints';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 import ICD10SearchInput, { ICD10Selection } from '@/components/ehr/ICD10SearchInput';
+import MedicationPrescriptionPanel from '@/components/ehr/MedicationPrescriptionPanel';
 
 const todayISO = (): string => new Date().toISOString().split('T')[0];
 
@@ -54,6 +55,7 @@ export default function VisitFormScreen() {
   const [submitting,     setSubmitting]     = useState(false);
   const [successMsg,     setSuccessMsg]     = useState<string | null>(null);
   const [submitError,    setSubmitError]    = useState<string | null>(null);
+  const [createdVisitId, setCreatedVisitId] = useState<string | undefined>(undefined);
 
   // Redirect non-doctors to home (must be in useEffect — cannot navigate during render)
   useEffect(() => {
@@ -96,17 +98,22 @@ export default function VisitFormScreen() {
       setSubmitting(true);
       setSubmitError(null);
 
-      await apiClient.post(API.EHR.PATIENT_VISITS(patient_id), {
+      const visitRes = await apiClient.post<{ id?: string; _id?: string }>(
+        API.EHR.PATIENT_VISITS(patient_id),
+        {
         chief_complaint: chiefComplaint.trim(),
         diagnosis_icd10: diagnosisIcd10.trim(),
         diagnosis_text:  diagnosisText.trim(),
         notes:           notes.trim() || undefined,
         visit_date:      visitDate.trim() || todayISO(),
-      });
+        }
+      );
+
+      const visitId = visitRes.data?.id ?? visitRes.data?._id;
+      setCreatedVisitId(visitId || undefined);
 
       const name = patient_name ? ` für ${patient_name}` : '';
-      setSuccessMsg(`✅  Besuch${name} wurde erfolgreich gespeichert.`);
-      setTimeout(() => router.back(), 1500);
+      setSuccessMsg(`✅  Besuch${name} wurde erfolgreich gespeichert. Verordnungen können jetzt separat gespeichert werden.`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Fehler beim Speichern';
       setSubmitError(message);
@@ -192,6 +199,11 @@ export default function VisitFormScreen() {
               placeholder="Diagnose beschreiben (oder aus ICD-Suche übernehmen)"
               error={errors.diagnosisText}
               required
+            />
+
+            <MedicationPrescriptionPanel
+              patientId={patient_id ?? ''}
+              visitId={createdVisitId}
             />
 
             {/* ── Visit Date ── */}

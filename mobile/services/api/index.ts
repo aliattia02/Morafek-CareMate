@@ -9,4 +9,5 @@ export * from './auth';
 export * from './doctor';
 export * from './doctor-management';
 export * from './ehr';
+export * from './medications';
 export * from './profile';
