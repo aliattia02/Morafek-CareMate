@@ -3,7 +3,7 @@ import { API } from './endpoints';
 
 export type NormSize = 'N1' | 'N2' | 'N3';
 export type CoverageType = 'GKV' | 'PKV' | 'Selbstzahler';
-export type DosageUnit = 'Tablette' | 'ml' | 'IE' | 'Hub' | 'Tropfen';
+export type DosageUnit = 'Tablette' | 'Kapsel' | 'ml' | 'IE' | 'Hub' | 'Tropfen';
 
 export interface MedicationRecord {
   _id?: string;

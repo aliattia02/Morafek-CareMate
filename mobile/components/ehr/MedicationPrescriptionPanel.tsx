@@ -1,10 +1,11 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
 import { Input } from '@/components/ui';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 import PZNSearchInput from '@/components/ehr/PZNSearchInput';
 import DosageBuilder, { DosageValue } from '@/components/ehr/DosageBuilder';
+import ERezeptFields from '@/components/ehr/ERezeptFields';
 import { CreateDoctorMedicationRequest, CoverageType, DosageUnit, NormSize } from '@/services/api/medications';
 import { PZNEntry } from '@/constants/pzn_data';
 
@@ -46,9 +47,7 @@ export interface MedicationPrescriptionPanelRef {
   getPayload: () => CreateDoctorMedicationRequest | null;
 }
 
-const COVERAGE_OPTIONS: CoverageType[] = ['GKV', 'PKV', 'Selbstzahler'];
-const NORM_OPTIONS: NormSize[] = ['N1', 'N2', 'N3'];
-const DOSAGE_UNIT_OPTIONS: DosageUnit[] = ['Tablette', 'ml', 'IE', 'Hub', 'Tropfen'];
+const DOSAGE_UNIT_OPTIONS: DosageUnit[] = ['Tablette', 'Kapsel', 'ml', 'IE', 'Hub', 'Tropfen'];
 
 const todayISO = () => new Date().toISOString().split('T')[0];
 
@@ -82,11 +81,6 @@ const MedicationPrescriptionPanel = forwardRef<MedicationPrescriptionPanelRef, P
     dosage_note: '',
   });
   const draftRef = useRef(draft);
-
-  const dosageLabel = useMemo(
-    () => `${draft.dosage.morning}-${draft.dosage.noon}-${draft.dosage.evening}-${draft.dosage.night}`,
-    [draft.dosage]
-  );
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -254,134 +248,65 @@ const MedicationPrescriptionPanel = forwardRef<MedicationPrescriptionPanelRef, P
             </View>
           </View>
 
-          <Text style={styles.sectionLabel}>Normgröße</Text>
-          <View style={styles.optionRow}>
-            {NORM_OPTIONS.map((opt) => (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.optionChip, draft.norm_size === opt && styles.optionChipSelected]}
-                onPress={() => setDraft((p) => ({ ...p, norm_size: opt }))}
-              >
-                <Text style={[styles.optionChipText, draft.norm_size === opt && styles.optionChipTextSelected]}>{opt}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <Text style={styles.sectionLabel}>Kostenträger</Text>
-          <View style={styles.optionRowWrap}>
-            {COVERAGE_OPTIONS.map((opt) => (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.optionChip, draft.coverage === opt && styles.optionChipSelected]}
-                onPress={() => setDraft((p) => ({ ...p, coverage: opt }))}
-              >
-                <Text style={[styles.optionChipText, draft.coverage === opt && styles.optionChipTextSelected]}>{opt}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          <Text style={styles.sectionLabel}>Aut-Idem</Text>
-          <View style={styles.optionRow}>
-            <TouchableOpacity
-              style={[styles.optionChip, draft.aut_idem && styles.optionChipSelected]}
-              onPress={() => setDraft((p) => ({ ...p, aut_idem: true }))}
-            >
-              <Text style={[styles.optionChipText, draft.aut_idem && styles.optionChipTextSelected]}>Ja</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.optionChip, !draft.aut_idem && styles.optionChipSelected]}
-              onPress={() => setDraft((p) => ({ ...p, aut_idem: false }))}
-            >
-              <Text style={[styles.optionChipText, !draft.aut_idem && styles.optionChipTextSelected]}>Nein</Text>
-            </TouchableOpacity>
-          </View>
-
-          <Text style={styles.sectionLabel}>Therapieart</Text>
-          <View style={styles.optionRow}>
-            <TouchableOpacity
-              style={[styles.optionChip, draft.is_chronic && styles.optionChipSelected]}
-              onPress={() => {
-                setDraft((p) => ({ ...p, is_chronic: true, end_date: '' }));
-                setErrors((p) => ({ ...p, end_date: '' }));
-              }}
-            >
-              <Text style={[styles.optionChipText, draft.is_chronic && styles.optionChipTextSelected]}>Chronisch</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.optionChip, !draft.is_chronic && styles.optionChipSelected]}
-              onPress={() => setDraft((p) => ({ ...p, is_chronic: false }))}
-            >
-              <Text style={[styles.optionChipText, !draft.is_chronic && styles.optionChipTextSelected]}>Befristet</Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.row2}>
-            <View style={styles.flex1}>
-              <Input
-                label="Startdatum"
-                value={draft.start_date}
-                onChangeText={(v) => {
-                  setDraft((p) => ({ ...p, start_date: v }));
-                  setErrors((p) => ({ ...p, start_date: '' }));
-                }}
-                placeholder="JJJJ-MM-TT"
-                error={errors.start_date}
-                required
-              />
-            </View>
-            <View style={styles.flex1}>
-              <Input
-                label="Enddatum"
-                value={draft.end_date}
-                onChangeText={(v) => {
-                  setDraft((p) => ({ ...p, end_date: v }));
-                  setErrors((p) => ({ ...p, end_date: '' }));
-                }}
-                placeholder={draft.is_chronic ? 'nicht nötig' : 'JJJJ-MM-TT'}
-                error={errors.end_date}
-                editable={!draft.is_chronic}
-              />
-            </View>
-          </View>
-
           <Input
-            label="Dauer (Tage, optional)"
-            value={draft.duration_days}
-            onChangeText={(v) => setDraft((p) => ({ ...p, duration_days: v.replace(/[^0-9]/g, '') }))}
-            keyboardType="numeric"
-            placeholder="z.B. 30"
+            label="Startdatum"
+            value={draft.start_date}
+            onChangeText={(v) => {
+              setDraft((p) => ({ ...p, start_date: v }));
+              setErrors((p) => ({ ...p, start_date: '' }));
+            }}
+            placeholder="JJJJ-MM-TT"
+            error={errors.start_date}
+            required
           />
 
           <DosageBuilder
             value={draft.dosage}
+            unit={draft.dosage_unit}
             onChange={(dosage) => {
               setDraft((p) => ({ ...p, dosage }));
               setErrors((p) => ({ ...p, dosage: '' }));
             }}
+            onUnitChange={(unit) => {
+              const resolvedUnit = DOSAGE_UNIT_OPTIONS.includes(unit as DosageUnit)
+                ? (unit as DosageUnit)
+                : draft.dosage_unit;
+              setDraft((p) => ({ ...p, dosage_unit: resolvedUnit }));
+            }}
           />
           {errors.dosage ? <Text style={styles.errorText}>{errors.dosage}</Text> : null}
 
-          <Text style={styles.sectionLabel}>Dosierungseinheit</Text>
-          <View style={styles.optionRowWrap}>
-            {DOSAGE_UNIT_OPTIONS.map((opt) => (
-              <TouchableOpacity
-                key={opt}
-                style={[styles.optionChip, draft.dosage_unit === opt && styles.optionChipSelected]}
-                onPress={() => setDraft((p) => ({ ...p, dosage_unit: opt }))}
-              >
-                <Text style={[styles.optionChipText, draft.dosage_unit === opt && styles.optionChipTextSelected]}>{opt}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+          <ERezeptFields
+            value={{
+              norm_size: draft.norm_size,
+              aut_idem: draft.aut_idem,
+              coverage: draft.coverage,
+              is_chronic: draft.is_chronic,
+              duration_days: draft.duration_days.trim() ? Number(draft.duration_days.trim()) : null,
+              end_date: draft.end_date.trim() ? draft.end_date : null,
+              dosage_note: draft.dosage_note,
+            }}
+            onChange={(partial) => {
+              setDraft((prev) => ({
+                ...prev,
+                norm_size: partial.norm_size ?? prev.norm_size,
+                aut_idem: partial.aut_idem ?? prev.aut_idem,
+                coverage: partial.coverage ?? prev.coverage,
+                is_chronic: partial.is_chronic ?? prev.is_chronic,
+                duration_days:
+                  partial.duration_days !== undefined
+                    ? (partial.duration_days == null ? '' : String(partial.duration_days))
+                    : prev.duration_days,
+                end_date: partial.end_date !== undefined ? (partial.end_date ?? '') : prev.end_date,
+                dosage_note: partial.dosage_note ?? prev.dosage_note,
+              }));
 
-          <Input
-            label="Dosierhinweis"
-            value={draft.dosage_note}
-            onChangeText={(v) => setDraft((p) => ({ ...p, dosage_note: v }))}
-            placeholder="z.B. nach dem Essen"
+              if (partial.end_date !== undefined || partial.is_chronic !== undefined) {
+                setErrors((prev) => ({ ...prev, end_date: '' }));
+              }
+            }}
           />
-
-          <Text style={styles.footerHint}>Schema: {dosageLabel} ({draft.dosage_unit})</Text>
+          {errors.end_date ? <Text style={styles.errorText}>{errors.end_date}</Text> : null}
         </>
       )}
     </View>
@@ -444,52 +369,11 @@ const styles = StyleSheet.create({
   flex1: {
     flex: 1,
   },
-  sectionLabel: {
-    ...typography.small,
-    color: colors.text.primary,
-    fontWeight: '600',
-    marginBottom: spacing.xs,
-  },
-  optionRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  optionRowWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginBottom: spacing.md,
-  },
-  optionChip: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: borderRadius.full,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    backgroundColor: colors.surface,
-  },
-  optionChipSelected: {
-    borderColor: colors.primary,
-    backgroundColor: colors.primary,
-  },
-  optionChipText: {
-    ...typography.small,
-    color: colors.text.primary,
-    fontWeight: '600',
-  },
-  optionChipTextSelected: {
-    color: '#fff',
-  },
   errorText: {
     ...typography.small,
     color: colors.danger,
     marginTop: -spacing.xs,
     marginBottom: spacing.sm,
-  },
-  footerHint: {
-    ...typography.small,
-    color: colors.text.secondary,
   },
 });
 
