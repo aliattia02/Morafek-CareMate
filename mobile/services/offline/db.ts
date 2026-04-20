@@ -190,27 +190,29 @@ export function deletePendingVital(localId: string) {
 
 export interface PendingMedicationIntake {
   local_id: string;
-  intake_id: string;
+  type: 'intake_confirm';
+  intakeId: string;
   status: 'taken' | 'skipped';
-  note: string | null;
-  created_at: string;
+  timestamp: string;
 }
 
 export function queueMedicationIntake(data: {
-  intake_id: string;
+  type: 'intake_confirm';
+  intakeId: string;
   status: 'taken' | 'skipped';
-  note?: string;
+  timestamp?: string;
 }): string {
   const localId = `intake_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  const timestamp = data.timestamp ?? new Date().toISOString();
 
   db.runSync(
     `INSERT INTO pending_medication_intakes VALUES (?,?,?,?,?)`,
     [
       localId,
-      data.intake_id,
+      data.intakeId,
       data.status,
-      data.note ?? null,
-      new Date().toISOString(),
+      null,
+      timestamp,
     ]
   );
 
@@ -218,7 +220,14 @@ export function queueMedicationIntake(data: {
 }
 
 export function getPendingMedicationIntakes(): PendingMedicationIntake[] {
-  return db.getAllSync(`SELECT * FROM pending_medication_intakes ORDER BY created_at ASC`);
+  const rows = db.getAllSync(`SELECT * FROM pending_medication_intakes ORDER BY created_at ASC`);
+  return rows.map((row: any) => ({
+    local_id: row.local_id,
+    type: 'intake_confirm',
+    intakeId: row.intake_id,
+    status: row.status,
+    timestamp: row.created_at,
+  }));
 }
 
 export function deletePendingMedicationIntake(localId: string) {

@@ -1,21 +1,22 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { E, ET } from '@/constants/elderlyTheme';
 import AdherenceHeatmap from '@/components/ehr/AdherenceHeatmap';
 import DailySlotCard from '@/components/ehr/DailySlotCard';
 import MedicationDetailModal from '@/components/ehr/MedicationDetailModal';
 import {
-  confirmMedicationIntake,
+  confirmIntake,
   getMedicationAdherence,
   getMyMedications,
   getTodayMedications,
@@ -59,6 +60,35 @@ function coverageLabel(value: MedicationRecord['coverage']) {
   return value ?? '—';
 }
 
+function computeSummary(slots: TodayMedicationResponse['slots']) {
+  const allItems = Object.values(slots).flat();
+  return {
+    total: allItems.length,
+    taken: allItems.filter((item) => item.status === 'taken').length,
+    pending: allItems.filter((item) => item.status === 'pending').length,
+    skipped: allItems.filter((item) => item.status === 'skipped').length,
+  };
+}
+
+function patchIntakeStatus(
+  prev: TodayMedicationResponse,
+  intakeId: string,
+  status: 'pending' | 'taken' | 'skipped'
+): TodayMedicationResponse {
+  const nextSlots = {
+    morning: prev.slots.morning.map((item) => (item.intake_id === intakeId ? { ...item, status } : item)),
+    noon: prev.slots.noon.map((item) => (item.intake_id === intakeId ? { ...item, status } : item)),
+    evening: prev.slots.evening.map((item) => (item.intake_id === intakeId ? { ...item, status } : item)),
+    night: prev.slots.night.map((item) => (item.intake_id === intakeId ? { ...item, status } : item)),
+  };
+
+  return {
+    ...prev,
+    slots: nextSlots,
+    summary: computeSummary(nextSlots),
+  };
+}
+
 export default function MedicationsScreen() {
   const [activeTab, setActiveTab] = useState<MedicationsTab>('today');
   const [todayData, setTodayData] = useState<TodayMedicationResponse | null>(null);
@@ -70,7 +100,8 @@ export default function MedicationsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [usingCache, setUsingCache] = useState(false);
   const [selectedMedication, setSelectedMedication] = useState<MedicationRecord | null>(null);
-  const [showMedicationDetail, setShowMedicationDetail] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [expandedSlots, setExpandedSlots] = useState<Record<SlotKey, boolean>>({
     morning: true,
     noon: true,
@@ -83,16 +114,34 @@ export default function MedicationsScreen() {
     [myMedications]
   );
 
+  const showToast = useCallback((message: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToastMessage(message);
+    toastTimerRef.current = setTimeout(() => setToastMessage(null), 2400);
+
+    try {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+    } catch {
+      // no-op outside Android
+    }
+  }, []);
+
   const syncPendingIntakes = useCallback(async () => {
     const pending = getPendingMedicationIntakes();
+    let syncedCount = 0;
+
     for (const item of pending) {
+      if (item.type !== 'intake_confirm') continue;
       try {
-        await confirmMedicationIntake(item.intake_id, { status: item.status, note: item.note ?? undefined });
+        await confirmIntake(item.intakeId, item.status);
         deletePendingMedicationIntake(item.local_id);
+        syncedCount += 1;
       } catch {
-        break;
+        // Keep failed item for next retry
       }
     }
+
+    return syncedCount;
   }, []);
 
   const loadTodayData = useCallback(async () => {
@@ -124,19 +173,43 @@ export default function MedicationsScreen() {
   const loadAll = useCallback(async () => {
     try {
       setError(null);
-      await syncPendingIntakes();
+      const synced = await syncPendingIntakes();
+      if (synced > 0) {
+        showToast(`Synced ${synced} offline confirmation${synced > 1 ? 's' : ''}`);
+      }
       await Promise.all([loadTodayData(), loadMyMedications()]);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load medications');
     } finally {
       setLoading(false);
     }
-  }, [loadMyMedications, loadTodayData, syncPendingIntakes]);
+  }, [loadMyMedications, loadTodayData, showToast, syncPendingIntakes]);
 
   useEffect(() => {
     initDB();
     loadAll();
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
   }, [loadAll]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      const drainQueue = async () => {
+        const synced = await syncPendingIntakes();
+        if (!active || synced === 0) return;
+        showToast(`Synced ${synced} offline confirmation${synced > 1 ? 's' : ''}`);
+        await loadTodayData();
+      };
+
+      drainQueue();
+      return () => {
+        active = false;
+      };
+    }, [loadTodayData, showToast, syncPendingIntakes])
+  );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -154,38 +227,29 @@ export default function MedicationsScreen() {
     }
   }, [activeTab, loadMyMedications, loadTodayData]);
 
-  const handleConfirm = useCallback(async (intakeId: string, status: 'taken' | 'skipped') => {
-    setUpdatingIntakeId(intakeId);
+  const handleConfirm = useCallback(
+    async (intakeId: string, status: 'taken' | 'skipped') => {
+      setUpdatingIntakeId(intakeId);
 
-    setTodayData((prev) => {
-      if (!prev) return prev;
-      const nextSlots = {
-        morning: prev.slots.morning.map((item) => (item.intake_id === intakeId ? { ...item, status } : item)),
-        noon: prev.slots.noon.map((item) => (item.intake_id === intakeId ? { ...item, status } : item)),
-        evening: prev.slots.evening.map((item) => (item.intake_id === intakeId ? { ...item, status } : item)),
-        night: prev.slots.night.map((item) => (item.intake_id === intakeId ? { ...item, status } : item)),
-      };
-      const allItems = Object.values(nextSlots).flat();
-      return {
-        ...prev,
-        slots: nextSlots,
-        summary: {
-          total: allItems.length,
-          taken: allItems.filter((item) => item.status === 'taken').length,
-          pending: allItems.filter((item) => item.status === 'pending').length,
-          skipped: allItems.filter((item) => item.status === 'skipped').length,
-        },
-      };
-    });
+      setTodayData((prev) => (prev ? patchIntakeStatus(prev, intakeId, status) : prev));
 
-    try {
-      await confirmMedicationIntake(intakeId, { status });
-    } catch {
-      queueMedicationIntake({ intake_id: intakeId, status });
-    } finally {
-      setUpdatingIntakeId(null);
-    }
-  }, []);
+      try {
+        await confirmIntake(intakeId, status);
+      } catch {
+        setTodayData((prev) => (prev ? patchIntakeStatus(prev, intakeId, 'pending') : prev));
+        queueMedicationIntake({
+          type: 'intake_confirm',
+          intakeId,
+          status,
+          timestamp: new Date().toISOString(),
+        });
+        showToast('Saved offline. Will sync when connection is restored.');
+      } finally {
+        setUpdatingIntakeId(null);
+      }
+    },
+    [showToast]
+  );
 
   const toggleSlot = useCallback((slot: SlotKey) => {
     setExpandedSlots((prev) => ({ ...prev, [slot]: !prev[slot] }));
@@ -195,7 +259,6 @@ export default function MedicationsScreen() {
     (medicationId?: string) => {
       if (!medicationId) return;
       setSelectedMedication(medicationsById[medicationId] ?? null);
-      setShowMedicationDetail(true);
     },
     [medicationsById]
   );
@@ -223,6 +286,12 @@ export default function MedicationsScreen() {
           <Text style={[styles.tabText, activeTab === 'my-medications' && styles.tabTextActive]}>My Medications</Text>
         </TouchableOpacity>
       </View>
+
+      {toastMessage ? (
+        <View style={styles.toast}>
+          <Text style={styles.toastText}>{toastMessage}</Text>
+        </View>
+      ) : null}
 
       {loading ? (
         <ActivityIndicator color={E.colors.primary} style={styles.loader} size="large" />
@@ -275,7 +344,9 @@ export default function MedicationsScreen() {
                     <TouchableOpacity style={styles.sectionHeader} onPress={() => toggleSlot(slot)}>
                       <Text style={styles.sectionTitle}>{SLOT_META[slot].label}</Text>
                       <View style={styles.sectionRight}>
-                        <Text style={styles.badgeText}>{taken} / {items.length} taken</Text>
+                        <Text style={styles.badgeText}>
+                          {taken} / {items.length} taken
+                        </Text>
                         <Text style={styles.chevron}>{expanded ? '⌃' : '⌄'}</Text>
                       </View>
                     </TouchableOpacity>
@@ -306,30 +377,30 @@ export default function MedicationsScreen() {
               {myMedications.map((med) => {
                 const medicationId = med.id ?? med._id;
                 return (
-                <TouchableOpacity
-                  key={String(medicationId)}
-                  style={styles.medicationCard}
-                  onPress={() => openMedicationDetail(medicationId)}
-                >
-                  <Text style={styles.medicationName}>{med.trade_name}</Text>
-                  <Text style={styles.medicationSubline}>
-                    {med.active_substance} • {med.strength} • {med.form}
-                  </Text>
+                  <TouchableOpacity
+                    key={String(medicationId)}
+                    style={styles.medicationCard}
+                    onPress={() => openMedicationDetail(medicationId)}
+                  >
+                    <Text style={styles.medicationName}>{med.trade_name}</Text>
+                    <Text style={styles.medicationSubline}>
+                      {med.active_substance} • {med.strength} • {med.form}
+                    </Text>
 
-                  <View style={styles.pillsRow}>
-                    <View style={styles.dosageBadge}>
-                      <Text style={styles.dosageBadgeText}>{med.dosage_label ?? '—'}</Text>
+                    <View style={styles.pillsRow}>
+                      <View style={styles.dosageBadge}>
+                        <Text style={styles.dosageBadgeText}>{med.dosage_label ?? '—'}</Text>
+                      </View>
+                      <View style={styles.coverageBadge}>
+                        <Text style={styles.coverageBadgeText}>{coverageLabel(med.coverage)}</Text>
+                      </View>
                     </View>
-                    <View style={styles.coverageBadge}>
-                      <Text style={styles.coverageBadgeText}>{coverageLabel(med.coverage)}</Text>
-                    </View>
-                  </View>
 
-                  <Text style={styles.dateLine}>
-                    Start: {normalizeDate(med.start_date)} •{' '}
-                    {med.is_chronic ? 'Dauermedikation' : `Ende: ${normalizeDate(med.end_date)}`}
-                  </Text>
-                </TouchableOpacity>
+                    <Text style={styles.dateLine}>
+                      Start: {normalizeDate(med.start_date)} •{' '}
+                      {med.is_chronic ? 'Dauermedikation' : `Ende: ${normalizeDate(med.end_date)}`}
+                    </Text>
+                  </TouchableOpacity>
                 );
               })}
 
@@ -343,11 +414,7 @@ export default function MedicationsScreen() {
         </ScrollView>
       )}
 
-      <MedicationDetailModal
-        visible={showMedicationDetail}
-        medication={selectedMedication}
-        onClose={() => setShowMedicationDetail(false)}
-      />
+      <MedicationDetailModal medication={selectedMedication} onClose={() => setSelectedMedication(null)} />
     </SafeAreaView>
   );
 }
@@ -386,6 +453,20 @@ const styles = StyleSheet.create({
   },
   tabTextActive: {
     color: E.colors.textInverse,
+  },
+  toast: {
+    marginTop: 8,
+    marginHorizontal: E.padSm,
+    borderRadius: E.radiusSm,
+    backgroundColor: E.colors.primaryDark,
+    paddingHorizontal: E.padSm,
+    paddingVertical: 8,
+  },
+  toastText: {
+    ...ET.small,
+    color: E.colors.textInverse,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   scroll: {
     flex: 1,

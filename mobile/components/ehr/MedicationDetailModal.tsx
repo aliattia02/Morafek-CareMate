@@ -1,11 +1,10 @@
-import React from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Animated, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { E, ET } from '@/constants/elderlyTheme';
-import type { MedicationRecord } from '@/services/api/medications';
+import type { Medication } from '@/services/api/medications';
 
 interface MedicationDetailModalProps {
-  visible: boolean;
-  medication: MedicationRecord | null;
+  medication: Medication | null;
   onClose: () => void;
 }
 
@@ -19,34 +18,59 @@ function Field({ label, value }: { label: string; value?: string | number | null
   );
 }
 
-export default function MedicationDetailModal({ visible, medication, onClose }: MedicationDetailModalProps) {
-  return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <View style={styles.sheet}>
-          <View style={styles.sheetHeader}>
-            <Text style={styles.title}>Medication details</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Text style={styles.closeText}>✕</Text>
-            </TouchableOpacity>
-          </View>
+export default function MedicationDetailModal({ medication, onClose }: MedicationDetailModalProps) {
+  const slide = useRef(new Animated.Value(320)).current;
 
-          {!medication ? (
-            <Text style={styles.empty}>Medication data not available.</Text>
-          ) : (
-            <ScrollView contentContainerStyle={styles.content}>
-              <Field label="Name" value={medication.trade_name} />
-              <Field label="Active substance" value={medication.active_substance} />
-              <Field label="Strength" value={medication.strength} />
-              <Field label="Form" value={medication.form} />
-              <Field label="PZN" value={medication.pzn} />
-              <Field label="Dosage" value={medication.dosage_label} />
-              <Field label="Start date" value={medication.start_date} />
-              <Field label="End date" value={medication.end_date} />
-              <Field label="Note" value={medication.dosage_note} />
-            </ScrollView>
+  useEffect(() => {
+    if (!medication) return;
+    slide.setValue(320);
+    Animated.timing(slide, {
+      toValue: 0,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [medication, slide]);
+
+  return (
+    <Modal visible={Boolean(medication)} transparent animationType="none" onRequestClose={onClose}>
+      <View style={styles.backdrop}>
+        <TouchableOpacity style={styles.dismissLayer} activeOpacity={1} onPress={onClose} />
+        <Animated.View style={[styles.sheet, { transform: [{ translateY: slide }] }]}>
+          {!medication ? null : (
+            <>
+              <View style={styles.sheetHeader}>
+                <Text style={styles.tradeName}>{medication.trade_name}</Text>
+                <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                  <Text style={styles.closeText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView contentContainerStyle={styles.content}>
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Drug information</Text>
+                  <Field label="Active substance" value={medication.active_substance} />
+                  <Field label="Form" value={medication.form} />
+                  <Field label="Strength" value={medication.strength} />
+                  <Field label="PZN" value={medication.pzn} />
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Dosage</Text>
+                  <Field label="Dosage label" value={medication.dosage_label} />
+                  <Field label="Unit" value={medication.dosage_unit} />
+                  <Field label="Note" value={medication.dosage_note} />
+                </View>
+
+                <View style={styles.section}>
+                  <Text style={styles.sectionTitle}>Therapy period</Text>
+                  <Field label="Start date" value={medication.start_date} />
+                  <Field label="End date" value={medication.is_chronic ? 'Dauermedikation' : medication.end_date} />
+                  <Field label="Coverage" value={medication.coverage} />
+                </View>
+              </ScrollView>
+            </>
           )}
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -58,21 +82,28 @@ const styles = StyleSheet.create({
     backgroundColor: '#00000066',
     justifyContent: 'flex-end',
   },
+  dismissLayer: {
+    ...StyleSheet.absoluteFillObject,
+  },
   sheet: {
     backgroundColor: E.colors.surface,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '78%',
+    maxHeight: '82%',
     padding: E.pad,
+    ...E.shadow,
   },
   sheetHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: E.padSm,
+    gap: 8,
   },
-  title: {
+  tradeName: {
     ...ET.h3,
+    flex: 1,
+    fontWeight: '700',
   },
   closeButton: {
     width: 32,
@@ -87,24 +118,26 @@ const styles = StyleSheet.create({
   },
   content: {
     gap: 12,
-    paddingBottom: 24,
+    paddingBottom: 20,
   },
-  field: {
+  section: {
     borderWidth: 1,
     borderColor: E.colors.border,
     borderRadius: E.radiusSm,
     padding: E.padSm,
     backgroundColor: E.colors.bg,
+    gap: 8,
+  },
+  sectionTitle: {
+    ...ET.bodyBold,
+  },
+  field: {
+    gap: 2,
   },
   fieldLabel: {
     ...ET.label,
-    marginBottom: 4,
   },
   fieldValue: {
     ...ET.body,
-  },
-  empty: {
-    ...ET.body,
-    color: E.colors.textSecondary,
   },
 });
