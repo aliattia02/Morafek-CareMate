@@ -18,6 +18,26 @@ function Field({ label, value }: { label: string; value?: string | number | null
   );
 }
 
+function DosageSlotPill({
+  label,
+  amount,
+}: {
+  label: string;
+  amount: number;
+}) {
+  const active = amount > 0;
+  return (
+    <View style={[styles.dosePill, active ? styles.dosePillActive : styles.dosePillInactive]}>
+      <Text style={[styles.dosePillLabel, active ? styles.dosePillLabelActive : styles.dosePillLabelInactive]}>
+        {label}
+      </Text>
+      <Text style={[styles.dosePillValue, active ? styles.dosePillValueActive : styles.dosePillValueInactive]}>
+        {amount}
+      </Text>
+    </View>
+  );
+}
+
 export default function MedicationDetailModal({ medication, onClose }: MedicationDetailModalProps) {
   const slide = useRef(new Animated.Value(320)).current;
 
@@ -60,17 +80,30 @@ export default function MedicationDetailModal({ medication, onClose }: Medicatio
                 </View>
 
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Dosage</Text>
+                  <Text style={styles.sectionTitle}>Prescription</Text>
                   <Field label="Dosage label" value={medication.dosage_label} />
-                  <Field label="Unit" value={medication.dosage_unit} />
                   <Field label="Note" value={medication.dosage_note} />
+                  <Field label="Unit" value={medication.dosage_unit} />
+                  <Field label="Coverage" value={medication.coverage} />
+                  <Field label="Start date" value={medication.start_date} />
+                  <Field label="End date" value={medication.is_chronic ? 'Dauermedikation' : medication.end_date} />
+
+                  <View style={styles.scheduleBlock}>
+                    <Text style={styles.scheduleTitle}>Dosage schedule (1-0-1-0)</Text>
+                    <View style={styles.scheduleRow}>
+                      <DosageSlotPill label="Mo" amount={medication.dosage_morning} />
+                      <DosageSlotPill label="Mi" amount={medication.dosage_noon} />
+                      <DosageSlotPill label="Ab" amount={medication.dosage_evening} />
+                      <DosageSlotPill label="Na" amount={medication.dosage_night} />
+                    </View>
+                  </View>
                 </View>
 
                 <View style={styles.section}>
-                  <Text style={styles.sectionTitle}>Therapy period</Text>
-                  <Field label="Start date" value={medication.start_date} />
-                  <Field label="End date" value={medication.is_chronic ? 'Dauermedikation' : medication.end_date} />
-                  <Field label="Coverage" value={medication.coverage} />
+                  <Text style={styles.sectionTitle}>Prescribing doctor</Text>
+                  <Field label="Doctor ID" value={medication.doctor_id ?? '—'} />
+                  <Field label="Visit ID" value={medication.visit_id ?? '—'} />
+                  <Field label="Prescription type" value={medication.aut_idem ? 'Aut-idem allowed' : 'Fixed brand'} />
                 </View>
               </ScrollView>
             </>
@@ -144,5 +177,53 @@ const styles = StyleSheet.create({
   },
   fieldValue: {
     ...ET.body,
+  },
+  scheduleBlock: {
+    marginTop: 4,
+    gap: 8,
+  },
+  scheduleTitle: {
+    ...ET.small,
+    color: E.colors.textSecondary,
+    fontWeight: '700',
+  },
+  scheduleRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dosePill: {
+    flex: 1,
+    borderRadius: E.radiusSm,
+    borderWidth: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    gap: 2,
+  },
+  dosePillActive: {
+    backgroundColor: E.colors.successLight,
+    borderColor: E.colors.success,
+  },
+  dosePillInactive: {
+    backgroundColor: E.colors.surfaceAlt,
+    borderColor: E.colors.border,
+  },
+  dosePillLabel: {
+    ...ET.caption,
+    fontWeight: '700',
+  },
+  dosePillLabelActive: {
+    color: E.colors.success,
+  },
+  dosePillLabelInactive: {
+    color: E.colors.textSecondary,
+  },
+  dosePillValue: {
+    ...ET.bodyBold,
+  },
+  dosePillValueActive: {
+    color: E.colors.success,
+  },
+  dosePillValueInactive: {
+    color: E.colors.textSecondary,
   },
 });
