@@ -19,23 +19,44 @@ else {
 
   const vitals: any[] = [];
   const pendingVitals: any[] = [];
+  const pendingMedicationIntakes: any[] = [];
 
   db = {
     execSync: () => {},
     runSync: (query: string, params: any[]) => {
       if (query.includes('pending_vitals')) {
-        pendingVitals.push({
-          local_id: params[0],
-          systolic: params[1],
-          diastolic: params[2],
-          pulse: params[3],
-          weight_kg: params[4],
-          notes: params[5],
-          created_at: params[6],
-        });
+        if (query.includes('DELETE')) {
+          const idx = pendingVitals.findIndex((v) => v.local_id === params[0]);
+          if (idx >= 0) pendingVitals.splice(idx, 1);
+        } else {
+          pendingVitals.push({
+            local_id: params[0],
+            systolic: params[1],
+            diastolic: params[2],
+            pulse: params[3],
+            weight_kg: params[4],
+            notes: params[5],
+            created_at: params[6],
+          });
+        }
+      }
+      if (query.includes('pending_medication_intakes')) {
+        if (query.includes('DELETE')) {
+          const idx = pendingMedicationIntakes.findIndex((v) => v.local_id === params[0]);
+          if (idx >= 0) pendingMedicationIntakes.splice(idx, 1);
+        } else {
+          pendingMedicationIntakes.push({
+            local_id: params[0],
+            intake_id: params[1],
+            status: params[2],
+            note: params[3],
+            created_at: params[4],
+          });
+        }
       }
     },
     getAllSync: (query: string) => {
+      if (query.includes('pending_medication_intakes')) return pendingMedicationIntakes;
       if (query.includes('pending_vitals')) return pendingVitals;
       if (query.includes('vitals')) return vitals;
       return [];
@@ -71,6 +92,13 @@ export function initDB() {
       pulse INTEGER,
       weight_kg REAL,
       notes TEXT,
+      created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS pending_medication_intakes (
+      local_id TEXT PRIMARY KEY,
+      intake_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      note TEXT,
       created_at TEXT
     );
   `);
@@ -137,6 +165,42 @@ export function getPendingVitals(): PendingVital[] {
 }
 
 export function deletePendingVital(localId: string) {
-  if (Platform.OS === 'web') return;
   db.runSync(`DELETE FROM pending_vitals WHERE local_id = ?`, [localId]);
+}
+
+export interface PendingMedicationIntake {
+  local_id: string;
+  intake_id: string;
+  status: 'taken' | 'skipped';
+  note: string | null;
+  created_at: string;
+}
+
+export function queueMedicationIntake(data: {
+  intake_id: string;
+  status: 'taken' | 'skipped';
+  note?: string;
+}): string {
+  const localId = `intake_${Date.now()}`;
+
+  db.runSync(
+    `INSERT INTO pending_medication_intakes VALUES (?,?,?,?,?)`,
+    [
+      localId,
+      data.intake_id,
+      data.status,
+      data.note ?? null,
+      new Date().toISOString(),
+    ]
+  );
+
+  return localId;
+}
+
+export function getPendingMedicationIntakes(): PendingMedicationIntake[] {
+  return db.getAllSync(`SELECT * FROM pending_medication_intakes ORDER BY created_at ASC`);
+}
+
+export function deletePendingMedicationIntake(localId: string) {
+  db.runSync(`DELETE FROM pending_medication_intakes WHERE local_id = ?`, [localId]);
 }

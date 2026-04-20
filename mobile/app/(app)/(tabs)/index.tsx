@@ -236,6 +236,7 @@ export default function PatientHomeScreen() {
             { icon: '💬', title: 'Messages',     sub: 'Chat',      route: '/(app)/ehr/messages',  color: '#FEF3DC', accent: E.colors.accent     },
             { icon: '📁', title: 'My Documents', sub: 'Files',     route: '/(app)/ehr/documents', color: '#E6F5EE', accent: E.colors.success    },
             { icon: '🏋️', title: 'My Exercises', sub: 'Workouts',  route: '/(app)/ehr/exercises', color: '#F0F4F5', accent: E.colors.textSecondary },
+            { icon: '💊', title: 'My Medications', sub: 'Schedule', route: '/(app)/ehr/medications', color: '#F3ECFE', accent: '#7D3CB5' },
           ].map((tile) => (
             <TouchableOpacity
               key={tile.route}
