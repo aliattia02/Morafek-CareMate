@@ -34,7 +34,9 @@ export default function AdherenceHeatmap({ days, overallRate }: AdherenceHeatmap
         ))}
       </View>
 
-      <Text style={styles.caption}>Each square is one day (left to right)</Text>
+      <Text style={styles.caption}>
+        Each square represents one day of medication adherence, ordered left to right.
+      </Text>
     </View>
   );
 }

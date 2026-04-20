@@ -184,6 +184,7 @@ export function getPendingVitals(): PendingVital[] {
 }
 
 export function deletePendingVital(localId: string) {
+  if (Platform.OS === 'web') return;
   db.runSync(`DELETE FROM pending_vitals WHERE local_id = ?`, [localId]);
 }
 
@@ -200,7 +201,7 @@ export function queueMedicationIntake(data: {
   status: 'taken' | 'skipped';
   note?: string;
 }): string {
-  const localId = `intake_${Date.now()}`;
+  const localId = `intake_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 
   db.runSync(
     `INSERT INTO pending_medication_intakes VALUES (?,?,?,?,?)`,
@@ -221,6 +222,7 @@ export function getPendingMedicationIntakes(): PendingMedicationIntake[] {
 }
 
 export function deletePendingMedicationIntake(localId: string) {
+  if (Platform.OS === 'web') return;
   db.runSync(`DELETE FROM pending_medication_intakes WHERE local_id = ?`, [localId]);
 }
 
