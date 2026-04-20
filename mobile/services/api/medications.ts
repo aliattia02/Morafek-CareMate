@@ -102,6 +102,40 @@ export interface TodayMedicationResponse {
   };
 }
 
+export interface MedicationAdherenceDay {
+  date: string;
+  total: number;
+  taken: number;
+  skipped: number;
+  pending: number;
+  rate: number;
+}
+
+export interface MedicationAdherenceResponse {
+  days: MedicationAdherenceDay[];
+  overall_rate: number;
+}
+
+export interface MedicationHistoryItem {
+  id?: string;
+  intake_id?: string;
+  medication_id?: string;
+  medication_name?: string;
+  date: string;
+  slot: 'morning' | 'noon' | 'evening' | 'night';
+  status: 'pending' | 'taken' | 'skipped';
+  note?: string;
+  confirmed_at?: string | null;
+}
+
+export interface MedicationHistoryResponse {
+  items: MedicationHistoryItem[];
+  page?: number;
+  per_page?: number;
+  total?: number;
+  total_pages?: number;
+}
+
 export async function createDoctorMedication(
   patientId: string,
   payload: CreateDoctorMedicationRequest
@@ -225,12 +259,14 @@ export async function confirmIntake(
   return confirmMedicationIntake(intakeId, { status, note });
 }
 
-export async function getMedicationAdherence(params?: { period_days?: number }): Promise<Record<string, unknown>> {
-  const response = await apiClient.get<Record<string, unknown>>(API.MEDICATIONS.ADHERENCE, { params });
+export async function getMedicationAdherence(
+  params?: { period_days?: number }
+): Promise<MedicationAdherenceResponse> {
+  const response = await apiClient.get<MedicationAdherenceResponse>(API.MEDICATIONS.ADHERENCE, { params });
   return response.data;
 }
 
-export async function getAdherence(): Promise<Record<string, unknown>> {
+export async function getAdherence(): Promise<MedicationAdherenceResponse> {
   return getMedicationAdherence();
 }
 
@@ -238,7 +274,7 @@ export async function getMedicationHistory(
   pageOrParams?: number | { page?: number; per_page?: number },
   perPage?: number,
   medicationId?: string
-): Promise<Record<string, unknown>> {
+): Promise<MedicationHistoryResponse> {
   const params =
     typeof pageOrParams === 'object'
       ? pageOrParams
@@ -248,7 +284,7 @@ export async function getMedicationHistory(
           medication_id: medicationId,
         };
 
-  const response = await apiClient.get<Record<string, unknown>>(API.MEDICATIONS.HISTORY, { params });
+  const response = await apiClient.get<MedicationHistoryResponse>(API.MEDICATIONS.HISTORY, { params });
   return response.data;
 }
 

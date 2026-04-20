@@ -17,10 +17,12 @@ import {
   Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/store/auth.store';
 import { E, ET } from '@/constants/elderlyTheme';
 import { getMyVitals, getMyVisits, type VitalResponse, type VisitResponse } from '@/services/api/ehr';
+import { getTodayMedications } from '@/services/api/medications';
 import { initDB, cacheVitals, getCachedVitals } from '@/services/offline/db';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -48,6 +50,7 @@ export default function PatientHomeScreen() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [usingCache, setUsingCache] = useState(false);
+  const [pendingMedicationCount, setPendingMedicationCount] = useState(0);
 
   // Redirect doctors immediately
   useEffect(() => {
@@ -69,9 +72,14 @@ export default function PatientHomeScreen() {
     try {
       setError(null);
       setUsingCache(false);
-      const [vitals, visits] = await Promise.all([getMyVitals(1), getMyVisits()]);
+      const [vitals, visits, todaySchedule] = await Promise.all([
+        getMyVitals(1),
+        getMyVisits(),
+        getTodayMedications().catch(() => null),
+      ]);
       setVital(vitals[0] ?? null);
       setVisit(visits[0] ?? null);
+      setPendingMedicationCount(todaySchedule?.summary.pending ?? 0);
       // Cache the latest vitals for offline use
       if (vitals.length > 0) {
         cacheVitals(vitals);
@@ -236,15 +244,33 @@ export default function PatientHomeScreen() {
             { icon: '💬', title: 'Messages',     sub: 'Chat',      route: '/(app)/ehr/messages',  color: '#FEF3DC', accent: E.colors.accent     },
             { icon: '📁', title: 'My Documents', sub: 'Files',     route: '/(app)/ehr/documents', color: '#E6F5EE', accent: E.colors.success    },
             { icon: '🏋️', title: 'My Exercises', sub: 'Workouts',  route: '/(app)/ehr/exercises', color: '#F0F4F5', accent: E.colors.textSecondary },
+            {
+              icon: 'pill',
+              title: 'Meine Medikamente',
+              sub: 'Heute',
+              route: '/(app)/ehr/medications',
+              color: '#F3ECFE',
+              accent: '#7D3CB5',
+              key: 'medications',
+            },
           ].map((tile) => (
             <TouchableOpacity
               key={tile.route}
               style={[styles.tile, { backgroundColor: tile.color }]}
               onPress={() => router.push(tile.route as any)}
             >
-              <Text style={styles.tileIcon}>{tile.icon}</Text>
+              {tile.icon === 'pill' ? (
+                <Ionicons name="medkit-outline" size={28} color={tile.accent} style={styles.tileIconVector} />
+              ) : (
+                <Text style={styles.tileIcon}>{tile.icon}</Text>
+              )}
               <Text style={styles.tileTitle}>{tile.title}</Text>
               <Text style={[styles.tileSub, { color: tile.accent }]}>{tile.sub}</Text>
+              {tile.key === 'medications' && pendingMedicationCount > 0 ? (
+                <View style={styles.tileBadge}>
+                  <Text style={styles.tileBadgeText}>{pendingMedicationCount}</Text>
+                </View>
+              ) : null}
             </TouchableOpacity>
           ))}
         </View>
@@ -460,6 +486,9 @@ const styles = StyleSheet.create({
     fontSize: 28,
     marginBottom: 6,
   },
+  tileIconVector: {
+    marginBottom: 6,
+  },
   tileTitle: {
     ...ET.bodyBold,
     marginBottom: 2,
@@ -467,6 +496,23 @@ const styles = StyleSheet.create({
   tileSub: {
     ...ET.small,
     fontWeight: '600',
+  },
+  tileBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: E.colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  tileBadgeText: {
+    ...ET.caption,
+    color: E.colors.textInverse,
+    fontWeight: '700',
   },
   // Sensors card
   sensorsCard: {

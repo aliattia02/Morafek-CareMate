@@ -16,9 +16,10 @@
  */
 
 import React, { useEffect } from 'react';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import * as Notifications from 'expo-notifications';
 
 // Store
 import { useAuthStore } from '@/store/auth.store';
@@ -27,12 +28,38 @@ import { useAuthStore } from '@/store/auth.store';
 import { colors } from '@/constants/theme';
 
 export default function RootLayout() {
+  const router = useRouter();
   const { checkAuth } = useAuthStore();
 
   // Check authentication status on app start
   useEffect(() => {
     checkAuth();
   }, []);
+
+  useEffect(() => {
+    const navigateToNotificationTarget = (data: Record<string, unknown> | undefined) => {
+      if (!data) return;
+      if (data.screen === 'medications') {
+        router.push('/(app)/ehr/medications');
+      }
+    };
+
+    const subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+      navigateToNotificationTarget(response.notification.request.content.data as Record<string, unknown> | undefined);
+    });
+
+    Notifications.getLastNotificationResponseAsync()
+      .then((response) => {
+        navigateToNotificationTarget(response?.notification.request.content.data as Record<string, unknown> | undefined);
+      })
+      .catch(() => {
+        // no-op
+      });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [router]);
 
   return (
     <SafeAreaProvider>
