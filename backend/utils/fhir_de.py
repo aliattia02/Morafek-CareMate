@@ -909,3 +909,117 @@ def validate_kbv_medication_request_resource(resource: dict) -> None:
         raise ValueError("MedicationRequest.subject reference is required.")
     if not resource.get("medicationReference", {}).get("reference"):
         raise ValueError("MedicationRequest.medicationReference is required.")
+
+
+_KNOWN_DARREICHUNGSFORM_CODES = {
+    "TAB", "KAP", "RET", "PFL", "CRE", "SAL", "GEL", "LOT",
+    "AER", "SPR", "TRO", "LIO", "SIR", "SUS", "EMU", "SOL",
+    "INJ", "INF", "PUL", "GRA", "SUP", "ZAE", "VAG", "KTR",
+}
+
+
+def _is_valid_iso8601(value: Any, *, date_only_allowed: bool) -> bool:
+    if value in (None, ""):
+        return False
+    raw = str(value).strip()
+    if not raw:
+        return False
+    if date_only_allowed and re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return True
+    if not date_only_allowed and re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return False
+    try:
+        datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return True
+    except ValueError:
+        return False
+
+
+def validate_medication_bundle_entries(entries: list) -> dict:
+    errors: list[dict[str, str]] = []
+    counts = {"Medication": 0, "MedicationRequest": 0, "MedicationStatement": 0}
+
+    def add_error(resource: dict, field: str, issue: str) -> None:
+        errors.append({
+            "resource_id": str(resource.get("id") or "unknown"),
+            "field": field,
+            "issue": issue,
+        })
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource", {})
+        if not isinstance(resource, dict):
+            continue
+        resource_type = resource.get("resourceType")
+
+        if resource_type == "Medication":
+            counts["Medication"] += 1
+            if resource.get("resourceType") != "Medication":
+                add_error(resource, "resourceType", "must be Medication")
+
+            profiles = resource.get("meta", {}).get("profile", [])
+            if not isinstance(profiles, list) or not profiles or "KBV_PR_ERP_Medication_PZN" not in str(profiles[0]):
+                add_error(resource, "meta.profile[0]", "must contain KBV_PR_ERP_Medication_PZN")
+
+            coding = ((resource.get("code", {}) or {}).get("coding", []) or [{}])[0]
+            if coding.get("system") != "http://fhir.de/CodeSystem/ifa/pzn":
+                add_error(resource, "code.coding[0].system", "must be http://fhir.de/CodeSystem/ifa/pzn")
+            pzn_code = coding.get("code")
+            if not isinstance(pzn_code, str) or len(pzn_code) != 8:
+                add_error(resource, "code.coding[0].code", "must be an 8-character string")
+
+            form_coding = ((resource.get("form", {}) or {}).get("coding", []) or [{}])[0]
+            form_code = form_coding.get("code")
+            if form_code not in _KNOWN_DARREICHUNGSFORM_CODES:
+                add_error(resource, "form.coding[0].code", "must be in known Darreichungsform code set")
+
+            extensions = resource.get("extension", [])
+            extension_urls = [
+                str(ext.get("url", "")).lower()
+                for ext in extensions
+                if isinstance(ext, dict)
+            ]
+            if not any("normgroesse" in url or "norm-size" in url for url in extension_urls):
+                add_error(resource, "extension", "must contain normgroesse extension")
+            if not any("category" in url for url in extension_urls):
+                add_error(resource, "extension", "must contain Category extension")
+            if not any("vaccine" in url for url in extension_urls):
+                add_error(resource, "extension", "must contain Vaccine extension")
+
+        if resource_type == "MedicationRequest":
+            counts["MedicationRequest"] += 1
+            if resource.get("resourceType") != "MedicationRequest":
+                add_error(resource, "resourceType", "must be MedicationRequest")
+            if resource.get("status") not in {"active", "completed", "stopped"}:
+                add_error(resource, "status", "must be one of active/completed/stopped")
+            if resource.get("intent") != "order":
+                add_error(resource, "intent", "must be order")
+            if not str((resource.get("medicationReference", {}) or {}).get("reference", "")).startswith("Medication/"):
+                add_error(resource, "medicationReference.reference", "must start with Medication/")
+            if not str((resource.get("subject", {}) or {}).get("reference", "")).startswith("Patient/"):
+                add_error(resource, "subject.reference", "must start with Patient/")
+            if not _is_valid_iso8601(resource.get("authoredOn"), date_only_allowed=True):
+                add_error(resource, "authoredOn", "must be valid ISO 8601 date string")
+            dosage_instruction = resource.get("dosageInstruction")
+            if not isinstance(dosage_instruction, list) or not dosage_instruction:
+                add_error(resource, "dosageInstruction", "must be a non-empty list")
+            substitution_allowed = ((resource.get("substitution", {}) or {}).get("allowedBoolean", None))
+            if not isinstance(substitution_allowed, bool):
+                add_error(resource, "substitution.allowedBoolean", "must be a boolean")
+
+        if resource_type == "MedicationStatement":
+            counts["MedicationStatement"] += 1
+            if resource.get("resourceType") != "MedicationStatement":
+                add_error(resource, "resourceType", "must be MedicationStatement")
+            if resource.get("status") not in {"completed", "not-taken", "intended", "in-progress"}:
+                add_error(resource, "status", "must be one of completed/not-taken/intended/in-progress")
+            if not str((resource.get("medicationReference", {}) or {}).get("reference", "")).startswith("Medication/"):
+                add_error(resource, "medicationReference.reference", "must start with Medication/")
+            if not str((resource.get("subject", {}) or {}).get("reference", "")).startswith("Patient/"):
+                add_error(resource, "subject.reference", "must start with Patient/")
+            if not _is_valid_iso8601(resource.get("effectiveDateTime"), date_only_allowed=False):
+                add_error(resource, "effectiveDateTime", "must be valid ISO 8601 datetime string")
+
+    return {"valid": len(errors) == 0, "errors": errors, "counts": counts}

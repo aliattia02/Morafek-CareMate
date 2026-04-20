@@ -28,7 +28,7 @@ metadata_bp = Blueprint("metadata", __name__)
 
 # ── Bump this whenever you add/remove supported resources or operations ──
 MORAFEK_FHIR_VERSION     = "4.0.1"
-MORAFEK_SERVER_VERSION   = "1.0.0"
+MORAFEK_SERVER_VERSION   = "1.1.0"
 MORAFEK_PUBLISHER        = "Morafek CareMate"
 MORAFEK_BASE_URL         = "https://morafek-caremate.onrender.com/fhir"
 
@@ -216,57 +216,40 @@ def _build_capability_statement() -> dict:
                 {
                     "type": "Medication",
                     "profile": _KBV_ERP_MED,
-                    "supportedProfile": [_KBV_ERP_MED],
-                    "documentation": (
-                        "Medication master data aligned with KBV eRezept Medication "
-                        "PZN profile. PZN coded via IFA code system."
-                    ),
                     "interaction": [
                         {"code": "read"},
-                        {"code": "search-type"},
                     ],
-                    "searchParam": [
-                        {"name": "code",    "type": "token",     "documentation": "PZN medication code"},
-                        {"name": "status",  "type": "token",     "documentation": "Medication status"},
-                    ],
+                    "versioning": "no-version",
                 },
 
                 # ── MedicationRequest ─────────────────────────────────────────
                 {
                     "type": "MedicationRequest",
                     "profile": _KBV_ERP_RX,
-                    "supportedProfile": [_KBV_ERP_RX],
-                    "documentation": (
-                        "Prescription orders aligned with KBV eRezept prescription "
-                        "profile and linked to Medication resources."
-                    ),
                     "interaction": [
                         {"code": "read"},
                         {"code": "search-type"},
                     ],
                     "searchParam": [
-                        {"name": "subject",    "type": "reference", "documentation": "Patient of the prescription"},
-                        {"name": "intent",     "type": "token",     "documentation": "MedicationRequest intent"},
-                        {"name": "status",     "type": "token",     "documentation": "MedicationRequest status"},
+                        {"name": "patient", "type": "reference"},
+                        {"name": "status", "type": "token"},
                     ],
+                    "versioning": "no-version",
                 },
 
                 # ── MedicationStatement ───────────────────────────────────────
                 {
                     "type": "MedicationStatement",
-                    "documentation": (
-                        "Patient medication intake/adherence statements with statuses "
-                        "mapped to completed, not-taken, or in-progress."
-                    ),
+                    "profile": "http://hl7.org/fhir/StructureDefinition/MedicationStatement",
                     "interaction": [
                         {"code": "read"},
                         {"code": "search-type"},
                     ],
                     "searchParam": [
-                        {"name": "subject",    "type": "reference", "documentation": "Patient of the statement"},
-                        {"name": "status",     "type": "token",     "documentation": "completed | not-taken | in-progress"},
-                        {"name": "effective",  "type": "date",      "documentation": "Date of medication statement"},
+                        {"name": "patient", "type": "reference"},
+                        {"name": "status", "type": "token"},
                     ],
+                    "versioning": "no-version",
                 },
 
                 # ── Bundle ───────────────────────────────────────────────────

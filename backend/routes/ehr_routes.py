@@ -14,6 +14,7 @@ from utils.fhir_de import (
     build_medication_statement,
     validate_kbv_medication_resource,
     validate_kbv_medication_request_resource,
+    validate_medication_bundle_entries,
 )
 from config import mongo
 import cloudinary.uploader
@@ -1826,6 +1827,14 @@ def fhir_export(current_user):
                 'fullUrl': f'urn:uuid:{statement["id"]}',
                 'resource': statement,
             })
+
+    med_validation = validate_medication_bundle_entries(entries)
+    if not med_validation.get('valid', True):
+        logger.warning(
+            'Medication structural validation failed (%d errors): %s',
+            len(med_validation.get('errors', [])),
+            med_validation.get('errors', []),
+        )
 
     bundle = build_document_bundle(patient_id, entries, author_ref=author_ref)
     logger.info(
