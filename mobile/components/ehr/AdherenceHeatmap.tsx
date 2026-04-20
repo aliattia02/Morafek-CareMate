@@ -176,7 +176,7 @@ export default function AdherenceHeatmap({ days, overallRate }: AdherenceHeatmap
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Adherence (28 Tage)</Text>
+      <Text style={styles.title}>Adherence (28 Days)</Text>
 
       {loading ? (
         <View style={styles.loadingWrapper}>
@@ -223,9 +223,8 @@ export default function AdherenceHeatmap({ days, overallRate }: AdherenceHeatmap
       ) : null}
 
       <View style={styles.overallWrapper}>
-        <Text style={styles.overallLabel}>Overall adherence</Text>
         <Text style={[styles.overallValue, { color: overallColor(remoteOverallRate) }]}>
-          {Math.round(remoteOverallRate * 100)}%
+          Overall adherence: {Math.round(remoteOverallRate * 100)}%
         </Text>
       </View>
     </View>
@@ -314,11 +313,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
   },
-  overallLabel: {
-    ...ET.body,
-    color: E.colors.textSecondary,
-  },
   overallValue: {
-    ...ET.display,
+    ...ET.h2,
+    fontWeight: '700',
   },
 });
