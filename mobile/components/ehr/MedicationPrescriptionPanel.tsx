@@ -197,7 +197,7 @@ export default function MedicationPrescriptionPanel({
 
   return (
     <View style={styles.container}>
-      <Text style={styles.panelTitle}>Add medication</Text>
+      <Text style={styles.panelTitle}>Medikation hinzufügen</Text>
 
       <View style={styles.searchWrapper}>
         <PZNSearchInput onSelect={applyPZNSelection} disabled={saving} />
@@ -240,15 +240,15 @@ export default function MedicationPrescriptionPanel({
       />
 
       <Input
-        label="Start date"
+        label="Startdatum"
         value={currentStartDate}
         onChangeText={setCurrentStartDate}
-        placeholder="YYYY-MM-DD"
+        placeholder="JJJJ-MM-TT"
         editable={!saving}
       />
 
       <Button
-        title="Add to prescription list"
+        title="Zur Verordnungsliste hinzufügen"
         onPress={addCurrentToList}
         disabled={!canAddCurrent || saving}
         fullWidth
@@ -258,7 +258,7 @@ export default function MedicationPrescriptionPanel({
 
       {prescriptionList.length > 0 && (
         <View style={styles.listSection}>
-          <Text style={styles.sectionTitle}>Prescriptions in this visit</Text>
+          <Text style={styles.sectionTitle}>Verordnungen in diesem Besuch</Text>
 
           {prescriptionList.map((item) => {
             const doseLabel = buildDosageLabel({
@@ -295,7 +295,7 @@ export default function MedicationPrescriptionPanel({
           ) : null}
 
           <Button
-            title={saving ? 'Saving…' : `Save all${unsavedCount > 0 ? ` (${unsavedCount})` : ''}`}
+            title={saving ? 'Speichern…' : `Alle speichern${unsavedCount > 0 ? ` (${unsavedCount})` : ''}`}
             onPress={saveAll}
             loading={saving}
             disabled={saving || unsavedCount === 0 || !visitId}
