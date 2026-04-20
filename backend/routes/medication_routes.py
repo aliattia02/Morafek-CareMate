@@ -9,7 +9,8 @@ from werkzeug.local import LocalProxy
 from routes.doctor_routes import check_doctor_patient_access
 from utils.auth import token_required
 from utils.error_handler import api_error_handler
-from utils.fhir_de import build_medication_request
+# build_medication_request is imported lazily inside read_fhir_medication_requests
+# to avoid breaking blueprint registration if fhir_de.py is not yet fully implemented.
 
 
 medication_routes = Blueprint("medication_routes", __name__)
@@ -562,6 +563,8 @@ def read_fhir_medication_requests(current_user):
     query: dict = {"patient_id": patient_id}
     if is_active_filter is not None:
         query["is_active"] = is_active_filter
+
+    from utils.fhir_de import build_medication_request  # lazy — Session 4 dependency
 
     medication_docs = list(medications_col.find(query))
     resources = [build_medication_request({**doc, "patient_id": patient_id}) for doc in medication_docs]
