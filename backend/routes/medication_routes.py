@@ -350,14 +350,90 @@ def list_patient_medications(current_user, patient_id):
 @token_required
 @api_error_handler
 def update_medication(current_user, patient_id, medication_id):
-    return _not_implemented("update_medication")
+    if current_user.get("user_type") != "doctor":
+        return jsonify({"error": "Unauthorized"}), 403
+
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err if isinstance(err, dict) else {"error": err}), code or 403
+
+    try:
+        medication_obj_id = ObjectId(medication_id)
+    except (InvalidId, TypeError):
+        return jsonify({"error": "Invalid medication_id"}), 400
+
+    data = request.get_json() or {}
+
+    updates = {}
+    dosage_fields = ("dosage_morning", "dosage_noon", "dosage_evening", "dosage_night")
+    for field in dosage_fields:
+        if field in data:
+            value = _parse_required_int(data, field)
+            if value is None:
+                return jsonify({"error": f"{field} must be an integer >= 0"}), 400
+            updates[field] = value
+
+    if "dosage_unit" in data:
+        dosage_unit = _parse_required_string(data, "dosage_unit")
+        if dosage_unit is None:
+            return jsonify({"error": "dosage_unit must be a non-empty string"}), 400
+        if dosage_unit not in {"Tablette", "Kapsel", "ml", "IE", "Hub", "Tropfen"}:
+            return jsonify({"error": "dosage_unit must be one of: Tablette, Kapsel, ml, IE, Hub, Tropfen"}), 400
+        updates["dosage_unit"] = dosage_unit
+
+    if "dosage_note" in data:
+        note_raw = data.get("dosage_note")
+        updates["dosage_note"] = str(note_raw).strip() if note_raw not in (None, "") else ""
+
+    if "is_active" in data:
+        is_active = data.get("is_active")
+        if not isinstance(is_active, bool):
+            return jsonify({"error": "is_active must be boolean"}), 400
+        updates["is_active"] = is_active
+
+    if not updates:
+        return jsonify({"error": "No updatable fields provided"}), 400
+
+    updated = medications_col.find_one_and_update(
+        {"_id": medication_obj_id, "patient_id": patient_id},
+        {"$set": updates},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:
+        return jsonify({"error": "Medication not found"}), 404
+
+    serialized = _serialize_medication_doc(updated)
+    serialized["dosage_label"] = _dosage_label(updated)
+    return jsonify(serialized), 200
 
 
 @medication_routes.route("/doctor/patient/<patient_id>/<medication_id>", methods=["DELETE"])
 @token_required
 @api_error_handler
 def deactivate_medication(current_user, patient_id, medication_id):
-    return _not_implemented("deactivate_medication")
+    if current_user.get("user_type") != "doctor":
+        return jsonify({"error": "Unauthorized"}), 403
+
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err if isinstance(err, dict) else {"error": err}), code or 403
+
+    try:
+        medication_obj_id = ObjectId(medication_id)
+    except (InvalidId, TypeError):
+        return jsonify({"error": "Invalid medication_id"}), 400
+
+    updated = medications_col.find_one_and_update(
+        {"_id": medication_obj_id, "patient_id": patient_id},
+        {"$set": {"is_active": False}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:
+        return jsonify({"error": "Medication not found"}), 404
+
+    serialized = _serialize_medication_doc(updated)
+    serialized["dosage_label"] = _dosage_label(updated)
+    return jsonify({"message": "Medication deactivated", "medication": serialized}), 200
 
 
 @medication_routes.route("/patient", methods=["GET"])
