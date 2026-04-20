@@ -21,6 +21,7 @@ import cloudinary.uploader
 import logging
 
 logger = logging.getLogger(__name__)
+MEDICATION_INTAKE_LOOKBACK_DAYS = 90
 
 ehr_routes = Blueprint('ehr_routes', __name__)
 
@@ -1790,7 +1791,9 @@ def fhir_export(current_user):
     # ── Medications — KBV Medication + MedicationRequest + MedicationStatement ─
     medication_docs = list(mongo.db.medications.find({'patient_id': patient_id, 'is_active': True}))
     medication_ids = [str(doc['_id']) for doc in medication_docs]
-    intake_cutoff_date = (datetime.now(timezone.utc) - timedelta(days=90)).strftime('%Y-%m-%d')
+    intake_cutoff_date = (
+        datetime.now(timezone.utc) - timedelta(days=MEDICATION_INTAKE_LOOKBACK_DAYS)
+    ).strftime('%Y-%m-%d')
     intake_docs = list(
         mongo.db.med_intakes.find({
             'patient_id': patient_id,

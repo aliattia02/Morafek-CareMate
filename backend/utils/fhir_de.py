@@ -711,6 +711,12 @@ _SLOT_DEFAULT_TIME = {
     "evening": "18:00:00",
     "night": "22:00:00",
 }
+_KBV_MEDICATION_CATEGORY_CODE = "00"
+_KBV_STATUS_CO_PAYMENT_CODE_MAP = {
+    "GKV": "0",
+    "PKV": "3",
+    "Selbstzahler": "2",
+}
 
 
 def _build_dosage_label(medication_doc: dict) -> str:
@@ -791,12 +797,18 @@ def build_medication_resource(med: dict) -> dict:
     pzn = str(med.get("pzn", "") or "").strip()
     if not pzn:
         raise ValueError(f"Medication PZN is required for KBV medication export (mongo_id={mongo_id}).")
+    if len(pzn) != 8 or not pzn.isdigit():
+        raise ValueError(f"Medication PZN must be an 8-digit string (mongo_id={mongo_id}).")
     trade_name = str(med.get("trade_name", "") or "").strip()
     active_substance = str(med.get("active_substance", "") or "").strip()
     form = str(med.get("form", "") or "").strip()
+    if not form:
+        raise ValueError(f"Medication form is required for KBV mapping (mongo_id={mongo_id}).")
     form_code = _KBV_DARREICHUNGSFORM_MAP.get(form.lower())
     strength = str(med.get("strength", "") or "").strip()
     norm_size = str(med.get("norm_size", "") or "").strip()
+    if not norm_size:
+        raise ValueError(f"Medication norm_size is required for KBV medication export (mongo_id={mongo_id}).")
 
     resource: dict[str, Any] = {
         "resourceType": "Medication",
@@ -815,12 +827,13 @@ def build_medication_resource(med: dict) -> dict:
 
     if form:
         form_coding: dict[str, Any] = {"text": form}
-        if form_code:
-            form_coding["coding"] = [{
-                "system": _KBV_DARREICHUNGSFORM_SYSTEM,
-                "code": form_code,
-                "display": form,
-            }]
+        if not form_code:
+            raise ValueError(f"Unsupported medication form for KBV mapping: '{form}' (mongo_id={mongo_id}).")
+        form_coding["coding"] = [{
+            "system": _KBV_DARREICHUNGSFORM_SYSTEM,
+            "code": form_code,
+            "display": form,
+        }]
         resource["form"] = form_coding
     if active_substance:
         ingredient: dict[str, Any] = {"itemCodeableConcept": {"text": active_substance}}
@@ -835,7 +848,7 @@ def build_medication_resource(med: dict) -> dict:
     extensions.append({
         "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Medication_Category",
         "valueCodeableConcept": {
-            "text": "00",
+            "text": _KBV_MEDICATION_CATEGORY_CODE,
         },
     })
     extensions.append({
@@ -863,7 +876,7 @@ def build_medication_request(med: dict) -> dict:
     dosage_note = str(med.get("dosage_note", "") or "").strip()
     timing_when = _build_timing_when(med)
     coverage = str(med.get("coverage", "") or "").strip()
-    co_payment_code = {"GKV": "0", "PKV": "3", "Selbstzahler": "2"}.get(coverage, "2")
+    co_payment_code = _KBV_STATUS_CO_PAYMENT_CODE_MAP.get(coverage, "2")
     resource: dict[str, Any] = {
         "resourceType": "MedicationRequest",
         "id": request_id,
