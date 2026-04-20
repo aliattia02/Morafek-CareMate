@@ -89,7 +89,9 @@ export default function MedicationDetailModal({ medication, onClose }: Medicatio
                   <Field label="End date" value={medication.is_chronic ? 'Dauermedikation' : medication.end_date} />
 
                   <View style={styles.scheduleBlock}>
-                    <Text style={styles.scheduleTitle}>Dosage schedule (1-0-1-0)</Text>
+                    <Text style={styles.scheduleTitle}>
+                      Dosage schedule ({medication.dosage_morning}-{medication.dosage_noon}-{medication.dosage_evening}-{medication.dosage_night})
+                    </Text>
                     <View style={styles.scheduleRow}>
                       <DosageSlotPill label="Mo" amount={medication.dosage_morning} />
                       <DosageSlotPill label="Mi" amount={medication.dosage_noon} />
