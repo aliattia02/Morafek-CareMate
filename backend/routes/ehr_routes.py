@@ -9,9 +9,9 @@ from utils.fhir_de import (
     build_observations_from_vitals_doc,
     build_document_bundle,
     build_isik_observation_vitals_fields,
-    build_kbv_medication_resource,
-    build_kbv_medication_request_resource,
-    build_medication_statement_resource,
+    build_medication_resource,
+    build_medication_request,
+    build_medication_statement,
     validate_kbv_medication_resource,
     validate_kbv_medication_request_resource,
 )
@@ -1803,11 +1803,10 @@ def fhir_export(current_user):
             intakes_by_medication.setdefault(med_id, []).append(intake_doc)
 
     for med_doc in medication_docs:
-        medication_resource = build_kbv_medication_resource(med_doc)
-        medication_request = build_kbv_medication_request_resource(
-            med_doc,
-            patient_id=patient_id,
-        )
+        med_with_patient = dict(med_doc)
+        med_with_patient['patient_id'] = patient_id
+        medication_resource = build_medication_resource(med_with_patient)
+        medication_request = build_medication_request(med_with_patient)
         validate_kbv_medication_resource(medication_resource)
         validate_kbv_medication_request_resource(medication_request)
 
@@ -1822,11 +1821,7 @@ def fhir_export(current_user):
 
         med_id = str(med_doc['_id'])
         for intake_doc in intakes_by_medication.get(med_id, []):
-            statement = build_medication_statement_resource(
-                intake_doc,
-                patient_id=patient_id,
-                medication_id=med_id,
-            )
+            statement = build_medication_statement(intake_doc, med_doc, patient_id)
             entries.append({
                 'fullUrl': f'urn:uuid:{statement["id"]}',
                 'resource': statement,

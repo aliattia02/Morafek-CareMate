@@ -824,36 +824,51 @@ def build_kbv_medication_request_resource(
     return build_medication_request(med)
 
 
+def build_medication_statement(
+    intake: dict,
+    med: dict,
+    patient_fhir_id: str,
+) -> dict:
+    status_map = {"taken": "completed", "skipped": "not-taken", "pending": "in-progress"}
+    intake_status = str(intake.get("status", "pending") or "pending").lower()
+    slot = str(intake.get("slot", "") or "").strip().lower()
+    intake_id = _stable_fhir_uuid(intake.get("_id") or intake.get("id"))
+    medication_id = _stable_fhir_uuid(med.get("_id") or med.get("id"))
+    effective_date = (
+        _normalize_iso_datetime(intake.get("date"))
+        or _normalize_iso_datetime(intake.get("taken_at"))
+        or _normalize_iso_datetime(intake.get("created_at"))
+    )
+
+    resource: dict[str, Any] = {
+        "resourceType": "MedicationStatement",
+        "id": intake_id,
+        "status": status_map.get(intake_status, "in-progress"),
+        "subject": {"reference": f"Patient/{patient_fhir_id}"},
+        "medicationReference": {"reference": f"Medication/{medication_id}"},
+        "informationSource": {"reference": f"Patient/{patient_fhir_id}"},
+        "extension": [{
+            "url": "https://morafek.app/fhir/StructureDefinition/medication-intake-slot",
+            "valueCode": slot or "unknown",
+        }],
+    }
+    if effective_date:
+        resource["effectiveDateTime"] = effective_date
+        resource["dateAsserted"] = effective_date
+    note = str(intake.get("note", "") or "").strip()
+    if note:
+        resource["note"] = [{"text": note}]
+    return resource
+
+
 def build_medication_statement_resource(
     intake_doc: dict,
     *,
     patient_id: str,
     medication_id: str,
 ) -> dict:
-    status_map = {"taken": "completed", "skipped": "not-taken", "pending": "in-progress"}
-    intake_status = str(intake_doc.get("status", "pending") or "pending").lower()
-    slot = str(intake_doc.get("slot", "") or "").strip().lower()
-    intake_date = _normalize_fhir_date(intake_doc.get("date"))
-
-    resource: dict[str, Any] = {
-        "resourceType": "MedicationStatement",
-        "id": str(intake_doc.get("_id") or intake_doc.get("id") or uuid4()),
-        "status": status_map.get(intake_status, "in-progress"),
-        "subject": {"reference": f"Patient/{patient_id}"},
-        "medicationReference": {"reference": f"Medication/{medication_id}"},
-        "informationSource": {"reference": f"Patient/{patient_id}"},
-        "extension": [{
-            "url": "https://morafek.app/fhir/StructureDefinition/medication-intake-slot",
-            "valueCode": slot or "unknown",
-        }],
-    }
-    if intake_date:
-        resource["effectiveDateTime"] = intake_date
-        resource["dateAsserted"] = intake_date
-    note = str(intake_doc.get("note", "") or "").strip()
-    if note:
-        resource["note"] = [{"text": note}]
-    return resource
+    medication_stub = {"_id": medication_id}
+    return build_medication_statement(intake_doc, medication_stub, patient_id)
 
 
 def validate_kbv_medication_resource(resource: dict) -> None:
