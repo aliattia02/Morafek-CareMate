@@ -564,7 +564,7 @@ def read_fhir_medication_requests(current_user):
         query["is_active"] = is_active_filter
 
     medication_docs = list(medications_col.find(query))
-    resources = [build_medication_request(dict(doc, patient_id=patient_id)) for doc in medication_docs]
+    resources = [build_medication_request({**doc, "patient_id": patient_id}) for doc in medication_docs]
 
     bundle_entries = [
         {

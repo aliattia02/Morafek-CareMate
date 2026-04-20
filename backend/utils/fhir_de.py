@@ -967,8 +967,8 @@ def validate_medication_bundle_entries(entries: list) -> dict:
             if coding.get("system") != "http://fhir.de/CodeSystem/ifa/pzn":
                 add_error(resource, "code.coding[0].system", "must be http://fhir.de/CodeSystem/ifa/pzn")
             pzn_code = coding.get("code")
-            if not isinstance(pzn_code, str) or len(pzn_code) != 8:
-                add_error(resource, "code.coding[0].code", "must be an 8-character string")
+            if not isinstance(pzn_code, str) or len(pzn_code) != 8 or not pzn_code.isdigit():
+                add_error(resource, "code.coding[0].code", "must be an 8-character numeric string")
 
             form_coding = ((resource.get("form", {}) or {}).get("coding", []) or [{}])[0]
             form_code = form_coding.get("code")
