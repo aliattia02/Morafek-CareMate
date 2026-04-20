@@ -2,6 +2,7 @@ import React from 'react';
 import { Text } from 'react-native';
 import { Tabs } from 'expo-router';
 import { colors } from '@/constants/theme';
+import { E } from '@/constants/elderlyTheme';
 import { useAuthStore } from '@/store/auth.store';
 
 function TabIcon({ icon, color }: { icon: string; color: string }) {
@@ -15,13 +16,13 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        tabBarActiveTintColor: colors.primary,
+        tabBarActiveTintColor: E.colors.primary,
         tabBarInactiveTintColor: colors.text.secondary,
         tabBarStyle: {
           backgroundColor: colors.surface,
           borderTopColor: colors.border,
         },
-        headerStyle: { backgroundColor: colors.primary },
+        headerStyle: { backgroundColor: E.colors.primary },
         headerTintColor: colors.text.inverse,
         headerTitleStyle: { fontWeight: '600' },
       }}

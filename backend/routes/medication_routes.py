@@ -313,6 +313,10 @@ def create_medication(current_user):
         "dosage_unit": dosage_unit,
         "dosage_note": str(data.get("dosage_note", "")).strip(),
         "is_active": bool(data.get("is_active", True)),
+        # Treatment-period history — each entry is {start_date, end_date}.
+        # end_date is None while the period is open (medication is active).
+        "periods": [{"start_date": start_date, "end_date": None}],
+        "deactivated_at": None,
         "created_at": datetime.now(timezone.utc),
     }
 
@@ -423,9 +427,35 @@ def deactivate_medication(current_user, patient_id, medication_id):
     except (InvalidId, TypeError):
         return jsonify({"error": "Invalid medication_id"}), 400
 
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Fetch existing doc first so we can close the current open period.
+    existing = medications_col.find_one({"_id": medication_obj_id, "patient_id": patient_id})
+    if not existing:
+        return jsonify({"error": "Medication not found"}), 404
+
+    # Close the open period: if periods array exists update its last open entry,
+    # otherwise seed from the medication's start_date (legacy docs).
+    existing_periods = existing.get("periods", [])
+    if existing_periods and existing_periods[-1].get("end_date") is None:
+        period_update: dict = {
+            "$set": {
+                "is_active": False,
+                "deactivated_at": today,
+                f"periods.{len(existing_periods) - 1}.end_date": today,
+            }
+        }
+    else:
+        # Legacy doc without a periods array — seed it now.
+        closing_period = {"start_date": existing.get("start_date"), "end_date": today}
+        period_update = {
+            "$set": {"is_active": False, "deactivated_at": today},
+            "$push": {"periods": closing_period},
+        }
+
     updated = medications_col.find_one_and_update(
         {"_id": medication_obj_id, "patient_id": patient_id},
-        {"$set": {"is_active": False}},
+        period_update,
         return_document=ReturnDocument.AFTER,
     )
     if not updated:
@@ -434,6 +464,64 @@ def deactivate_medication(current_user, patient_id, medication_id):
     serialized = _serialize_medication_doc(updated)
     serialized["dosage_label"] = _dosage_label(updated)
     return jsonify({"message": "Medication deactivated", "medication": serialized}), 200
+
+
+@medication_routes.route("/doctor/patient/<patient_id>/<medication_id>/reactivate", methods=["PATCH"])
+@token_required
+@api_error_handler
+def reactivate_medication(current_user, patient_id, medication_id):
+    """PATCH /doctor/patient/:patient_id/:medication_id/reactivate
+
+    Reactivates a previously deactivated medication and opens a new treatment
+    period starting today.  Accepts an optional JSON body with ``start_date``
+    (YYYY-MM-DD) to override the period start; defaults to today.
+    """
+    if current_user.get("user_type") != "doctor":
+        return jsonify({"error": "Unauthorized"}), 403
+
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err if isinstance(err, dict) else {"error": err}), code or 403
+
+    try:
+        medication_obj_id = ObjectId(medication_id)
+    except (InvalidId, TypeError):
+        return jsonify({"error": "Invalid medication_id"}), 400
+
+    existing = medications_col.find_one({"_id": medication_obj_id, "patient_id": patient_id})
+    if not existing:
+        return jsonify({"error": "Medication not found"}), 404
+
+    if existing.get("is_active"):
+        return jsonify({"error": "Medication is already active"}), 409
+
+    # Allow an optional custom start_date for the new period.
+    data = request.get_json(silent=True) or {}
+    start_date_raw = data.get("start_date")
+    if start_date_raw:
+        date_err = _validate_yyyy_mm_dd(str(start_date_raw).strip(), "start_date")
+        if date_err:
+            return date_err
+        new_start = str(start_date_raw).strip()
+    else:
+        new_start = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    new_period = {"start_date": new_start, "end_date": None}
+
+    updated = medications_col.find_one_and_update(
+        {"_id": medication_obj_id, "patient_id": patient_id},
+        {
+            "$set": {"is_active": True, "deactivated_at": None},
+            "$push": {"periods": new_period},
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:
+        return jsonify({"error": "Medication not found"}), 404
+
+    serialized = _serialize_medication_doc(updated)
+    serialized["dosage_label"] = _dosage_label(updated)
+    return jsonify({"message": "Medication reactivated", "medication": serialized}), 200
 
 
 @medication_routes.route("/patient", methods=["GET"])

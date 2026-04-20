@@ -1,7 +1,14 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { E, ET } from '@/constants/elderlyTheme';
-import type { Medication } from '@/services/api/medications';
+import type { Medication as BaseMedication } from '@/services/api/medications';
+
+// Extend the base type with fields added for deactivation/period tracking.
+type MedicationPeriod = { start_date: string; end_date: string | null };
+type Medication = BaseMedication & {
+  deactivated_at?: string | null;
+  periods?: MedicationPeriod[];
+};
 
 interface MedicationDetailModalProps {
   medication: Medication | null;
@@ -14,6 +21,56 @@ function Field({ label, value }: { label: string; value?: string | number | null
     <View style={styles.field}>
       <Text style={styles.fieldLabel}>{label}</Text>
       <Text style={styles.fieldValue}>{String(value)}</Text>
+    </View>
+  );
+}
+
+function TreatmentPeriods({ periods, isActive, deactivatedAt }: {
+  periods?: MedicationPeriod[];
+  isActive?: boolean;
+  deactivatedAt?: string | null;
+}) {
+  // Determine what to render: multi-period history, or a simple active/inactive display.
+  const hasHistory = periods && periods.length > 1;
+
+  if (!hasHistory) {
+    // Single period or legacy doc — show plain start / end fields.
+    const singlePeriod = periods?.[0];
+    const endLabel = isActive ? null : (deactivatedAt ?? singlePeriod?.end_date ?? '—');
+    return (
+      <>
+        {singlePeriod?.start_date ? (
+          <Field label="Start date" value={singlePeriod.start_date} />
+        ) : null}
+        {!isActive && endLabel ? (
+          <Field label="Deactivated on" value={endLabel} />
+        ) : null}
+      </>
+    );
+  }
+
+  // Multi-period history.
+  return (
+    <View style={styles.periodsBlock}>
+      <Text style={styles.periodsTitle}>Treatment periods ({periods!.length})</Text>
+      {periods!.map((p, idx) => {
+        const isOpen = p.end_date === null || p.end_date === undefined;
+        return (
+          <View key={idx} style={[styles.periodRow, isOpen ? styles.periodRowActive : styles.periodRowInactive]}>
+            <View style={styles.periodDot} />
+            <View style={styles.periodTextBlock}>
+              <Text style={styles.periodRange}>
+                {p.start_date} → {isOpen ? 'present' : p.end_date}
+              </Text>
+              {isOpen ? (
+                <Text style={styles.periodStatus}>Active</Text>
+              ) : (
+                <Text style={[styles.periodStatus, styles.periodStatusInactive]}>Ended</Text>
+              )}
+            </View>
+          </View>
+        );
+      })}
     </View>
   );
 }
@@ -85,8 +142,11 @@ export default function MedicationDetailModal({ medication, onClose }: Medicatio
                   <Field label="Note" value={medication.dosage_note} />
                   <Field label="Unit" value={medication.dosage_unit} />
                   <Field label="Coverage" value={medication.coverage} />
-                  <Field label="Start date" value={medication.start_date} />
-                  <Field label="End date" value={medication.is_chronic ? 'Dauermedikation' : medication.end_date} />
+                  <TreatmentPeriods
+                    periods={medication.periods}
+                    isActive={medication.is_active}
+                    deactivatedAt={medication.deactivated_at}
+                  />
 
                   <View style={styles.scheduleBlock}>
                     <Text style={styles.scheduleTitle}>
@@ -183,6 +243,54 @@ const styles = StyleSheet.create({
   scheduleBlock: {
     marginTop: 4,
     gap: 8,
+  },
+  periodsBlock: {
+    marginTop: 4,
+    gap: 6,
+  },
+  periodsTitle: {
+    ...ET.small,
+    color: E.colors.textSecondary,
+    fontWeight: '700',
+  },
+  periodRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: E.radiusSm,
+    borderWidth: 1,
+  },
+  periodRowActive: {
+    backgroundColor: E.colors.successLight,
+    borderColor: E.colors.success,
+  },
+  periodRowInactive: {
+    backgroundColor: E.colors.surfaceAlt,
+    borderColor: E.colors.border,
+  },
+  periodDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: E.colors.textSecondary,
+  },
+  periodTextBlock: {
+    flex: 1,
+    gap: 1,
+  },
+  periodRange: {
+    ...ET.body,
+    fontVariant: ['tabular-nums'],
+  },
+  periodStatus: {
+    ...ET.caption,
+    color: E.colors.success,
+    fontWeight: '700',
+  },
+  periodStatusInactive: {
+    color: E.colors.textSecondary,
   },
   scheduleTitle: {
     ...ET.small,

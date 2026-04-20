@@ -6,12 +6,16 @@
 export const E = {
   colors: {
     // Brand
-    primary:      '#0E7C8B',   // Deep teal
-    primaryLight: '#E6F4F6',   // Tint for backgrounds
-    primaryDark:  '#0A5E6A',   // Pressed state
-    accent:       '#F5A623',   // Warm amber — used for highlights
-    accentLight:  '#FEF3DC',
+    primary:      '#0E7C8B',
+    primaryLight: '#E6F4F6',
+    primaryDark:  '#0A5E6A',
 
+    // ⭐ NEW — App hero / profile banner / big headers
+    hero:         '#1F7F88',
+    heroDark:     '#17656C',
+    heroLight:    '#E8F5F6',
+
+    accent:       '#F5A623',
     // Semantics
     success:      '#1A8C5B',
     successLight: '#E6F5EE',

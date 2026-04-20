@@ -50,7 +50,9 @@ import {
 import { apiClient } from '@/services/api/client';
 import { API } from '@/services/api/endpoints';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+import { E } from '@/constants/elderlyTheme';
 import type { DoctorPatient } from '@/services/api/doctor';
+import VisitDetailModal, { type VisitDetail } from '@/components/ehr/VisitDetailModal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -134,6 +136,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
   const [visitsLoaded, setVisitsLoaded] = useState(false);
   const [visitsError, setVisitsError] = useState<string | null>(null);
   const [visitsRefreshing, setVisitsRefreshing] = useState(false);
+  const [selectedVisit, setSelectedVisit] = useState<VisitDetail | null>(null);
 
   // ── Medications ──────────────────────────────────────────────────────────
   const [medications, setMedications] = useState<MedicationRecord[]>([]);
@@ -522,7 +525,47 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     );
   }, [cancelDosageEdit, editingMedicationId, medicationIdOf, patient.id]);
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  const handleReactivateMedication = useCallback((med: MedicationRecord) => {
+    const medicationId = medicationIdOf(med);
+    if (!medicationId) return;
+    if (med.is_active !== false) return;
+
+    const runReactivate = async () => {
+      try {
+        setMedicationActionLoadingId(medicationId);
+        setMedicationsError(null);
+        const res = await apiClient.patch<{ medication: MedicationRecord }>(
+          `/api/medications/doctor/patient/${patient.id}/${medicationId}/reactivate`
+        );
+        const updated = res.data.medication;
+        setMedications((prev) =>
+          prev.map((item) =>
+            medicationIdOf(item) === medicationId ? { ...item, ...updated } : item
+          )
+        );
+      } catch (err: unknown) {
+        setMedicationsError(err instanceof Error ? err.message : 'Failed to reactivate medication');
+      } finally {
+        setMedicationActionLoadingId(null);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Reactivate medication\n\nReactivate ${med.trade_name}?`)) {
+        void runReactivate();
+      }
+      return;
+    }
+
+    Alert.alert(
+      'Reactivate medication',
+      `Reactivate ${med.trade_name}? A new treatment period will start today.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Reactivate', onPress: () => { void runReactivate(); } },
+      ]
+    );
+  }, [medicationIdOf, patient.id]);
 
   return (
     <View style={styles.container}>
@@ -573,7 +616,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
           )}
 
           {profileLoading ? (
-            <ActivityIndicator color={colors.primary} style={styles.loader} />
+            <ActivityIndicator color={E.colors.primary} style={styles.loader} />
           ) : editingProfile ? (
             <>
               <View style={styles.profileEditHeader}>
@@ -938,56 +981,93 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
 
       {/* ══════════════ VISITS TAB ══════════════ */}
       {activeTab === 'visits' && (
-        <ScrollView
-          style={styles.tabContent}
-          contentContainerStyle={styles.content}
-          refreshControl={
-            <RefreshControl refreshing={visitsRefreshing} onRefresh={onRefreshVisits} colors={[colors.primary]} />
-          }
-        >
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={() =>
-              router.push({
-                pathname: '/(app)/ehr/visit-form',
-                params: { patient_id: patient.id, patient_name: `${patient.firstName} ${patient.lastName}` },
-              } as any)
+        <>
+          {/* Detail modal — rendered outside the ScrollView so it sits above everything */}
+          <VisitDetailModal
+            visit={selectedVisit}
+            onClose={() => setSelectedVisit(null)}
+            doctorName={`Dr. ${patient.firstName ?? ''} ${patient.lastName ?? ''}`.trim()}
+            medications={
+              selectedVisit
+                ? medications.filter(
+                    (m) => m.visit_id === selectedVisit.id,
+                  )
+                : []
+            }
+          />
+
+          <ScrollView
+            style={styles.tabContent}
+            contentContainerStyle={styles.content}
+            refreshControl={
+              <RefreshControl refreshing={visitsRefreshing} onRefresh={onRefreshVisits} colors={[E.colors.primary]} />
             }
           >
-            <Text style={styles.addButtonText}>➕  Add Visit</Text>
-          </TouchableOpacity>
-          {visitsLoading ? (
-            <ActivityIndicator color={colors.primary} style={styles.loader} />
-          ) : visitsError ? (
-            <Text style={styles.errorText}>⚠️ {visitsError}</Text>
-          ) : visits.length === 0 ? (
-            <Text style={styles.emptyText}>No visits found.</Text>
-          ) : (
-            visits.map((visit, index) => (
-              <Card key={visit.id ?? index} variant="outlined" padding="medium" style={styles.card}>
-                <Text style={styles.dateText}>{visit.visit_date}</Text>
-                {visit.chief_complaint ? (
-                  <>
-                    <Text style={styles.fieldLabel}>Chief Complaint</Text>
-                    <Text style={styles.fieldValue}>{visit.chief_complaint}</Text>
-                  </>
-                ) : null}
-                {visit.diagnosis_text ? (
-                  <>
-                    <Text style={styles.fieldLabel}>Diagnosis</Text>
-                    <Text style={styles.fieldValue}>{visit.diagnosis_text}</Text>
-                  </>
-                ) : null}
-                {visit.diagnosis_icd10 ? (
-                  <>
-                    <Text style={styles.fieldLabel}>ICD-10</Text>
-                    <Text style={styles.fieldValue}>{visit.diagnosis_icd10}</Text>
-                  </>
-                ) : null}
-              </Card>
-            ))
-          )}
-        </ScrollView>
+            <TouchableOpacity
+              style={styles.addButton}
+              onPress={() =>
+                router.push({
+                  pathname: '/(app)/ehr/visit-form',
+                  params: { patient_id: patient.id, patient_name: `${patient.firstName} ${patient.lastName}` },
+                } as any)
+              }
+            >
+              <Text style={styles.addButtonText}>➕  Add Visit</Text>
+            </TouchableOpacity>
+            {visitsLoading ? (
+              <ActivityIndicator color={E.colors.primary} style={styles.loader} />
+            ) : visitsError ? (
+              <Text style={styles.errorText}>⚠️ {visitsError}</Text>
+            ) : visits.length === 0 ? (
+              <Text style={styles.emptyText}>No visits found.</Text>
+            ) : (
+              visits.map((visit, index) => {
+                const visitMedCount = medications.filter((m) => m.visit_id === visit.id).length;
+                return (
+                  <TouchableOpacity
+                    key={visit.id ?? index}
+                    activeOpacity={0.75}
+                    onPress={() => setSelectedVisit(visit as VisitDetail)}
+                  >
+                    <Card variant="outlined" padding="medium" style={styles.card}>
+                      {/* Header row: date + chevron */}
+                      <View style={styles.visitCardHeader}>
+                        <Text style={styles.dateText}>{visit.visit_date}</Text>
+                        <Text style={styles.visitChevron}>›</Text>
+                      </View>
+                      {visit.chief_complaint ? (
+                        <>
+                          <Text style={styles.fieldLabel}>Chief Complaint</Text>
+                          <Text style={styles.fieldValue}>{visit.chief_complaint}</Text>
+                        </>
+                      ) : null}
+                      {visit.diagnosis_text ? (
+                        <>
+                          <Text style={styles.fieldLabel}>Diagnosis</Text>
+                          <Text style={styles.fieldValue}>{visit.diagnosis_text}</Text>
+                        </>
+                      ) : null}
+                      {visit.diagnosis_icd10 ? (
+                        <>
+                          <Text style={styles.fieldLabel}>ICD-10</Text>
+                          <Text style={styles.fieldValue}>{visit.diagnosis_icd10}</Text>
+                        </>
+                      ) : null}
+                      {/* Medication count badge */}
+                      {visitMedCount > 0 ? (
+                        <View style={styles.visitMedBadge}>
+                          <Text style={styles.visitMedBadgeText}>
+                            💊 {visitMedCount} prescription{visitMedCount !== 1 ? 's' : ''} — tap to view
+                          </Text>
+                        </View>
+                      ) : null}
+                    </Card>
+                  </TouchableOpacity>
+                );
+              })
+            )}
+          </ScrollView>
+        </>
       )}
 
       {/* ══════════════ MEDICATIONS TAB ══════════════ */}
@@ -1030,11 +1110,11 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             style={styles.tabContent}
             contentContainerStyle={styles.content}
             refreshControl={
-              <RefreshControl refreshing={medicationsRefreshing} onRefresh={onRefreshMedications} colors={[colors.primary]} />
+              <RefreshControl refreshing={medicationsRefreshing} onRefresh={onRefreshMedications} colors={[E.colors.primary]} />
             }
           >
             {medicationsLoading ? (
-              <ActivityIndicator color={colors.primary} style={styles.loader} />
+              <ActivityIndicator color={E.colors.primary} style={styles.loader} />
             ) : medicationsError ? (
               <Text style={styles.errorText}>⚠️ {medicationsError}</Text>
             ) : (() => {
@@ -1150,6 +1230,11 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                         {isChronic ? 'Dauermedikation' : `Ende: ${med.end_date ?? '—'}`}
                       </Text>
                     </View>
+                    {!isActive && (med as any).deactivated_at ? (
+                      <Text style={styles.medDeactivatedLabel}>
+                        ⏸ Deactivated: {(med as any).deactivated_at}
+                      </Text>
+                    ) : null}
 
                     {/* ── Dosage note ── */}
                     {med.dosage_note ? (
@@ -1164,13 +1249,29 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                       >
                         <Text style={styles.medEditBtnText}>Edit dosage</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity
-                        style={[styles.medActionBtn, styles.medDeactivateBtn, !isActive && styles.medActionBtnDisabled]}
-                        onPress={() => handleDeactivateMedication(med)}
-                        disabled={!isActive || medicationActionLoadingId === medicationIdOf(med)}
-                      >
-                        <Text style={styles.medDeactivateBtnText}>Deactivate</Text>
-                      </TouchableOpacity>
+                      {isActive ? (
+                        <TouchableOpacity
+                          style={[styles.medActionBtn, styles.medDeactivateBtn,
+                            medicationActionLoadingId === medicationIdOf(med) && styles.medActionBtnDisabled]}
+                          onPress={() => handleDeactivateMedication(med)}
+                          disabled={medicationActionLoadingId === medicationIdOf(med)}
+                        >
+                          <Text style={styles.medDeactivateBtnText}>
+                            {medicationActionLoadingId === medicationIdOf(med) ? 'Deactivating…' : 'Deactivate'}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : (
+                        <TouchableOpacity
+                          style={[styles.medActionBtn, styles.medReactivateBtn,
+                            medicationActionLoadingId === medicationIdOf(med) && styles.medActionBtnDisabled]}
+                          onPress={() => handleReactivateMedication(med)}
+                          disabled={medicationActionLoadingId === medicationIdOf(med)}
+                        >
+                          <Text style={styles.medReactivateBtnText}>
+                            {medicationActionLoadingId === medicationIdOf(med) ? 'Reactivating…' : '▶ Reactivate'}
+                          </Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
 
                     {editingMedicationId === medicationIdOf(med) && (
@@ -1267,11 +1368,11 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             style={styles.tabContent}
             contentContainerStyle={styles.content}
             refreshControl={
-              <RefreshControl refreshing={vitalsRefreshing} onRefresh={onRefreshVitals} colors={[colors.primary]} />
+              <RefreshControl refreshing={vitalsRefreshing} onRefresh={onRefreshVitals} colors={[E.colors.primary]} />
             }
           >
             {vitalsLoading ? (
-              <ActivityIndicator color={colors.primary} style={styles.loader} />
+              <ActivityIndicator color={E.colors.primary} style={styles.loader} />
             ) : vitalsError ? (
               <Text style={styles.errorText}>⚠️ {vitalsError}</Text>
             ) : vitals.length === 0 ? (
@@ -1521,11 +1622,11 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             style={styles.tabContent}
             contentContainerStyle={styles.content}
             refreshControl={
-              <RefreshControl refreshing={messagesRefreshing} onRefresh={onRefreshMessages} colors={[colors.primary]} />
+              <RefreshControl refreshing={messagesRefreshing} onRefresh={onRefreshMessages} colors={[E.colors.primary]} />
             }
           >
             {messagesLoading ? (
-              <ActivityIndicator color={colors.primary} style={styles.loader} />
+              <ActivityIndicator color={E.colors.primary} style={styles.loader} />
             ) : messagesError ? (
               <Text style={styles.errorText}>⚠️ {messagesError}</Text>
             ) : messages.length === 0 ? (
@@ -1608,11 +1709,11 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             style={styles.tabContent}
             contentContainerStyle={styles.content}
             refreshControl={
-              <RefreshControl refreshing={documentsRefreshing} onRefresh={onRefreshDocuments} colors={[colors.primary]} />
+              <RefreshControl refreshing={documentsRefreshing} onRefresh={onRefreshDocuments} colors={[E.colors.primary]} />
             }
           >
             {documentsLoading ? (
-              <ActivityIndicator color={colors.primary} style={styles.loader} />
+              <ActivityIndicator color={E.colors.primary} style={styles.loader} />
             ) : documentsError ? (
               <Text style={styles.errorText}>⚠️ {documentsError}</Text>
             ) : (() => {
@@ -1651,7 +1752,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
           style={styles.tabContent}
           contentContainerStyle={styles.content}
           refreshControl={
-            <RefreshControl refreshing={exercisesRefreshing} onRefresh={onRefreshExercises} colors={[colors.primary]} />
+            <RefreshControl refreshing={exercisesRefreshing} onRefresh={onRefreshExercises} colors={[E.colors.primary]} />
           }
         >
           <TouchableOpacity
@@ -1666,7 +1767,7 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
             <Text style={styles.addButtonText}>➕  Add Exercise</Text>
           </TouchableOpacity>
           {exercisesLoading ? (
-            <ActivityIndicator color={colors.primary} style={styles.loader} />
+            <ActivityIndicator color={E.colors.primary} style={styles.loader} />
           ) : exercisesError ? (
             <Text style={styles.errorText}>⚠️ {exercisesError}</Text>
           ) : exercises.length === 0 ? (
@@ -1710,7 +1811,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   backButton: { marginBottom: spacing.xs },
-  backText: { ...typography.body, color: colors.primary, fontWeight: '600' },
+  backText: { ...typography.body, color: E.colors.primary, fontWeight: '600' },
   patientName: { ...typography.h2, color: colors.text.primary },
   tabBar: {
     backgroundColor: colors.surface,
@@ -1722,9 +1823,9 @@ const styles = StyleSheet.create({
   },
   tabBarContent: { flexDirection: 'row', alignItems: 'center', height: 44 },
   tab: { height: 44, justifyContent: 'center', alignItems: 'center', paddingHorizontal: spacing.md },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: colors.primary },
+  tabActive: { borderBottomWidth: 2, borderBottomColor: E.colors.primary },
   tabText: { ...typography.body, color: colors.text.secondary },
-  tabTextActive: { color: colors.primary, fontWeight: '600' },
+  tabTextActive: { color: E.colors.primary, fontWeight: '600' },
   tabContent: { flex: 1 },
   content: { padding: spacing.md, paddingBottom: spacing.xl },
   card: { marginBottom: spacing.md },
@@ -1735,6 +1836,32 @@ const styles = StyleSheet.create({
   fieldValue: { ...typography.body, color: colors.text.primary },
   dateText: { ...typography.body, color: colors.text.primary, fontWeight: '600', marginBottom: spacing.xs },
 
+  // Visit card enhancements
+  visitCardHeader: {
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
+  },
+  visitChevron: {
+    fontSize:   22,
+    color:      colors.text.secondary,
+    fontWeight: '300',
+    lineHeight: 26,
+  },
+  visitMedBadge: {
+    marginTop:        spacing.sm,
+    backgroundColor:  E.colors.primary + '12',
+    borderRadius:     borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical:  4,
+    alignSelf:        'flex-start',
+  },
+  visitMedBadgeText: {
+    ...typography.small,
+    color:      E.colors.primary,
+    fontWeight: '600',
+  },
+
   // Messages
   messagesContainer: { flex: 1 },
   messageBubble: {
@@ -1743,7 +1870,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
     maxWidth: '80%',
   },
-  messageBubbleDoctor: { alignSelf: 'flex-end', backgroundColor: colors.primary },
+  messageBubbleDoctor: { alignSelf: 'flex-end', backgroundColor: E.colors.primary },
   messageBubblePatient: {
     alignSelf: 'flex-start',
     backgroundColor: colors.surface,
@@ -1776,7 +1903,7 @@ const styles = StyleSheet.create({
     maxHeight: 100,
   },
   sendButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: E.colors.primary,
     borderRadius: borderRadius.md,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
@@ -1792,7 +1919,7 @@ const styles = StyleSheet.create({
   docIcon: { fontSize: 22, marginRight: spacing.sm },
   docInfo: { flex: 1 },
   viewDocButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: E.colors.primary,
     borderRadius: borderRadius.sm,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
@@ -1802,7 +1929,7 @@ const styles = StyleSheet.create({
 
   // Add buttons
   addButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: E.colors.primary,
     borderRadius: borderRadius.md,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
@@ -1841,7 +1968,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  docSubTabActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  docSubTabActive: { backgroundColor: E.colors.primary, borderColor: E.colors.primary },
   docSubTabText: { ...typography.small, color: colors.text.secondary, fontWeight: '500' },
   docSubTabTextActive: { color: colors.surface, fontWeight: '700' },
   docSubTabBadge: {
@@ -1952,7 +2079,7 @@ const styles = StyleSheet.create({
   medDatesRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   medDateText: { ...typography.small, color: colors.text.secondary },
   medDateSep:  { ...typography.small, color: colors.border },
-  medChronicText: { color: colors.primary, fontWeight: '600' },
+  medChronicText: { color: E.colors.primary, fontWeight: '600' },
 
   medNote: { ...typography.small, color: colors.text.secondary, fontStyle: 'italic' },
   medActionRow: {
@@ -1985,6 +2112,21 @@ const styles = StyleSheet.create({
     ...typography.small,
     color: '#C62828',
     fontWeight: '700',
+  },
+  medReactivateBtn: {
+    backgroundColor: '#E8F5E9',
+    borderColor: '#A5D6A7',
+  },
+  medReactivateBtnText: {
+    ...typography.small,
+    color: '#2E7D32',
+    fontWeight: '700',
+  },
+  medDeactivatedLabel: {
+    ...typography.small,
+    color: colors.text.secondary,
+    fontStyle: 'italic',
+    marginTop: 2,
   },
   medActionBtnDisabled: {
     opacity: 0.5,
@@ -2032,8 +2174,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   medEditSaveBtn: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+    backgroundColor: E.colors.primary,
+    borderColor: E.colors.primary,
   },
   medEditSaveBtnText: {
     ...typography.small,
@@ -2181,7 +2323,7 @@ const styles = StyleSheet.create({
   },
   profileAvatar: {
     width: 56, height: 56, borderRadius: 28,
-    backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: E.colors.primary, alignItems: 'center', justifyContent: 'center',
   },
   profileAvatarText: { ...typography.h2, color: colors.surface, fontWeight: '700' },
   profileIdentityInfo: { flex: 1, gap: 2 },
@@ -2213,7 +2355,7 @@ const styles = StyleSheet.create({
   },
   profileTagDangerText: { ...typography.small, color: '#B71C1C', fontWeight: '600' },
   profileListRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  profileListDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary, marginTop: 6 },
+  profileListDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: E.colors.primary, marginTop: 6 },
   profileMedIcon: { fontSize: 14, marginTop: 1 },
   profileListText: { ...typography.body, color: colors.text.primary, flex: 1 },
   profileEmergencyCard: {
@@ -2225,12 +2367,12 @@ const styles = StyleSheet.create({
   profileEmergencyPhone: { ...typography.body, color: colors.text.secondary },
   profileNotesBox: {
     backgroundColor: colors.background, borderRadius: borderRadius.sm,
-    padding: spacing.sm, borderLeftWidth: 3, borderLeftColor: colors.primary,
+    padding: spacing.sm, borderLeftWidth: 3, borderLeftColor: E.colors.primary,
   },
   profileNotesText: { ...typography.body, color: colors.text.primary },
   profileUpdatedAt: { ...typography.small, color: colors.text.secondary, textAlign: 'right', marginBottom: spacing.sm },
   profileEditBtn: {
-    backgroundColor: colors.primary, borderRadius: borderRadius.md,
+    backgroundColor: E.colors.primary, borderRadius: borderRadius.md,
     paddingVertical: spacing.sm, paddingHorizontal: spacing.md, alignItems: 'center', marginTop: spacing.xs,
   },
   profileEditBtnText: { ...typography.body, color: colors.surface, fontWeight: '700' },
@@ -2245,7 +2387,7 @@ const styles = StyleSheet.create({
   },
   profileCancelBtnText: { ...typography.body, color: colors.text.secondary, fontWeight: '600' },
   profileSaveBtn: {
-    backgroundColor: colors.primary, borderRadius: borderRadius.md,
+    backgroundColor: E.colors.primary, borderRadius: borderRadius.md,
     paddingVertical: spacing.sm, paddingHorizontal: spacing.md,
     alignItems: 'center', justifyContent: 'center', minWidth: 72, height: 40,
   },
@@ -2265,7 +2407,7 @@ const styles = StyleSheet.create({
     borderRadius: 20, borderWidth: 1, borderColor: colors.border,
     paddingHorizontal: spacing.sm, paddingVertical: 4,
   },
-  profileChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  profileChipActive: { backgroundColor: E.colors.primary, borderColor: E.colors.primary },
   profileChipText: { ...typography.small, color: colors.text.secondary, fontWeight: '500' },
   profileChipTextActive: { color: colors.surface, fontWeight: '700' },
   profileListItemRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
@@ -2278,7 +2420,7 @@ const styles = StyleSheet.create({
   profileAddRowBtn: {
     alignSelf: 'flex-start', paddingVertical: 4, paddingHorizontal: spacing.sm,
     borderRadius: borderRadius.sm, borderWidth: 1, borderStyle: 'dashed',
-    borderColor: colors.primary, marginTop: 2,
+    borderColor: E.colors.primary, marginTop: 2,
   },
-  profileAddRowBtnText: { ...typography.small, color: colors.primary, fontWeight: '600' },
+  profileAddRowBtnText: { ...typography.small, color: E.colors.primary, fontWeight: '600' },
 });

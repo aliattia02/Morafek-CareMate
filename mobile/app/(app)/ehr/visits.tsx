@@ -28,21 +28,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { apiClient } from '@/services/api/client';
 import { API } from '@/services/api/endpoints';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
+import VisitDetailModal, { type VisitDetail } from '@/components/ehr/VisitDetailModal';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface Visit {
-  id:               string;
-  encounter_fhir_id?: string;
-  doctor_id?:       string;
-  chief_complaint?: string;
-  diagnosis_icd10?: string;
-  diagnosis_text?:  string;
-  visit_date?:      string;
-  notes?:           string;
-}
+// Re-export VisitDetail from the modal so the local type alias is consistent.
+type Visit = VisitDetail;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -63,25 +52,29 @@ function formatDate(iso?: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Visit Card
+// Visit Summary Card (pressable — opens VisitDetailModal)
 // ─────────────────────────────────────────────────────────────────────────────
 
-function VisitCard({ visit }: { visit: Visit }) {
-  const [expanded, setExpanded] = useState(false);
-  const hasNotes = !!visit.notes?.trim();
-
+function VisitCard({ visit, onPress }: { visit: Visit; onPress: () => void }) {
   return (
-    <View style={styles.card}>
-      {/* Header row: date */}
+    <TouchableOpacity
+      style={styles.card}
+      onPress={onPress}
+      activeOpacity={0.75}
+      accessibilityRole="button"
+      accessibilityLabel={`Visit on ${formatDate(visit.visit_date)}, tap for details`}
+    >
+      {/* Header row: date + chevron */}
       <View style={styles.cardHeader}>
         <Text style={styles.visitDate}>📅 {formatDate(visit.visit_date)}</Text>
+        <Text style={styles.cardChevron}>›</Text>
       </View>
 
       {/* Chief complaint */}
       {visit.chief_complaint ? (
         <View style={styles.row}>
           <Text style={styles.rowLabel}>Reason</Text>
-          <Text style={styles.rowValue}>{visit.chief_complaint}</Text>
+          <Text style={styles.rowValue} numberOfLines={2}>{visit.chief_complaint}</Text>
         </View>
       ) : null}
 
@@ -90,7 +83,7 @@ function VisitCard({ visit }: { visit: Visit }) {
         <View style={styles.row}>
           <Text style={styles.rowLabel}>Diagnosis</Text>
           <View style={styles.diagnosisCell}>
-            <Text style={styles.rowValue}>{visit.diagnosis_text}</Text>
+            <Text style={styles.rowValue} numberOfLines={2}>{visit.diagnosis_text}</Text>
             {visit.diagnosis_icd10 ? (
               <View style={styles.icdBadge}>
                 <Text style={styles.icdText}>{visit.diagnosis_icd10}</Text>
@@ -100,27 +93,11 @@ function VisitCard({ visit }: { visit: Visit }) {
         </View>
       ) : null}
 
-      {/* Notes (expandable) */}
-      {hasNotes && (
-        <>
-          <TouchableOpacity
-            style={styles.notesToggle}
-            onPress={() => setExpanded((p) => !p)}
-            accessibilityRole="button"
-            accessibilityLabel={expanded ? 'Collapse notes' : 'Expand notes'}
-          >
-            <Text style={styles.notesToggleText}>
-              📝 Notes {expanded ? '▲' : '▼'}
-            </Text>
-          </TouchableOpacity>
-          {expanded && (
-            <View style={styles.notesBox}>
-              <Text style={styles.notesText}>{visit.notes}</Text>
-            </View>
-          )}
-        </>
-      )}
-    </View>
+      {/* Notes hint */}
+      {visit.notes?.trim() ? (
+        <Text style={styles.notesHint}>📝 Notes available — tap to read</Text>
+      ) : null}
+    </TouchableOpacity>
   );
 }
 
@@ -129,10 +106,11 @@ function VisitCard({ visit }: { visit: Visit }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function VisitsScreen() {
-  const [visits,     setVisits]     = useState<Visit[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error,      setError]      = useState<string | null>(null);
+  const [visits,       setVisits]       = useState<Visit[]>([]);
+  const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [error,        setError]        = useState<string | null>(null);
+  const [selectedVisit, setSelectedVisit] = useState<Visit | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -157,6 +135,11 @@ export default function VisitsScreen() {
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
       <Stack.Screen options={{ title: 'My Visits' }} />
+
+      <VisitDetailModal
+        visit={selectedVisit}
+        onClose={() => setSelectedVisit(null)}
+      />
 
       {loading ? (
         <ActivityIndicator
@@ -197,7 +180,13 @@ export default function VisitsScreen() {
               </Text>
             </View>
           ) : (
-            visits.map((v) => <VisitCard key={v.id} visit={v} />)
+            visits.map((v) => (
+              <VisitCard
+                key={v.id}
+                visit={v}
+                onPress={() => setSelectedVisit(v)}
+              />
+            ))
           )}
         </ScrollView>
       )}
@@ -265,13 +254,20 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection:  'row',
+    alignItems:     'center',
+    justifyContent: 'space-between',
   },
   visitDate: {
     ...typography.body,
-    color: colors.text.primary,
+    color:      colors.text.primary,
     fontWeight: '700',
+  },
+  cardChevron: {
+    fontSize:  22,
+    color:     colors.text.secondary,
+    fontWeight: '300',
+    lineHeight: 26,
   },
 
   // Row
@@ -309,25 +305,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // Notes
-  notesToggle: {
-    paddingVertical: spacing.xs,
-  },
-  notesToggleText: {
+  notesHint: {
     ...typography.small,
-    color: colors.primary,
+    color:      colors.primary,
     fontWeight: '600',
-  },
-  notesBox: {
-    backgroundColor: colors.background,
-    borderRadius: borderRadius.sm,
-    padding: spacing.sm,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.border,
-  },
-  notesText: {
-    ...typography.body,
-    color: colors.text.secondary,
+    paddingTop: 2,
   },
 
   // Empty state

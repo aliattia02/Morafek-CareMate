@@ -94,7 +94,11 @@ def create_app():
         raise
 
     # ── MongoDB startup indexes ───────────────────────────────────────────────
-    _ensure_mongo_indexes(logger)
+    # Flask-PyMongo resolves mongo.db through the application context, so
+    # index creation must run inside one. create_app() itself does not push
+    # a context, so we do it explicitly here before returning the app.
+    with app.app_context():
+        _ensure_mongo_indexes(logger)
 
     return app
 
