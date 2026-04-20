@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as Notifications from 'expo-notifications';
 import { E, ET } from '@/constants/elderlyTheme';
 import AdherenceHeatmap from '@/components/ehr/AdherenceHeatmap';
 import DailySlotCard from '@/components/ehr/DailySlotCard';
@@ -63,6 +65,21 @@ function coverageLabel(value: MedicationRecord['coverage']) {
 
 function syncedToastMessage(count: number) {
   return `Synced ${count} offline confirmation${count > 1 ? 's' : ''}`;
+}
+
+function slotTargetDate(dateString: string, slot: SlotKey): Date {
+  const date = new Date(dateString);
+  date.setSeconds(0, 0);
+  if (slot === 'morning') {
+    date.setHours(8, 0, 0, 0);
+  } else if (slot === 'noon') {
+    date.setHours(12, 0, 0, 0);
+  } else if (slot === 'evening') {
+    date.setHours(18, 0, 0, 0);
+  } else {
+    date.setHours(21, 0, 0, 0);
+  }
+  return date;
 }
 
 function computeSummary(slots: TodayMedicationResponse['slots']) {
@@ -149,22 +166,74 @@ export default function MedicationsScreen() {
     return syncedCount;
   }, []);
 
+  const scheduleMedicationNotifications = useCallback(async (today: TodayMedicationResponse) => {
+    try {
+      const settings = await Notifications.getPermissionsAsync();
+      let granted = settings.granted;
+
+      if (!granted) {
+        const request = await Notifications.requestPermissionsAsync();
+        granted = request.granted;
+      }
+      if (!granted) return;
+
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('medications', {
+          name: 'Medication reminders',
+          importance: Notifications.AndroidImportance.HIGH,
+        });
+      }
+
+      await Notifications.cancelAllScheduledNotificationsAsync();
+
+      const now = new Date();
+      for (const slot of Object.keys(today.slots) as SlotKey[]) {
+        for (const item of today.slots[slot]) {
+          if (item.status !== 'pending') continue;
+
+          const triggerDate = slotTargetDate(today.date, slot);
+          if (triggerDate <= now) continue;
+
+          await Notifications.scheduleNotificationAsync({
+            content: {
+              title: 'Medikament einnehmen',
+              body: `${item.medication.trade_name}: ${item.dosage} ${item.unit}`,
+              data: {
+                screen: 'medications',
+                intakeId: item.intake_id,
+              },
+            },
+            trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.DATE,
+              date: triggerDate,
+              channelId: Platform.OS === 'android' ? 'medications' : undefined,
+            },
+          });
+        }
+      }
+    } catch {
+      // Skip silently; reminders must never block UI.
+    }
+  }, []);
+
   const loadTodayData = useCallback(async () => {
     setUsingCache(false);
     try {
       const today = await getTodayMedications();
       setTodayData(today);
       cacheTodayMedications(today);
+      void scheduleMedicationNotifications(today);
     } catch (err: unknown) {
       const cached = getCachedTodayMedications();
       if (cached) {
         setTodayData(cached);
         setUsingCache(true);
+        void scheduleMedicationNotifications(cached);
       } else {
         throw err;
       }
     }
-  }, []);
+  }, [scheduleMedicationNotifications]);
 
   const loadMyMedications = useCallback(async () => {
     const [medications, adherenceData] = await Promise.all([
