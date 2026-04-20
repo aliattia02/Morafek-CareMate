@@ -35,6 +35,7 @@ import {
 
 type SlotKey = keyof TodayMedicationResponse['slots'];
 type MedicationsTab = 'today' | 'my-medications';
+const TOAST_DURATION_MS = 2400;
 
 const SLOT_META: Record<SlotKey, { label: string }> = {
   morning: { label: 'Morgens' },
@@ -58,6 +59,10 @@ function normalizeDate(date?: string | null): string {
 
 function coverageLabel(value: MedicationRecord['coverage']) {
   return value ?? '—';
+}
+
+function syncedToastMessage(count: number) {
+  return `Synced ${count} offline confirmation${count > 1 ? 's' : ''}`;
 }
 
 function computeSummary(slots: TodayMedicationResponse['slots']) {
@@ -117,7 +122,7 @@ export default function MedicationsScreen() {
   const showToast = useCallback((message: string) => {
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setToastMessage(message);
-    toastTimerRef.current = setTimeout(() => setToastMessage(null), 2400);
+    toastTimerRef.current = setTimeout(() => setToastMessage(null), TOAST_DURATION_MS);
 
     try {
       ToastAndroid.show(message, ToastAndroid.SHORT);
@@ -175,7 +180,7 @@ export default function MedicationsScreen() {
       setError(null);
       const synced = await syncPendingIntakes();
       if (synced > 0) {
-        showToast(`Synced ${synced} offline confirmation${synced > 1 ? 's' : ''}`);
+        showToast(syncedToastMessage(synced));
       }
       await Promise.all([loadTodayData(), loadMyMedications()]);
     } catch (err: unknown) {
@@ -200,7 +205,7 @@ export default function MedicationsScreen() {
       const drainQueue = async () => {
         const synced = await syncPendingIntakes();
         if (!active || synced === 0) return;
-        showToast(`Synced ${synced} offline confirmation${synced > 1 ? 's' : ''}`);
+        showToast(syncedToastMessage(synced));
         await loadTodayData();
       };
 

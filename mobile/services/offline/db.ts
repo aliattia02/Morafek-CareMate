@@ -7,6 +7,7 @@ import type { VitalResponse } from '@/services/api/ehr';
 import type { TodayMedicationResponse } from '@/services/api/medications';
 
 let db: any;
+let intakeQueueCounter = 0;
 
 // 👉 MOBILE: real SQLite
 if (Platform.OS !== 'web') {
@@ -202,7 +203,8 @@ export function queueMedicationIntake(data: {
   status: 'taken' | 'skipped';
   timestamp?: string;
 }): string {
-  const localId = `intake_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  intakeQueueCounter += 1;
+  const localId = `intake_${Date.now()}_${intakeQueueCounter}_${Math.random().toString(36).slice(2, 10)}`;
   const timestamp = data.timestamp ?? new Date().toISOString();
 
   db.runSync(
@@ -211,6 +213,7 @@ export function queueMedicationIntake(data: {
       localId,
       data.intakeId,
       data.status,
+      // Note is intentionally not part of queued intake confirmations for now.
       null,
       timestamp,
     ]

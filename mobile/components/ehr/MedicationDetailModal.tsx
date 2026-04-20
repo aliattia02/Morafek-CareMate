@@ -23,12 +23,17 @@ export default function MedicationDetailModal({ medication, onClose }: Medicatio
 
   useEffect(() => {
     if (!medication) return;
+    slide.stopAnimation();
     slide.setValue(320);
-    Animated.timing(slide, {
+    const animation = Animated.timing(slide, {
       toValue: 0,
       duration: 220,
       useNativeDriver: true,
-    }).start();
+    });
+    animation.start();
+    return () => {
+      animation.stop();
+    };
   }, [medication, slide]);
 
   return (
