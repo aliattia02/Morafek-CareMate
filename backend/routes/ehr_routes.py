@@ -523,8 +523,16 @@ def create_visit(current_user, patient_id):
 
     logger.info("Visit encounter and condition stored in ehr_visits / ehr_conditions")
 
+    encounter_mongo_id = str(encounter_result.inserted_id)
     return jsonify({
-        'encounter_id': str(encounter_result.inserted_id),
+        # 'id' and '_id' are aliases for the MongoDB ObjectId of the encounter.
+        # visit-form.tsx reads `visitRes.data?.id ?? visitRes.data?._id` to
+        # obtain the visitId it passes to MedicationPrescriptionPanel.
+        # Without this field the visitId was always undefined and the
+        # "Alle speichern" button stayed permanently disabled.
+        'id': encounter_mongo_id,
+        '_id': encounter_mongo_id,
+        'encounter_id': encounter_mongo_id,
         'condition_id': str(condition_result.inserted_id),
         'patient_id': patient_id,
         'doctor_id': doctor_id,

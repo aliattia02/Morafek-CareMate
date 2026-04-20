@@ -265,8 +265,8 @@ def create_medication(current_user):
     dosage_unit = _parse_required_string(data, "dosage_unit")
     if dosage_unit is None:
         return jsonify({"error": "Missing required field: dosage_unit"}), 400
-    if dosage_unit not in {"Tablette", "ml", "IE", "Hub", "Tropfen"}:
-        return jsonify({"error": "dosage_unit must be one of: Tablette, ml, IE, Hub, Tropfen"}), 400
+    if dosage_unit not in {"Tablette", "Kapsel", "ml", "IE", "Hub", "Tropfen"}:
+        return jsonify({"error": "dosage_unit must be one of: Tablette, Kapsel, ml, IE, Hub, Tropfen"}), 400
 
     duration_days = data.get("duration_days")
     if duration_days is not None:
@@ -328,7 +328,22 @@ def create_medication(current_user):
 @token_required
 @api_error_handler
 def list_patient_medications(current_user, patient_id):
-    return _not_implemented("list_patient_medications")
+    if current_user.get("user_type") != "doctor":
+        return jsonify({"error": "Unauthorized"}), 403
+
+    has_access, err, code = check_doctor_patient_access(current_user, patient_id)
+    if not has_access:
+        return jsonify(err if isinstance(err, dict) else {"error": err}), code or 403
+
+    docs = list(
+        medications_col.find({"patient_id": patient_id})
+        .sort("trade_name", ASCENDING)
+    )
+    result = [
+        {**_serialize_medication_doc(d), "dosage_label": _dosage_label(d)}
+        for d in docs
+    ]
+    return jsonify(result), 200
 
 
 @medication_routes.route("/doctor/patient/<patient_id>/<medication_id>", methods=["PUT"])
@@ -615,25 +630,44 @@ def get_medication_adherence(current_user):
         if d:
             daily_map[d][intake.get("status", "pending")] += 1
 
-    daily_list = sorted(
-        [{"date": d, **counts} for d, counts in daily_map.items()],
+    overall_rate = round(taken / total, 4) if total > 0 else 0.0  # 0-to-1 float
+
+    days_list = sorted(
+        [
+            {
+                "date":    d,
+                "taken":   counts["taken"],
+                "skipped": counts["skipped"],
+                "pending": counts["pending"],
+                "total":   counts["taken"] + counts["skipped"] + counts["pending"],
+                "rate":    round(
+                    counts["taken"]
+                    / max(counts["taken"] + counts["skipped"] + counts["pending"], 1),
+                    4,
+                ),
+            }
+            for d, counts in daily_map.items()
+        ],
         key=lambda x: x["date"],
     )
 
     return jsonify(
         {
-            "period_days": period_days,
-            "start_date": start_date,
-            "end_date": end_date,
+            "period_days":  period_days,
+            "start_date":   start_date,
+            "end_date":     end_date,
+            # top-level keys consumed by AdherenceHeatmap / medications.tsx
+            "overall_rate": overall_rate,
+            "days":         days_list,
+            # keep summary for any backward-compat callers
             "summary": {
-                "total": total,
-                "taken": taken,
-                "skipped": skipped,
-                "pending": pending,
+                "total":          total,
+                "taken":          taken,
+                "skipped":        skipped,
+                "pending":        pending,
                 "adherence_rate": adherence_rate,
             },
             "per_medication": per_medication,
-            "daily": daily_list,
         }
     ), 200
 
