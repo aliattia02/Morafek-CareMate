@@ -9,6 +9,7 @@ from werkzeug.local import LocalProxy
 from routes.doctor_routes import check_doctor_patient_access
 from utils.auth import token_required
 from utils.error_handler import api_error_handler
+from utils.fhir_de import build_medication_request
 
 
 medication_routes = Blueprint("medication_routes", __name__)
@@ -537,3 +538,45 @@ def list_own_medication_intakes(current_user):
 @api_error_handler
 def list_patient_medication_intakes(current_user, patient_id):
     return _not_implemented("list_patient_medication_intakes")
+
+
+@medication_routes.route("/fhir/MedicationRequest/", methods=["GET"], strict_slashes=False)
+@token_required
+@api_error_handler
+def read_fhir_medication_requests(current_user):
+    patient_id, err_resp = _require_patient_user(current_user)
+    if err_resp:
+        return err_resp
+
+    patient_param = str(request.args.get("patient", "") or "").strip()
+    if patient_param and patient_param not in {patient_id, f"Patient/{patient_id}"}:
+        return jsonify({"error": "patient search parameter does not match authenticated user"}), 403
+
+    status_filter = str(request.args.get("status", "") or "").strip().lower()
+    is_active_filter = None
+    if status_filter == "active":
+        is_active_filter = True
+    elif status_filter in {"completed", "stopped"}:
+        is_active_filter = False
+
+    query: dict = {"patient_id": patient_id}
+    if is_active_filter is not None:
+        query["is_active"] = is_active_filter
+
+    medication_docs = list(medications_col.find(query))
+    resources = [build_medication_request({**doc, "patient_id": patient_id}) for doc in medication_docs]
+
+    bundle_entries = [
+        {
+            "fullUrl": f"urn:uuid:{resource['id']}",
+            "resource": resource,
+        }
+        for resource in resources
+    ]
+    bundle = {
+        "resourceType": "Bundle",
+        "type": "searchset",
+        "total": len(bundle_entries),
+        "entry": bundle_entries,
+    }
+    return jsonify(bundle), 200

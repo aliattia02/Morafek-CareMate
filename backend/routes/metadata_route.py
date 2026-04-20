@@ -28,7 +28,7 @@ metadata_bp = Blueprint("metadata", __name__)
 
 # ── Bump this whenever you add/remove supported resources or operations ──
 MORAFEK_FHIR_VERSION     = "4.0.1"
-MORAFEK_SERVER_VERSION   = "1.0.0"
+MORAFEK_SERVER_VERSION   = "1.1.0"
 MORAFEK_PUBLISHER        = "Morafek CareMate"
 MORAFEK_BASE_URL         = "https://morafek-caremate.onrender.com/fhir"
 
@@ -38,6 +38,8 @@ _ISIK_ENCOUNTER  = "https://gematik.de/fhir/isik/StructureDefinition/ISiKKontakt
 _ISIK_CONDITION  = "https://gematik.de/fhir/isik/StructureDefinition/ISiKDiagnose"
 _ISIK_OBS_VITALS = "https://gematik.de/fhir/isik/StructureDefinition/ISiKLebenszeichen"
 _ISIK_DOC_REF    = "https://gematik.de/fhir/isik/StructureDefinition/ISiKDokumentenInformationen"
+_KBV_ERP_MED     = "https://fhir.kbv.de/StructureDefinition/KBV_PR_ERP_Medication_PZN"
+_KBV_ERP_RX      = "https://fhir.kbv.de/StructureDefinition/KBV_PR_ERP_Prescription"
 
 # ── de.basisprofil.r4 ────────────────────────────────────────────────────────
 _DE_PATIENT   = "http://fhir.de/StructureDefinition/Patient"
@@ -73,7 +75,8 @@ def _build_capability_statement() -> dict:
             "Morafek CareMate FHIR R4 server. Implements de.basisprofil.r4 and "
             "targets ISiK Stage 1 (Basisdaten) compliance. "
             "Supported resources: Patient, Observation (vital signs), Encounter, "
-            "Condition, DocumentReference, Bundle."
+            "Condition, DocumentReference, Medication, MedicationRequest, "
+            "MedicationStatement, Bundle."
         ),
         "kind": "instance",
         "software": {
@@ -209,13 +212,54 @@ def _build_capability_statement() -> dict:
                     ],
                 },
 
+                # ── Medication ────────────────────────────────────────────────
+                {
+                    "type": "Medication",
+                    "profile": _KBV_ERP_MED,
+                    "interaction": [
+                        {"code": "read"},
+                    ],
+                    "versioning": "no-version",
+                },
+
+                # ── MedicationRequest ─────────────────────────────────────────
+                {
+                    "type": "MedicationRequest",
+                    "profile": _KBV_ERP_RX,
+                    "interaction": [
+                        {"code": "read"},
+                        {"code": "search-type"},
+                    ],
+                    "searchParam": [
+                        {"name": "patient", "type": "reference"},
+                        {"name": "status", "type": "token"},
+                    ],
+                    "versioning": "no-version",
+                },
+
+                # ── MedicationStatement ───────────────────────────────────────
+                {
+                    "type": "MedicationStatement",
+                    "profile": "http://hl7.org/fhir/StructureDefinition/MedicationStatement",
+                    "interaction": [
+                        {"code": "read"},
+                        {"code": "search-type"},
+                    ],
+                    "searchParam": [
+                        {"name": "patient", "type": "reference"},
+                        {"name": "status", "type": "token"},
+                    ],
+                    "versioning": "no-version",
+                },
+
                 # ── Bundle ───────────────────────────────────────────────────
                 {
                     "type": "Bundle",
                     "documentation": (
                         "Full-patient FHIR R4 Bundle export available at "
                         "GET /api/patient/fhir-export. Returns all Observations, "
-                        "Encounters, Conditions, and DocumentReferences."
+                        "Encounters, Conditions, DocumentReferences, Medications, "
+                        "MedicationRequests, and MedicationStatements."
                     ),
                     "interaction": [
                         {"code": "read"},

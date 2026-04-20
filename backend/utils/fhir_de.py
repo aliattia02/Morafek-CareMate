@@ -31,7 +31,9 @@ References
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 from typing import Any
+import uuid
 from uuid import uuid4
 
 
@@ -53,6 +55,10 @@ class _Profiles:
     ISIK_CONDITION:  str = "https://gematik.de/fhir/isik/StructureDefinition/ISiKDiagnose"
     ISIK_OBSERVATION_VITALS: str = "https://gematik.de/fhir/isik/StructureDefinition/ISiKLebenszeichen"
     ISIK_DOCUMENT_REFERENCE: str = "https://gematik.de/fhir/isik/StructureDefinition/ISiKDokumentenInformationen"
+
+    # ── KBV eRezept ──
+    KBV_ERP_MEDICATION_PZN: str = "https://fhir.kbv.de/StructureDefinition/KBV_PR_ERP_Medication_PZN"
+    KBV_ERP_PRESCRIPTION:   str = "https://fhir.kbv.de/StructureDefinition/KBV_PR_ERP_Prescription"
 
 
 PROFILE = _Profiles()
@@ -500,6 +506,9 @@ _SECTION_META: dict[str, tuple[str, str, str]] = {
     "Encounter":         ("Besuche",        "46240-8", "History of encounters"),
     "Condition":         ("Diagnosen",      "11450-4", "Problem list"),
     "DocumentReference": ("Dokumente",      "46209-3", "Provider orders"),
+    "Medication":        ("Medikationen",   "10160-0", "History of medication use"),
+    "MedicationRequest": ("Verordnungen",   "57833-6", "Prescription for medication"),
+    "MedicationStatement": ("Einnahmen",    "10160-0", "History of medication use"),
 }
 
 
@@ -635,3 +644,519 @@ def build_lanr_identifier(lanr_value: str) -> dict:
         "system": IdentifierSystem.LANR,
         "value":  lanr_value,
     }
+
+
+def _normalize_fhir_date(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    return str(value).strip() or None
+
+
+def _build_dosage_text(medication_doc: dict) -> str:
+    dosage_values = [
+        int(medication_doc.get(f"dosage_{slot}") or 0)
+        for slot in ("morning", "noon", "evening", "night")
+    ]
+    dosage_pattern = "-".join(str(value) for value in dosage_values)
+    dosage_unit = str(medication_doc.get("dosage_unit", "") or "").strip()
+    dosage_note = str(medication_doc.get("dosage_note", "") or "").strip()
+    if not any(dosage_values) and not dosage_unit and not dosage_note:
+        return ""
+    text = f"{dosage_pattern} {dosage_unit}".strip()
+    if dosage_note:
+        text = f"{text} ({dosage_note})" if text else dosage_note
+    return text
+
+
+_KBV_DARREICHUNGSFORM_SYSTEM = "https://fhir.kbv.de/CodeSystem/KBV_CS_SFHIR_KBV_DARREICHUNGSFORM"
+_KBV_DARREICHUNGSFORM_MAP = {
+    "tablette": "TAB",
+    "kapsel": "KAP",
+    "retardtablette": "RET",
+    "pflaster": "PFL",
+    "creme": "CRE",
+    "salbe": "SAL",
+    "gel": "GEL",
+    "lotion": "LOT",
+    "aerosol": "AER",
+    "spray": "SPR",
+    "tropfen": "TRO",
+    "lyophilisat": "LIO",
+    "sirup": "SIR",
+    "suspension": "SUS",
+    "emulsion": "EMU",
+    "lösung": "SOL",
+    "loesung": "SOL",
+    "injektion": "INJ",
+    "infusion": "INF",
+    "pulver": "PUL",
+    "granulat": "GRA",
+    "suppositorium": "SUP",
+    "zäpfchen": "ZAE",
+    "zaepfchen": "ZAE",
+    "vaginaltablette": "VAG",
+    "konzentrat": "KTR",
+}
+_SLOT_TIMING_WHEN = {
+    "morning": "MORN",
+    "noon": "NOON",
+    "evening": "EVE",
+    "night": "NIGHT",
+}
+_SLOT_DEFAULT_TIME = {
+    "morning": "08:00:00",
+    "noon": "12:00:00",
+    "evening": "18:00:00",
+    "night": "22:00:00",
+}
+_KBV_MEDICATION_CATEGORY_CODE = "00"
+_KBV_STATUS_CO_PAYMENT_CODE_MAP = {
+    "GKV": "0",
+    "PKV": "3",
+    "Selbstzahler": "2",
+}
+
+
+def _build_dosage_label(medication_doc: dict) -> str:
+    dosage_values = [
+        int(medication_doc.get(f"dosage_{slot}") or 0)
+        for slot in ("morning", "noon", "evening", "night")
+    ]
+    return "-".join(str(value) for value in dosage_values)
+
+
+def _build_timing_when(medication_doc: dict) -> list[str]:
+    when_codes: list[str] = []
+    for slot, code in _SLOT_TIMING_WHEN.items():
+        if int(medication_doc.get(f"dosage_{slot}") or 0) > 0:
+            when_codes.append(code)
+    return when_codes
+
+
+def _derive_effective_datetime_from_intake(intake: dict) -> str | None:
+    confirmed_at = _normalize_iso_datetime(intake.get("confirmed_at"))
+    if confirmed_at:
+        return confirmed_at
+    date_value = str(intake.get("date", "") or "").strip()
+    if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_value):
+        return (
+            _normalize_iso_datetime(intake.get("taken_at"))
+            or _normalize_iso_datetime(intake.get("created_at"))
+        )
+    slot = str(intake.get("slot", "") or "").strip().lower()
+    slot_time = _SLOT_DEFAULT_TIME.get(slot, "00:00:00")
+    return f"{date_value}T{slot_time}Z"
+
+
+def _parse_strength_text(strength_text: str) -> tuple[float, str] | None:
+    match = re.match(r"^\s*(\d+(?:[.,]\d+)?)\s*(.+?)\s*$", strength_text or "")
+    if not match:
+        return None
+    numeric_part = match.group(1).replace(",", ".")
+    unit_part = match.group(2).strip()
+    if not unit_part:
+        return None
+    try:
+        value = float(numeric_part)
+    except ValueError:
+        return None
+    return value, unit_part
+
+
+def _stable_fhir_uuid(mongo_id: Any) -> str:
+    if mongo_id in (None, ""):
+        raise ValueError("MongoDB _id is required to build stable FHIR UUID.")
+    source = str(mongo_id).strip()
+    if not source:
+        raise ValueError("MongoDB _id is required to build stable FHIR UUID.")
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, source))
+
+
+def _normalize_iso_datetime(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    raw = str(value).strip()
+    if not raw:
+        return None
+    if re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+        return f"{raw}T00:00:00Z"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return parsed.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return raw
+
+
+def build_medication_resource(med: dict) -> dict:
+    mongo_id = med.get("_id") or med.get("id")
+    medication_id = _stable_fhir_uuid(mongo_id)
+    pzn = str(med.get("pzn", "") or "").strip()
+    if not pzn:
+        raise ValueError(f"Medication PZN is required for KBV medication export (mongo_id={mongo_id}).")
+    if len(pzn) != 8 or not pzn.isdigit():
+        raise ValueError(f"Medication PZN must be an 8-digit string (mongo_id={mongo_id}).")
+    trade_name = str(med.get("trade_name", "") or "").strip()
+    active_substance = str(med.get("active_substance", "") or "").strip()
+    form = str(med.get("form", "") or "").strip()
+    if not form:
+        raise ValueError(f"Medication form is required for KBV mapping (mongo_id={mongo_id}).")
+    form_code = _KBV_DARREICHUNGSFORM_MAP.get(form.lower())
+    strength = str(med.get("strength", "") or "").strip()
+    norm_size = str(med.get("norm_size", "") or "").strip()
+    if not norm_size:
+        raise ValueError(f"Medication norm_size is required for KBV medication export (mongo_id={mongo_id}).")
+
+    resource: dict[str, Any] = {
+        "resourceType": "Medication",
+        "id": medication_id,
+        "meta": {"profile": [PROFILE.KBV_ERP_MEDICATION_PZN]},
+        "status": "active" if med.get("is_active", True) else "inactive",
+        "code": {
+            "coding": [{
+                "system": "http://fhir.de/CodeSystem/ifa/pzn",
+                "code": pzn,
+                "display": trade_name or pzn,
+            }],
+            "text": trade_name or pzn,
+        },
+    }
+
+    if form:
+        form_coding: dict[str, Any] = {"text": form}
+        if not form_code:
+            raise ValueError(f"Unsupported medication form for KBV mapping: '{form}' (mongo_id={mongo_id}).")
+        form_coding["coding"] = [{
+            "system": _KBV_DARREICHUNGSFORM_SYSTEM,
+            "code": form_code,
+            "display": form,
+        }]
+        resource["form"] = form_coding
+    if active_substance:
+        ingredient: dict[str, Any] = {"itemCodeableConcept": {"text": active_substance}}
+        if strength:
+            parsed_strength = _parse_strength_text(strength)
+            if parsed_strength:
+                amount_value, amount_unit = parsed_strength
+                ingredient["strength"] = {"numerator": {"value": amount_value, "unit": amount_unit}}
+        resource["ingredient"] = [ingredient]
+
+    extensions: list[dict[str, Any]] = []
+    extensions.append({
+        "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Medication_Category",
+        "valueCoding": {
+            "system": "https://fhir.kbv.de/CodeSystem/KBV_CS_ERP_Medication_Category",
+            "code": _KBV_MEDICATION_CATEGORY_CODE,
+        },
+    })
+    extensions.append({
+        "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Medication_Vaccine",
+        "valueBoolean": bool(med.get("is_vaccine", False)),
+    })
+    extensions.append({
+        "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Medication_Normgroesse",
+        "valueCode": norm_size,
+    })
+    if extensions:
+        resource["extension"] = extensions
+    return resource
+
+
+def build_medication_request(med: dict) -> dict:
+    mongo_id = med.get("_id") or med.get("id")
+    medication_id = _stable_fhir_uuid(mongo_id)
+    request_id = _stable_fhir_uuid(f"MedicationRequest:{mongo_id}")
+    patient_id = str(med.get("patient_id", "") or "").strip()
+    start_date = _normalize_iso_datetime(med.get("start_date"))
+    end_date = _normalize_iso_datetime(med.get("end_date"))
+
+    dosage_label = _build_dosage_label(med)
+    dosage_note = str(med.get("dosage_note", "") or "").strip()
+    timing_when = _build_timing_when(med)
+    coverage = str(med.get("coverage", "") or "").strip()
+    co_payment_code = _KBV_STATUS_CO_PAYMENT_CODE_MAP.get(coverage, "2")
+    is_chronic = bool(med.get("is_chronic", False))
+    resource: dict[str, Any] = {
+        "resourceType": "MedicationRequest",
+        "id": request_id,
+        "meta": {"profile": [PROFILE.KBV_ERP_PRESCRIPTION]},
+        "status": "active" if med.get("is_active", True) else "completed",
+        "intent": "order",
+        "medicationReference": {"reference": f"Medication/{medication_id}"},
+        "extension": [
+            {
+                "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_StatusCoPayment",
+                "valueCoding": {
+                    "system": "https://fhir.kbv.de/CodeSystem/KBV_CS_ERP_StatusCoPayment",
+                    "code": co_payment_code,
+                },
+            },
+            {
+                "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_EmergencyServicesFee",
+                "valueBoolean": bool(med.get("emergency_services_fee", False)),
+            },
+            {
+                "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_BVG",
+                "valueBoolean": bool(med.get("bvg", False)),
+            },
+            {
+                "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Multiple_Prescription",
+                "valueBoolean": bool(med.get("multiple_prescription", False)),
+            },
+        ],
+        "substitution": {
+            "allowedBoolean": bool(med.get("aut_idem", False)),
+        },
+    }
+    if patient_id:
+        resource["subject"] = {"reference": f"Patient/{patient_id}"}
+    if dosage_label:
+        dosage_instruction: dict[str, Any] = {"text": dosage_label}
+        repeat: dict[str, Any] = {}
+        if timing_when:
+            repeat["when"] = timing_when
+        bounds_period: dict[str, str] = {}
+        if start_date:
+            bounds_period["start"] = start_date
+        if end_date and not is_chronic:
+            bounds_period["end"] = end_date
+        if bounds_period:
+            repeat["boundsPeriod"] = bounds_period
+        if repeat:
+            dosage_instruction["timing"] = {"repeat": repeat}
+        resource["dosageInstruction"] = [dosage_instruction]
+    if dosage_note:
+        resource["note"] = [{"text": dosage_note}]
+
+    authored_on = _normalize_iso_datetime(med.get("created_at")) or start_date
+    if authored_on:
+        resource["authoredOn"] = authored_on
+    if med.get("doctor_id"):
+        resource["requester"] = {"reference": f"Practitioner/{med['doctor_id']}"}
+    if med.get("visit_id"):
+        resource["encounter"] = {"reference": f"Encounter/{med['visit_id']}"}
+    if start_date or (end_date and not is_chronic):
+        validity_period: dict[str, str] = {}
+        if start_date:
+            validity_period["start"] = start_date
+        if end_date and not is_chronic:
+            validity_period["end"] = end_date
+        resource["dispenseRequest"] = {"validityPeriod": validity_period}
+    return resource
+
+
+def build_kbv_medication_resource(medication_doc: dict) -> dict:
+    return build_medication_resource(medication_doc)
+
+
+def build_kbv_medication_request_resource(
+    medication_doc: dict,
+    *,
+    patient_id: str,
+) -> dict:
+    med = dict(medication_doc)
+    if patient_id:
+        med["patient_id"] = patient_id
+    return build_medication_request(med)
+
+
+def build_medication_statement(
+    intake: dict,
+    med: dict,
+    patient_fhir_id: str,
+) -> dict:
+    status_map = {"taken": "completed", "skipped": "not-taken", "pending": "intended"}
+    intake_status = str(intake.get("status", "pending") or "pending").lower()
+    slot = str(intake.get("slot", "") or "").strip().lower()
+    intake_id = _stable_fhir_uuid(intake.get("_id") or intake.get("id"))
+    medication_fhir_id = str(med.get("fhir_id", "") or "").strip()
+    medication_id = medication_fhir_id or _stable_fhir_uuid(med.get("_id") or med.get("id"))
+    effective_date = _derive_effective_datetime_from_intake(intake)
+    dose_value = int(med.get(f"dosage_{slot}", 0) or 0) if slot else 0
+
+    resource: dict[str, Any] = {
+        "resourceType": "MedicationStatement",
+        "id": intake_id,
+        "status": status_map.get(intake_status, "intended"),
+        "subject": {"reference": f"Patient/{patient_fhir_id}"},
+        "medicationReference": {"reference": f"Medication/{medication_id}"},
+        "informationSource": {"reference": f"Patient/{patient_fhir_id}"},
+        "extension": [{
+            "url": "https://morafek.app/fhir/StructureDefinition/medication-intake-slot",
+            "valueCode": slot or "unknown",
+        }],
+    }
+    if effective_date:
+        resource["effectiveDateTime"] = effective_date
+        resource["dateAsserted"] = effective_date
+    if dose_value > 0:
+        resource["dosage"] = [{
+            "doseQuantity": {
+                "value": dose_value,
+            }
+        }]
+    note = str(intake.get("note", "") or "").strip()
+    if note:
+        resource["note"] = [{"text": note}]
+    return resource
+
+
+def build_medication_statement_resource(
+    intake_doc: dict,
+    *,
+    patient_id: str,
+    medication_id: str,
+) -> dict:
+    medication_stub = {"fhir_id": medication_id}
+    return build_medication_statement(intake_doc, medication_stub, patient_id)
+
+
+def validate_kbv_medication_resource(resource: dict) -> None:
+    if resource.get("resourceType") != "Medication":
+        raise ValueError("Medication resourceType is required.")
+    profiles = resource.get("meta", {}).get("profile", [])
+    if PROFILE.KBV_ERP_MEDICATION_PZN not in profiles:
+        raise ValueError("KBV medication profile URL is missing.")
+    code = resource.get("code", {})
+    coding_list = code.get("coding")
+    if not isinstance(coding_list, list) or not coding_list:
+        raise ValueError("Medication.code.coding is required.")
+    coding = coding_list[0]
+    if coding.get("system") != "http://fhir.de/CodeSystem/ifa/pzn":
+        raise ValueError("Medication must use the IFA PZN coding system.")
+    if not coding.get("code"):
+        raise ValueError("Medication PZN code is required.")
+
+
+def validate_kbv_medication_request_resource(resource: dict) -> None:
+    if resource.get("resourceType") != "MedicationRequest":
+        raise ValueError("MedicationRequest resourceType is required.")
+    profiles = resource.get("meta", {}).get("profile", [])
+    if PROFILE.KBV_ERP_PRESCRIPTION not in profiles:
+        raise ValueError("KBV prescription profile URL is missing.")
+    if not resource.get("status"):
+        raise ValueError("MedicationRequest.status is required.")
+    if resource.get("intent") != "order":
+        raise ValueError("MedicationRequest.intent must be 'order'.")
+    if not resource.get("subject", {}).get("reference"):
+        raise ValueError("MedicationRequest.subject reference is required.")
+    if not resource.get("medicationReference", {}).get("reference"):
+        raise ValueError("MedicationRequest.medicationReference is required.")
+
+
+_KNOWN_DARREICHUNGSFORM_CODES = {
+    "TAB", "KAP", "RET", "PFL", "CRE", "SAL", "GEL", "LOT",
+    "AER", "SPR", "TRO", "LIO", "SIR", "SUS", "EMU", "SOL",
+    "INJ", "INF", "PUL", "GRA", "SUP", "ZAE", "VAG", "KTR",
+}
+
+
+def _is_valid_iso8601(value: Any, *, date_only_allowed: bool) -> bool:
+    if value in (None, ""):
+        return False
+    raw = str(value).strip()
+    if not raw:
+        return False
+    is_date_only = bool(re.match(r"^\d{4}-\d{2}-\d{2}$", raw))
+    if date_only_allowed and is_date_only:
+        return True
+    if not date_only_allowed and is_date_only:
+        return False
+    try:
+        datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        return True
+    except ValueError:
+        return False
+
+
+def validate_medication_bundle_entries(entries: list) -> dict:
+    errors: list[dict[str, str]] = []
+    counts = {"Medication": 0, "MedicationRequest": 0, "MedicationStatement": 0}
+
+    def add_error(resource: dict, field: str, issue: str) -> None:
+        errors.append({
+            "resource_id": str(resource.get("id") or "unknown"),
+            "field": field,
+            "issue": issue,
+        })
+
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource", {})
+        if not isinstance(resource, dict):
+            continue
+        resource_type = resource.get("resourceType")
+
+        if resource_type == "Medication":
+            counts["Medication"] += 1
+            if resource.get("resourceType") != "Medication":
+                add_error(resource, "resourceType", "must be Medication")
+
+            profiles = resource.get("meta", {}).get("profile", [])
+            if not isinstance(profiles, list) or not profiles or PROFILE.KBV_ERP_MEDICATION_PZN not in profiles:
+                add_error(resource, "meta.profile[0]", "must contain KBV_PR_ERP_Medication_PZN")
+
+            coding = ((resource.get("code", {}) or {}).get("coding", []) or [{}])[0]
+            if coding.get("system") != "http://fhir.de/CodeSystem/ifa/pzn":
+                add_error(resource, "code.coding[0].system", "must be http://fhir.de/CodeSystem/ifa/pzn")
+            pzn_code = coding.get("code")
+            if not isinstance(pzn_code, str) or len(pzn_code) != 8 or not pzn_code.isdigit():
+                add_error(resource, "code.coding[0].code", "must be an 8-character numeric string")
+
+            form_coding = ((resource.get("form", {}) or {}).get("coding", []) or [{}])[0]
+            form_code = form_coding.get("code")
+            if form_code not in _KNOWN_DARREICHUNGSFORM_CODES:
+                add_error(resource, "form.coding[0].code", "must be in known Darreichungsform code set")
+
+            extensions = resource.get("extension", [])
+            extension_urls = [
+                str(ext.get("url", "")).lower()
+                for ext in extensions
+                if isinstance(ext, dict)
+            ]
+            if not any("normgroesse" in url or "norm-size" in url for url in extension_urls):
+                add_error(resource, "extension", "must contain normgroesse extension")
+            if not any("category" in url for url in extension_urls):
+                add_error(resource, "extension", "must contain Category extension")
+            if not any("vaccine" in url for url in extension_urls):
+                add_error(resource, "extension", "must contain Vaccine extension")
+
+        if resource_type == "MedicationRequest":
+            counts["MedicationRequest"] += 1
+            if resource.get("resourceType") != "MedicationRequest":
+                add_error(resource, "resourceType", "must be MedicationRequest")
+            if resource.get("status") not in {"active", "completed", "stopped"}:
+                add_error(resource, "status", "must be one of active/completed/stopped")
+            if resource.get("intent") != "order":
+                add_error(resource, "intent", "must be order")
+            if not str((resource.get("medicationReference", {}) or {}).get("reference", "")).startswith("Medication/"):
+                add_error(resource, "medicationReference.reference", "must start with Medication/")
+            if not str((resource.get("subject", {}) or {}).get("reference", "")).startswith("Patient/"):
+                add_error(resource, "subject.reference", "must start with Patient/")
+            if not _is_valid_iso8601(resource.get("authoredOn"), date_only_allowed=True):
+                add_error(resource, "authoredOn", "must be valid ISO 8601 date string")
+            dosage_instruction = resource.get("dosageInstruction")
+            if not isinstance(dosage_instruction, list) or not dosage_instruction:
+                add_error(resource, "dosageInstruction", "must be a non-empty list")
+            substitution_allowed = ((resource.get("substitution", {}) or {}).get("allowedBoolean", None))
+            if not isinstance(substitution_allowed, bool):
+                add_error(resource, "substitution.allowedBoolean", "must be a boolean")
+
+        if resource_type == "MedicationStatement":
+            counts["MedicationStatement"] += 1
+            if resource.get("resourceType") != "MedicationStatement":
+                add_error(resource, "resourceType", "must be MedicationStatement")
+            if resource.get("status") not in {"completed", "not-taken", "intended", "in-progress"}:
+                add_error(resource, "status", "must be one of completed/not-taken/intended/in-progress")
+            if not str((resource.get("medicationReference", {}) or {}).get("reference", "")).startswith("Medication/"):
+                add_error(resource, "medicationReference.reference", "must start with Medication/")
+            if not str((resource.get("subject", {}) or {}).get("reference", "")).startswith("Patient/"):
+                add_error(resource, "subject.reference", "must start with Patient/")
+            if not _is_valid_iso8601(resource.get("effectiveDateTime"), date_only_allowed=False):
+                add_error(resource, "effectiveDateTime", "must be valid ISO 8601 datetime string")
+
+    return {"valid": len(errors) == 0, "errors": errors, "counts": counts}
