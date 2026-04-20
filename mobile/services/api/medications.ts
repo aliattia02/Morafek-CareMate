@@ -34,6 +34,8 @@ export interface MedicationRecord {
   created_at?: string;
 }
 
+export type Medication = MedicationRecord;
+
 export interface CreateDoctorMedicationRequest {
   pzn: string;
   trade_name: string;
@@ -111,6 +113,13 @@ export async function createDoctorMedication(
   return response.data;
 }
 
+export async function prescribeMedication(
+  patientId: string,
+  payload: CreateDoctorMedicationRequest
+): Promise<MedicationRecord> {
+  return createDoctorMedication(patientId, payload);
+}
+
 export async function getDoctorPatientMedications(
   patientId: string,
   params?: { active_only?: boolean }
@@ -120,6 +129,16 @@ export async function getDoctorPatientMedications(
     { params }
   );
   return response.data;
+}
+
+export async function getPatientMedications(
+  patientId: string,
+  activeOnly?: boolean
+): Promise<MedicationRecord[]> {
+  return getDoctorPatientMedications(
+    patientId,
+    activeOnly === undefined ? undefined : { active_only: activeOnly }
+  );
 }
 
 export async function updateDoctorMedication(
@@ -134,6 +153,14 @@ export async function updateDoctorMedication(
   return response.data;
 }
 
+export async function updateMedication(
+  patientId: string,
+  medId: string,
+  payload: UpdateDoctorMedicationRequest
+): Promise<MedicationRecord> {
+  return updateDoctorMedication(patientId, medId, payload);
+}
+
 export async function deleteDoctorMedication(
   patientId: string,
   medicationId: string
@@ -142,6 +169,13 @@ export async function deleteDoctorMedication(
     API.MEDICATIONS.DOCTOR_PATIENT_MED(patientId, medicationId)
   );
   return response.data;
+}
+
+export async function deactivateMedication(
+  patientId: string,
+  medId: string
+): Promise<{ message?: string }> {
+  return deleteDoctorMedication(patientId, medId);
 }
 
 export async function getDoctorPatientVisitMedications(
@@ -154,6 +188,13 @@ export async function getDoctorPatientVisitMedications(
   return response.data;
 }
 
+export async function getMedicationsByVisit(
+  patientId: string,
+  visitId: string
+): Promise<MedicationRecord[]> {
+  return getDoctorPatientVisitMedications(patientId, visitId);
+}
+
 export async function getMyMedications(): Promise<MedicationRecord[]> {
   const response = await apiClient.get<MedicationRecord[]>(API.MEDICATIONS.MY);
   return response.data;
@@ -164,6 +205,10 @@ export async function getTodayMedications(): Promise<TodayMedicationResponse> {
   return response.data;
 }
 
+export async function getTodaySchedule(): Promise<TodayMedicationResponse> {
+  return getTodayMedications();
+}
+
 export async function confirmMedicationIntake(
   intakeId: string,
   payload: { status?: 'pending' | 'taken' | 'skipped'; note?: string }
@@ -172,17 +217,50 @@ export async function confirmMedicationIntake(
   return response.data;
 }
 
+export async function confirmIntake(
+  intakeId: string,
+  status: 'pending' | 'taken' | 'skipped',
+  note?: string
+): Promise<MedicationIntake> {
+  return confirmMedicationIntake(intakeId, { status, note });
+}
+
 export async function getMedicationAdherence(params?: { period_days?: number }): Promise<Record<string, unknown>> {
   const response = await apiClient.get<Record<string, unknown>>(API.MEDICATIONS.ADHERENCE, { params });
   return response.data;
 }
 
-export async function getMedicationHistory(params?: { page?: number; per_page?: number }): Promise<Record<string, unknown>> {
+export async function getAdherence(): Promise<Record<string, unknown>> {
+  return getMedicationAdherence();
+}
+
+export async function getMedicationHistory(
+  pageOrParams?: number | { page?: number; per_page?: number },
+  perPage?: number,
+  medicationId?: string
+): Promise<Record<string, unknown>> {
+  const params =
+    typeof pageOrParams === 'object'
+      ? pageOrParams
+      : {
+          page: pageOrParams,
+          per_page: perPage,
+          medication_id: medicationId,
+        };
+
   const response = await apiClient.get<Record<string, unknown>>(API.MEDICATIONS.HISTORY, { params });
   return response.data;
 }
 
 export default {
+  prescribeMedication,
+  getPatientMedications,
+  updateMedication,
+  deactivateMedication,
+  getMedicationsByVisit,
+  getTodaySchedule,
+  confirmIntake,
+  getAdherence,
   createDoctorMedication,
   getDoctorPatientMedications,
   updateDoctorMedication,

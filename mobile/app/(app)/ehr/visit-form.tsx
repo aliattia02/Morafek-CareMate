@@ -15,7 +15,7 @@
  *   logic, web-compatible success/error banners) is unchanged.
  */
 
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -31,13 +31,10 @@ import { Card, Input, Button } from '@/components/ui';
 import { useAuthStore }        from '@/store/auth.store';
 import { apiClient }           from '@/services/api/client';
 import { API }                 from '@/services/api/endpoints';
-import { createDoctorMedication } from '@/services/api/medications';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 import ICD10SearchInput, { ICD10Selection } from '@/components/ehr/ICD10SearchInput';
-import MedicationPrescriptionPanel, {
-  MedicationPrescriptionPanelRef,
-} from '@/components/ehr/MedicationPrescriptionPanel';
+import MedicationPrescriptionPanel from '@/components/ehr/MedicationPrescriptionPanel';
 
 const todayISO = (): string => new Date().toISOString().split('T')[0];
 
@@ -58,7 +55,7 @@ export default function VisitFormScreen() {
   const [submitting,     setSubmitting]     = useState(false);
   const [successMsg,     setSuccessMsg]     = useState<string | null>(null);
   const [submitError,    setSubmitError]    = useState<string | null>(null);
-  const medicationPanelRef = useRef<MedicationPrescriptionPanelRef>(null);
+  const [createdVisitId, setCreatedVisitId] = useState<string | undefined>(undefined);
 
   // Redirect non-doctors to home (must be in useEffect — cannot navigate during render)
   useEffect(() => {
@@ -97,15 +94,6 @@ export default function VisitFormScreen() {
       return;
     }
 
-    let medicationPayload = null;
-    if (medicationPanelRef.current?.hasEnabledPrescription()) {
-      medicationPayload = medicationPanelRef.current.getPayload();
-      if (!medicationPayload) {
-        setSubmitError('Bitte prüfen Sie die Medikationsangaben.');
-        return;
-      }
-    }
-
     try {
       setSubmitting(true);
       setSubmitError(null);
@@ -122,20 +110,10 @@ export default function VisitFormScreen() {
       );
 
       const visitId = visitRes.data?.id ?? visitRes.data?._id;
-      if (medicationPayload) {
-        await createDoctorMedication(patient_id, {
-          ...medicationPayload,
-          visit_id: visitId || undefined,
-        });
-      }
+      setCreatedVisitId(visitId || undefined);
 
       const name = patient_name ? ` für ${patient_name}` : '';
-      setSuccessMsg(
-        medicationPayload
-          ? `✅  Besuch${name} und Medikation wurden erfolgreich gespeichert.`
-          : `✅  Besuch${name} wurde erfolgreich gespeichert.`
-      );
-      setTimeout(() => router.back(), 1500);
+      setSuccessMsg(`✅  Besuch${name} wurde erfolgreich gespeichert. Verordnungen können jetzt separat gespeichert werden.`);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Fehler beim Speichern';
       setSubmitError(message);
@@ -224,8 +202,8 @@ export default function VisitFormScreen() {
             />
 
             <MedicationPrescriptionPanel
-              ref={medicationPanelRef}
-              startDateDefault={visitDate}
+              patientId={patient_id ?? ''}
+              visitId={createdVisitId}
             />
 
             {/* ── Visit Date ── */}

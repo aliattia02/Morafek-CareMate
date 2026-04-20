@@ -1,317 +1,311 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 
-import { Input } from '@/components/ui';
+import { Input, Button } from '@/components/ui';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 import PZNSearchInput from '@/components/ehr/PZNSearchInput';
 import DosageBuilder, { DosageValue } from '@/components/ehr/DosageBuilder';
-import ERezeptFields from '@/components/ehr/ERezeptFields';
-import { CreateDoctorMedicationRequest, CoverageType, DosageUnit, NormSize } from '@/services/api/medications';
+import ERezeptFields, { ERezeptValue } from '@/components/ehr/ERezeptFields';
 import { PZNEntry } from '@/constants/pzn_data';
+import {
+  prescribeMedication,
+  type DosageUnit,
+  type MedicationRecord,
+  type CreateDoctorMedicationRequest,
+} from '@/services/api/medications';
 
-interface Props {
-  startDateDefault?: string;
+export type Medication = MedicationRecord;
+
+export interface MedicationPrescriptionPanelProps {
+  patientId: string;
+  visitId?: string;
+  onMedicationAdded?: (med: Medication) => void;
 }
 
-interface FieldErrors {
-  pzn?: string;
-  trade_name?: string;
-  active_substance?: string;
-  form?: string;
-  strength?: string;
-  start_date?: string;
-  end_date?: string;
-  dosage?: string;
-}
-
-interface Draft {
-  pzn: string;
-  trade_name: string;
-  active_substance: string;
-  form: string;
-  strength: string;
-  norm_size: NormSize;
-  aut_idem: boolean;
-  coverage: CoverageType;
-  is_chronic: boolean;
-  start_date: string;
-  end_date: string;
-  duration_days: string;
-  dosage: DosageValue;
-  dosage_unit: DosageUnit;
-  dosage_note: string;
-}
-
-export interface MedicationPrescriptionPanelRef {
-  hasEnabledPrescription: () => boolean;
-  getPayload: () => CreateDoctorMedicationRequest | null;
+interface PrescriptionListItem {
+  localId: string;
+  payload: CreateDoctorMedicationRequest;
+  saved: boolean;
+  saveError?: string;
+  savedMedication?: Medication;
 }
 
 const DOSAGE_UNIT_OPTIONS: DosageUnit[] = ['Tablette', 'Kapsel', 'ml', 'IE', 'Hub', 'Tropfen'];
 
-const todayISO = () => new Date().toISOString().split('T')[0];
+const todayISO = (): string => new Date().toISOString().split('T')[0];
 
-function isValidDate(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value);
+const defaultDosage = (): DosageValue => ({ morning: 0, noon: 0, evening: 0, night: 0 });
+
+const defaultERezept = (): ERezeptValue => ({
+  norm_size: 'N1',
+  aut_idem: false,
+  coverage: 'GKV',
+  is_chronic: true,
+  duration_days: null,
+  end_date: null,
+  dosage_note: '',
+});
+
+function toDosageUnit(unit: string, fallback: DosageUnit): DosageUnit {
+  return DOSAGE_UNIT_OPTIONS.includes(unit as DosageUnit) ? (unit as DosageUnit) : fallback;
 }
 
-const MedicationPrescriptionPanel = forwardRef<MedicationPrescriptionPanelRef, Props>(function MedicationPrescriptionPanel(
-  { startDateDefault },
-  ref
-) {
-  const [enabled, setEnabled] = useState(false);
-  const [errors, setErrors] = useState<FieldErrors>({});
-  const enabledRef = useRef(false);
+function getDosageTotal(v: DosageValue): number {
+  return v.morning + v.noon + v.evening + v.night;
+}
 
-  const [draft, setDraft] = useState<Draft>({
-    pzn: '',
-    trade_name: '',
-    active_substance: '',
-    form: '',
-    strength: '',
-    norm_size: 'N1',
-    aut_idem: false,
-    coverage: 'GKV',
-    is_chronic: true,
-    start_date: startDateDefault ?? todayISO(),
-    end_date: '',
-    duration_days: '',
-    dosage: { morning: 1, noon: 0, evening: 0, night: 0 },
-    dosage_unit: 'Tablette',
-    dosage_note: '',
-  });
-  const draftRef = useRef(draft);
+function formatDose(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
 
-  useEffect(() => {
-    enabledRef.current = enabled;
-  }, [enabled]);
+function buildDosageLabel(dose: DosageValue, unit: string): string {
+  const schedule = `${formatDose(dose.morning)}-${formatDose(dose.noon)}-${formatDose(dose.evening)}-${formatDose(dose.night)}`;
+  const printableUnit = unit === 'Tablette' ? 'Tabletten' : unit === 'Kapsel' ? 'Kapseln' : unit;
+  return `${schedule} ${printableUnit}`;
+}
 
-  useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
+export default function MedicationPrescriptionPanel({
+  patientId,
+  visitId,
+  onMedicationAdded,
+}: MedicationPrescriptionPanelProps) {
+  const [currentDrug, setCurrentDrug] = useState<PZNEntry | null>(null);
+  const [currentDosage, setCurrentDosage] = useState<DosageValue>(defaultDosage());
+  const [currentUnit, setCurrentUnit] = useState<DosageUnit>('Tablette');
+  const [currentERezept, setCurrentERezept] = useState<ERezeptValue>(defaultERezept());
+  const [currentStartDate, setCurrentStartDate] = useState<string>(todayISO());
+  const [prescriptionList, setPrescriptionList] = useState<PrescriptionListItem[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const buildPayload = useCallback((currentDraft: Draft): CreateDoctorMedicationRequest | null => {
-    const nextErrors: FieldErrors = {};
+  const canAddCurrent = useMemo(
+    () => !!currentDrug && getDosageTotal(currentDosage) > 0,
+    [currentDrug, currentDosage]
+  );
 
-    if (!/^\d{8}$/.test(currentDraft.pzn.trim())) nextErrors.pzn = 'PZN muss 8-stellig sein';
-    if (!currentDraft.trade_name.trim()) nextErrors.trade_name = 'Handelsname ist erforderlich';
-    if (!currentDraft.active_substance.trim()) nextErrors.active_substance = 'Wirkstoff ist erforderlich';
-    if (!currentDraft.form.trim()) nextErrors.form = 'Darreichungsform ist erforderlich';
-    if (!currentDraft.strength.trim()) nextErrors.strength = 'Stärke ist erforderlich';
+  const unsavedCount = useMemo(() => prescriptionList.filter((item) => !item.saved).length, [prescriptionList]);
 
-    if (!isValidDate(currentDraft.start_date.trim())) {
-      nextErrors.start_date = 'Datum im Format JJJJ-MM-TT eingeben';
+  const applyPZNSelection = (entry: PZNEntry) => {
+    setCurrentDrug(entry);
+    setCurrentUnit(toDosageUnit(entry.dosage_unit, currentUnit));
+    setCurrentERezept((prev) => ({ ...prev, norm_size: entry.norm_size }));
+    setError(null);
+  };
+
+  const clearSelection = () => {
+    setCurrentDrug(null);
+    setCurrentDosage(defaultDosage());
+  };
+
+  const addCurrentToList = () => {
+    if (!currentDrug) {
+      setError('Bitte wählen Sie zuerst ein Medikament aus.');
+      return;
     }
 
-    const end = currentDraft.end_date.trim();
-    if (!currentDraft.is_chronic) {
-      if (!end) {
-        nextErrors.end_date = 'Enddatum ist erforderlich bei nicht chronischer Verordnung';
-      } else if (!isValidDate(end)) {
-        nextErrors.end_date = 'Datum im Format JJJJ-MM-TT eingeben';
+    if (getDosageTotal(currentDosage) <= 0) {
+      setError('Mindestens ein Dosierungs-Slot muss größer als 0 sein.');
+      return;
+    }
+
+    const payload: CreateDoctorMedicationRequest = {
+      pzn: currentDrug.pzn,
+      trade_name: currentDrug.trade_name,
+      active_substance: currentDrug.active_substance,
+      form: currentDrug.form,
+      strength: currentDrug.strength,
+      norm_size: currentERezept.norm_size,
+      aut_idem: currentERezept.aut_idem,
+      coverage: currentERezept.coverage,
+      is_chronic: currentERezept.is_chronic,
+      start_date: currentStartDate,
+      end_date: currentERezept.is_chronic ? undefined : (currentERezept.end_date ?? undefined),
+      duration_days: currentERezept.duration_days ?? undefined,
+      dosage_morning: currentDosage.morning,
+      dosage_noon: currentDosage.noon,
+      dosage_evening: currentDosage.evening,
+      dosage_night: currentDosage.night,
+      dosage_unit: currentUnit,
+      dosage_note: currentERezept.dosage_note || undefined,
+      visit_id: visitId,
+      is_active: true,
+    };
+
+    setPrescriptionList((prev) => [
+      ...prev,
+      {
+        localId: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        payload,
+        saved: false,
+      },
+    ]);
+
+    setCurrentDrug(null);
+    setCurrentDosage(defaultDosage());
+    setError(null);
+  };
+
+  const removeFromList = (localId: string) => {
+    if (saving) return;
+    setPrescriptionList((prev) => prev.filter((item) => item.localId !== localId));
+  };
+
+  const saveAll = async () => {
+    const pending = prescriptionList.filter((item) => !item.saved);
+    if (pending.length === 0 || saving) return;
+
+    if (!patientId) {
+      setError('Patienten-ID fehlt.');
+      return;
+    }
+
+    if (!visitId) {
+      setError('Bitte zuerst den Besuch speichern, damit die Verordnungen dem Besuch zugeordnet werden.');
+      return;
+    }
+
+    setSaving(true);
+    setError(null);
+
+    for (const item of pending) {
+      try {
+        const saved = await prescribeMedication(patientId, {
+          ...item.payload,
+          visit_id: visitId,
+        });
+
+        setPrescriptionList((prev) => prev.map((row) => (
+          row.localId === item.localId
+            ? { ...row, saved: true, saveError: undefined, savedMedication: saved }
+            : row
+        )));
+
+        onMedicationAdded?.(saved);
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Fehler beim Speichern der Medikation';
+        setPrescriptionList((prev) => prev.map((row) => (
+          row.localId === item.localId
+            ? { ...row, saveError: message }
+            : row
+        )));
+        setError('Mindestens eine Medikation konnte nicht gespeichert werden. Bitte erneut versuchen.');
       }
     }
 
-    const totalDosage =
-      currentDraft.dosage.morning +
-      currentDraft.dosage.noon +
-      currentDraft.dosage.evening +
-      currentDraft.dosage.night;
-    if (totalDosage <= 0) nextErrors.dosage = 'Mindestens ein Dosierungs-Slot muss > 0 sein';
-
-    setErrors(nextErrors);
-    if (Object.keys(nextErrors).length > 0) return null;
-
-    return {
-      pzn: currentDraft.pzn.trim(),
-      trade_name: currentDraft.trade_name.trim(),
-      active_substance: currentDraft.active_substance.trim(),
-      form: currentDraft.form.trim(),
-      strength: currentDraft.strength.trim(),
-      norm_size: currentDraft.norm_size,
-      aut_idem: currentDraft.aut_idem,
-      coverage: currentDraft.coverage,
-      is_chronic: currentDraft.is_chronic,
-      start_date: currentDraft.start_date.trim(),
-      end_date: currentDraft.is_chronic ? undefined : end,
-      duration_days: currentDraft.duration_days.trim() ? Number(currentDraft.duration_days.trim()) : undefined,
-      dosage_morning: currentDraft.dosage.morning,
-      dosage_noon: currentDraft.dosage.noon,
-      dosage_evening: currentDraft.dosage.evening,
-      dosage_night: currentDraft.dosage.night,
-      dosage_unit: currentDraft.dosage_unit,
-      dosage_note: currentDraft.dosage_note.trim() || undefined,
-      is_active: true,
-    };
-  }, []);
-
-  useImperativeHandle(ref, () => ({
-    hasEnabledPrescription: () => enabledRef.current,
-    getPayload: () => {
-      if (!enabledRef.current) return null;
-      return buildPayload(draftRef.current);
-    },
-  }), [buildPayload]);
-
-  const applyPZNSelection = (selection: PZNEntry) => {
-    setDraft((prev) => {
-      const resolvedUnit = DOSAGE_UNIT_OPTIONS.includes(selection.dosage_unit as DosageUnit)
-        ? (selection.dosage_unit as DosageUnit)
-        : prev.dosage_unit;
-
-      return {
-        ...prev,
-        pzn: selection.pzn,
-        trade_name: selection.trade_name,
-        active_substance: selection.active_substance,
-        form: selection.form,
-        strength: selection.strength,
-        norm_size: selection.norm_size,
-        dosage_unit: resolvedUnit,
-      };
-    });
-    setErrors((prev) => ({ ...prev, pzn: '', trade_name: '', active_substance: '', form: '', strength: '' }));
+    setSaving(false);
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.headerRow}>
-        <Text style={styles.headerTitle}>Medikation (E-Rezept)</Text>
-        <TouchableOpacity
-          style={[styles.toggleBtn, enabled && styles.toggleBtnEnabled]}
-          onPress={() => setEnabled((p) => !p)}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: enabled }}
-          accessibilityLabel="Medikation hinzufügen"
-        >
-          <Text style={[styles.toggleBtnText, enabled && styles.toggleBtnTextEnabled]}>
-            {enabled ? 'Aktiv' : 'Hinzufügen'}
-          </Text>
-        </TouchableOpacity>
+      <Text style={styles.panelTitle}>Add medication</Text>
+
+      <View style={styles.searchWrapper}>
+        <PZNSearchInput onSelect={applyPZNSelection} disabled={saving} />
       </View>
 
-      {!enabled ? (
-        <Text style={styles.helperText}>Optional: Medikament für diesen Besuch verordnen.</Text>
-      ) : (
-        <>
-          <View style={styles.searchWrapper}>
-            <PZNSearchInput onSelect={applyPZNSelection} />
-            {errors.pzn ? <Text style={styles.errorText}>{errors.pzn}</Text> : null}
-          </View>
-
-          <Input
-            label="Handelsname"
-            value={draft.trade_name}
-            onChangeText={(v) => {
-              setDraft((p) => ({ ...p, trade_name: v }));
-              setErrors((p) => ({ ...p, trade_name: '' }));
-            }}
-            error={errors.trade_name}
-            required
-          />
-
-          <Input
-            label="Wirkstoff"
-            value={draft.active_substance}
-            onChangeText={(v) => {
-              setDraft((p) => ({ ...p, active_substance: v }));
-              setErrors((p) => ({ ...p, active_substance: '' }));
-            }}
-            error={errors.active_substance}
-            required
-          />
-
-          <View style={styles.row2}>
-            <View style={styles.flex1}>
-              <Input
-                label="Form"
-                value={draft.form}
-                onChangeText={(v) => {
-                  setDraft((p) => ({ ...p, form: v }));
-                  setErrors((p) => ({ ...p, form: '' }));
-                }}
-                error={errors.form}
-                required
-              />
-            </View>
-            <View style={styles.flex1}>
-              <Input
-                label="Stärke"
-                value={draft.strength}
-                onChangeText={(v) => {
-                  setDraft((p) => ({ ...p, strength: v }));
-                  setErrors((p) => ({ ...p, strength: '' }));
-                }}
-                error={errors.strength}
-                required
-              />
+      {currentDrug && (
+        <View style={styles.drugCard}>
+          <View style={styles.drugMain}>
+            <Text style={styles.drugTitle}>{currentDrug.trade_name}</Text>
+            <Text style={styles.drugSubtitle}>{currentDrug.active_substance} • {currentDrug.strength}</Text>
+            <View style={styles.pznBadge}>
+              <Text style={styles.pznText}>{currentDrug.pzn}</Text>
             </View>
           </View>
 
-          <Input
-            label="Startdatum"
-            value={draft.start_date}
-            onChangeText={(v) => {
-              setDraft((p) => ({ ...p, start_date: v }));
-              setErrors((p) => ({ ...p, start_date: '' }));
-            }}
-            placeholder="JJJJ-MM-TT"
-            error={errors.start_date}
-            required
-          />
+          <TouchableOpacity
+            onPress={clearSelection}
+            style={styles.clearButton}
+            disabled={saving}
+            accessibilityRole="button"
+            accessibilityLabel="Auswahl löschen"
+          >
+            <Text style={styles.clearButtonText}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
-          <DosageBuilder
-            value={draft.dosage}
-            unit={draft.dosage_unit}
-            onChange={(dosage) => {
-              setDraft((p) => ({ ...p, dosage }));
-              setErrors((p) => ({ ...p, dosage: '' }));
-            }}
-            onUnitChange={(unit) => {
-              const resolvedUnit = DOSAGE_UNIT_OPTIONS.includes(unit as DosageUnit)
-                ? (unit as DosageUnit)
-                : draft.dosage_unit;
-              setDraft((p) => ({ ...p, dosage_unit: resolvedUnit }));
-            }}
-          />
-          {errors.dosage ? <Text style={styles.errorText}>{errors.dosage}</Text> : null}
+      <DosageBuilder
+        value={currentDosage}
+        unit={currentUnit}
+        onChange={setCurrentDosage}
+        onUnitChange={(unit) => setCurrentUnit(toDosageUnit(unit, currentUnit))}
+        disabled={saving || !currentDrug}
+      />
 
-          <ERezeptFields
-            value={{
-              norm_size: draft.norm_size,
-              aut_idem: draft.aut_idem,
-              coverage: draft.coverage,
-              is_chronic: draft.is_chronic,
-              duration_days: draft.duration_days.trim() ? Number(draft.duration_days.trim()) : null,
-              end_date: draft.end_date.trim() ? draft.end_date : null,
-              dosage_note: draft.dosage_note,
-            }}
-            onChange={(partial) => {
-              setDraft((prev) => ({
-                ...prev,
-                norm_size: partial.norm_size ?? prev.norm_size,
-                aut_idem: partial.aut_idem ?? prev.aut_idem,
-                coverage: partial.coverage ?? prev.coverage,
-                is_chronic: partial.is_chronic ?? prev.is_chronic,
-                duration_days:
-                  partial.duration_days !== undefined
-                    ? (partial.duration_days == null ? '' : String(partial.duration_days))
-                    : prev.duration_days,
-                end_date: partial.end_date !== undefined ? (partial.end_date ?? '') : prev.end_date,
-                dosage_note: partial.dosage_note ?? prev.dosage_note,
-              }));
+      <ERezeptFields
+        value={currentERezept}
+        onChange={(partial) => setCurrentERezept((prev) => ({ ...prev, ...partial }))}
+        disabled={saving || !currentDrug}
+      />
 
-              if (partial.end_date !== undefined || partial.is_chronic !== undefined) {
-                setErrors((prev) => ({ ...prev, end_date: '' }));
-              }
-            }}
+      <Input
+        label="Start date"
+        value={currentStartDate}
+        onChangeText={setCurrentStartDate}
+        placeholder="YYYY-MM-DD"
+        editable={!saving}
+      />
+
+      <Button
+        title="Add to prescription list"
+        onPress={addCurrentToList}
+        disabled={!canAddCurrent || saving}
+        fullWidth
+      />
+
+      {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+      {prescriptionList.length > 0 && (
+        <View style={styles.listSection}>
+          <Text style={styles.sectionTitle}>Prescriptions in this visit</Text>
+
+          {prescriptionList.map((item) => {
+            const doseLabel = buildDosageLabel({
+              morning: item.payload.dosage_morning,
+              noon: item.payload.dosage_noon,
+              evening: item.payload.dosage_evening,
+              night: item.payload.dosage_night,
+            }, item.payload.dosage_unit);
+
+            return (
+              <View key={item.localId} style={styles.listRow}>
+                <View style={styles.listMain}>
+                  <Text style={styles.listTrade}>{item.payload.trade_name}</Text>
+                  <Text style={styles.listDose}>{doseLabel}</Text>
+                  {item.saved ? <Text style={styles.savedText}>Gespeichert</Text> : null}
+                  {item.saveError ? <Text style={styles.rowErrorText}>{item.saveError}</Text> : null}
+                </View>
+
+                <TouchableOpacity
+                  onPress={() => removeFromList(item.localId)}
+                  disabled={saving}
+                  style={styles.trashButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Verordnung ${item.payload.trade_name} entfernen`}
+                >
+                  <Text style={styles.trashText}>🗑️</Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+
+          {!visitId && unsavedCount > 0 ? (
+            <Text style={styles.helperText}>Bitte zuerst den Besuch speichern, danach können Verordnungen gespeichert werden.</Text>
+          ) : null}
+
+          <Button
+            title={saving ? 'Saving…' : `Save all${unsavedCount > 0 ? ` (${unsavedCount})` : ''}`}
+            onPress={saveAll}
+            loading={saving}
+            disabled={saving || unsavedCount === 0 || !visitId}
+            fullWidth
           />
-          {errors.end_date ? <Text style={styles.errorText}>{errors.end_date}</Text> : null}
-        </>
+        </View>
       )}
     </View>
   );
-});
+}
 
 const styles = StyleSheet.create({
   container: {
@@ -322,59 +316,131 @@ const styles = StyleSheet.create({
     borderRadius: borderRadius.md,
     padding: spacing.md,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.xs,
-    gap: spacing.sm,
-  },
-  headerTitle: {
+  panelTitle: {
     ...typography.body,
     color: colors.text.primary,
     fontWeight: '700',
-    flex: 1,
-  },
-  toggleBtn: {
-    borderWidth: 1,
-    borderColor: colors.primary,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: borderRadius.full,
-    backgroundColor: colors.surface,
-  },
-  toggleBtnEnabled: {
-    backgroundColor: colors.primary,
-  },
-  toggleBtnText: {
-    ...typography.small,
-    color: colors.primary,
-    fontWeight: '700',
-  },
-  toggleBtnTextEnabled: {
-    color: '#fff',
-  },
-  helperText: {
-    ...typography.small,
-    color: colors.text.secondary,
+    marginBottom: spacing.sm,
   },
   searchWrapper: {
     zIndex: 12,
     elevation: 12,
   },
-  row2: {
+  drugCard: {
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    padding: spacing.sm,
+    backgroundColor: colors.surface,
     flexDirection: 'row',
     gap: spacing.sm,
   },
-  flex1: {
+  drugMain: {
     flex: 1,
+  },
+  drugTitle: {
+    ...typography.body,
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  drugSubtitle: {
+    ...typography.small,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  pznBadge: {
+    alignSelf: 'flex-start',
+    marginTop: spacing.xs,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.primary + '14',
+    paddingHorizontal: spacing.xs,
+    paddingVertical: 2,
+  },
+  pznText: {
+    ...typography.small,
+    color: colors.primary,
+    fontWeight: '700',
+    fontFamily: 'monospace',
+  },
+  clearButton: {
+    width: 28,
+    height: 28,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceVariant,
+  },
+  clearButtonText: {
+    ...typography.body,
+    color: colors.text.secondary,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  listSection: {
+    marginTop: spacing.md,
+    gap: spacing.sm,
+  },
+  sectionTitle: {
+    ...typography.small,
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  listRow: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  listMain: {
+    flex: 1,
+  },
+  listTrade: {
+    ...typography.small,
+    color: colors.text.primary,
+    fontWeight: '700',
+  },
+  listDose: {
+    ...typography.small,
+    color: colors.text.secondary,
+  },
+  savedText: {
+    ...typography.small,
+    color: colors.successDark,
+    marginTop: 2,
+  },
+  rowErrorText: {
+    ...typography.small,
+    color: colors.danger,
+    marginTop: 2,
+  },
+  trashButton: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surfaceVariant,
+  },
+  trashText: {
+    fontSize: 16,
+  },
+  helperText: {
+    ...typography.small,
+    color: colors.text.secondary,
   },
   errorText: {
     ...typography.small,
     color: colors.danger,
-    marginTop: -spacing.xs,
-    marginBottom: spacing.sm,
+    marginTop: spacing.sm,
   },
 });
-
-export default MedicationPrescriptionPanel;
