@@ -42,6 +42,8 @@ import {
 } from '@/services/api/ehr';
 import {
   getDoctorPatientMedications,
+  deactivateMedication,
+  updateDoctorMedication,
   type MedicationRecord,
 } from '@/services/api/medications';
 import { apiClient } from '@/services/api/client';
@@ -139,6 +141,14 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
   const [medicationsError, setMedicationsError] = useState<string | null>(null);
   const [medicationsRefreshing, setMedicationsRefreshing] = useState(false);
   const [medFilter, setMedFilter] = useState<'all' | 'active' | 'inactive'>('active');
+  const [medicationActionLoadingId, setMedicationActionLoadingId] = useState<string | null>(null);
+  const [editingMedicationId, setEditingMedicationId] = useState<string | null>(null);
+  const [editingDosage, setEditingDosage] = useState({
+    morning: '',
+    noon: '',
+    evening: '',
+    night: '',
+  });
 
   const [messages, setMessages] = useState<MessageResponse[]>([]);
   const [messagesLoading, setMessagesLoading] = useState(false);
@@ -400,6 +410,105 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
 
   const dosageScheduleLabel = (med: MedicationRecord) =>
     `${med.dosage_morning}-${med.dosage_noon}-${med.dosage_evening}-${med.dosage_night}`;
+
+  const medicationIdOf = useCallback((med: MedicationRecord) => String(med._id ?? med.id ?? ''), []);
+
+  const startDosageEdit = useCallback((med: MedicationRecord) => {
+    const medicationId = medicationIdOf(med);
+    if (!medicationId) return;
+    setMedicationsError(null);
+    setEditingMedicationId(medicationId);
+    setEditingDosage({
+      morning: String(med.dosage_morning ?? 0),
+      noon: String(med.dosage_noon ?? 0),
+      evening: String(med.dosage_evening ?? 0),
+      night: String(med.dosage_night ?? 0),
+    });
+  }, [medicationIdOf]);
+
+  const cancelDosageEdit = useCallback(() => {
+    setEditingMedicationId(null);
+    setEditingDosage({ morning: '', noon: '', evening: '', night: '' });
+  }, []);
+
+  const saveDosageEdit = useCallback(async (medicationId: string) => {
+    const parseDose = (value: string) => {
+      const trimmed = value.trim();
+      if (!/^\d+$/.test(trimmed)) return null;
+      return Number(trimmed);
+    };
+
+    const dosage_morning = parseDose(editingDosage.morning);
+    const dosage_noon = parseDose(editingDosage.noon);
+    const dosage_evening = parseDose(editingDosage.evening);
+    const dosage_night = parseDose(editingDosage.night);
+
+    if (
+      dosage_morning === null ||
+      dosage_noon === null ||
+      dosage_evening === null ||
+      dosage_night === null
+    ) {
+      setMedicationsError('Dosage values must be whole numbers (0 or higher).');
+      return;
+    }
+
+    try {
+      setMedicationActionLoadingId(medicationId);
+      setMedicationsError(null);
+      const updated = await updateDoctorMedication(patient.id, medicationId, {
+        dosage_morning,
+        dosage_noon,
+        dosage_evening,
+        dosage_night,
+      });
+      setMedications((prev) =>
+        prev.map((item) => (medicationIdOf(item) === medicationId ? updated : item))
+      );
+      cancelDosageEdit();
+    } catch (err: unknown) {
+      setMedicationsError(err instanceof Error ? err.message : 'Failed to update dosage');
+    } finally {
+      setMedicationActionLoadingId(null);
+    }
+  }, [cancelDosageEdit, editingDosage.evening, editingDosage.morning, editingDosage.night, editingDosage.noon, medicationIdOf, patient.id]);
+
+  const handleDeactivateMedication = useCallback((med: MedicationRecord) => {
+    const medicationId = medicationIdOf(med);
+    if (!medicationId) return;
+    if (med.is_active === false) return;
+
+    Alert.alert(
+      'Deactivate medication',
+      `Deactivate ${med.trade_name}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Deactivate',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setMedicationActionLoadingId(medicationId);
+              setMedicationsError(null);
+              await deactivateMedication(patient.id, medicationId);
+              setMedications((prev) =>
+                prev.map((item) =>
+                  medicationIdOf(item) === medicationId ? { ...item, is_active: false } : item
+                )
+              );
+              if (editingMedicationId === medicationId) {
+                cancelDosageEdit();
+              }
+            } catch (err: unknown) {
+              setMedicationsError(err instanceof Error ? err.message : 'Failed to deactivate medication');
+            } finally {
+              setMedicationActionLoadingId(null);
+            }
+          },
+        },
+      ]
+    );
+  }, [cancelDosageEdit, editingMedicationId, medicationIdOf, patient.id]);
 
   // ── Render ───────────────────────────────────────────────────────────────
 
@@ -1034,6 +1143,77 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
                     {med.dosage_note ? (
                       <Text style={styles.medNote}>{med.dosage_note}</Text>
                     ) : null}
+
+                    <View style={styles.medActionRow}>
+                      <TouchableOpacity
+                        style={[styles.medActionBtn, styles.medEditBtn]}
+                        onPress={() => startDosageEdit(med)}
+                        disabled={medicationActionLoadingId === medicationIdOf(med)}
+                      >
+                        <Text style={styles.medEditBtnText}>Edit dosage</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[styles.medActionBtn, styles.medDeactivateBtn, !isActive && styles.medActionBtnDisabled]}
+                        onPress={() => handleDeactivateMedication(med)}
+                        disabled={!isActive || medicationActionLoadingId === medicationIdOf(med)}
+                      >
+                        <Text style={styles.medDeactivateBtnText}>Deactivate</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {editingMedicationId === medicationIdOf(med) && (
+                      <View style={styles.medEditPanel}>
+                        <Text style={styles.medEditTitle}>Dosage schedule (Mo-Mi-Ab-Na)</Text>
+                        <View style={styles.medEditInputsRow}>
+                          <TextInput
+                            style={styles.medEditInput}
+                            keyboardType="number-pad"
+                            value={editingDosage.morning}
+                            onChangeText={(value) => setEditingDosage((prev) => ({ ...prev, morning: value }))}
+                            placeholder="Mo"
+                          />
+                          <TextInput
+                            style={styles.medEditInput}
+                            keyboardType="number-pad"
+                            value={editingDosage.noon}
+                            onChangeText={(value) => setEditingDosage((prev) => ({ ...prev, noon: value }))}
+                            placeholder="Mi"
+                          />
+                          <TextInput
+                            style={styles.medEditInput}
+                            keyboardType="number-pad"
+                            value={editingDosage.evening}
+                            onChangeText={(value) => setEditingDosage((prev) => ({ ...prev, evening: value }))}
+                            placeholder="Ab"
+                          />
+                          <TextInput
+                            style={styles.medEditInput}
+                            keyboardType="number-pad"
+                            value={editingDosage.night}
+                            onChangeText={(value) => setEditingDosage((prev) => ({ ...prev, night: value }))}
+                            placeholder="Na"
+                          />
+                        </View>
+                        <View style={styles.medEditActionRow}>
+                          <TouchableOpacity
+                            style={[styles.medActionBtn, styles.medEditCancelBtn]}
+                            onPress={cancelDosageEdit}
+                            disabled={medicationActionLoadingId === medicationIdOf(med)}
+                          >
+                            <Text style={styles.medEditCancelBtnText}>Cancel</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.medActionBtn, styles.medEditSaveBtn]}
+                            onPress={() => saveDosageEdit(medicationIdOf(med))}
+                            disabled={medicationActionLoadingId === medicationIdOf(med)}
+                          >
+                            <Text style={styles.medEditSaveBtnText}>
+                              {medicationActionLoadingId === medicationIdOf(med) ? 'Saving…' : 'Save'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
                   </View>
                 );
               });
@@ -1763,6 +1943,91 @@ const styles = StyleSheet.create({
   medChronicText: { color: colors.primary, fontWeight: '600' },
 
   medNote: { ...typography.small, color: colors.text.secondary, fontStyle: 'italic' },
+  medActionRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  medActionBtn: {
+    flex: 1,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  medEditBtn: {
+    backgroundColor: '#E3F2FD',
+    borderColor: '#90CAF9',
+  },
+  medEditBtnText: {
+    ...typography.small,
+    color: '#1565C0',
+    fontWeight: '700',
+  },
+  medDeactivateBtn: {
+    backgroundColor: '#FFEBEE',
+    borderColor: '#FFCDD2',
+  },
+  medDeactivateBtnText: {
+    ...typography.small,
+    color: '#C62828',
+    fontWeight: '700',
+  },
+  medActionBtnDisabled: {
+    opacity: 0.5,
+  },
+  medEditPanel: {
+    marginTop: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.background,
+    padding: spacing.sm,
+    gap: spacing.sm,
+  },
+  medEditTitle: {
+    ...typography.small,
+    color: colors.text.secondary,
+    fontWeight: '700',
+  },
+  medEditInputsRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  medEditInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: borderRadius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    backgroundColor: colors.surface,
+    color: colors.text.primary,
+    textAlign: 'center',
+  },
+  medEditActionRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  medEditCancelBtn: {
+    backgroundColor: colors.surface,
+    borderColor: colors.border,
+  },
+  medEditCancelBtnText: {
+    ...typography.small,
+    color: colors.text.secondary,
+    fontWeight: '700',
+  },
+  medEditSaveBtn: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  medEditSaveBtnText: {
+    ...typography.small,
+    color: colors.surface,
+    fontWeight: '700',
+  },
 
   // ── Vitals enhanced ──────────────────────────────────────────────────────
   urgentBanner: {
