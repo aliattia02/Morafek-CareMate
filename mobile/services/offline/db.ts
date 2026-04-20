@@ -4,6 +4,7 @@
 
 import { Platform } from 'react-native';
 import type { VitalResponse } from '@/services/api/ehr';
+import type { TodayMedicationResponse } from '@/services/api/medications';
 
 let db: any;
 
@@ -20,6 +21,7 @@ else {
   const vitals: any[] = [];
   const pendingVitals: any[] = [];
   const pendingMedicationIntakes: any[] = [];
+  let todayMedicationsCache: any | null = null;
 
   db = {
     execSync: () => {},
@@ -54,8 +56,20 @@ else {
           });
         }
       }
+      if (query.includes('today_medications_cache')) {
+        if (query.includes('DELETE')) {
+          todayMedicationsCache = null;
+        } else {
+          todayMedicationsCache = {
+            cache_key: params[0],
+            payload: params[1],
+            updated_at: params[2],
+          };
+        }
+      }
     },
     getAllSync: (query: string) => {
+      if (query.includes('today_medications_cache')) return todayMedicationsCache ? [todayMedicationsCache] : [];
       if (query.includes('pending_medication_intakes')) return pendingMedicationIntakes;
       if (query.includes('pending_vitals')) return pendingVitals;
       if (query.includes('vitals')) return vitals;
@@ -100,6 +114,11 @@ export function initDB() {
       status TEXT NOT NULL,
       note TEXT,
       created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS today_medications_cache (
+      cache_key TEXT PRIMARY KEY,
+      payload TEXT NOT NULL,
+      updated_at TEXT
     );
   `);
 }
@@ -203,4 +222,24 @@ export function getPendingMedicationIntakes(): PendingMedicationIntake[] {
 
 export function deletePendingMedicationIntake(localId: string) {
   db.runSync(`DELETE FROM pending_medication_intakes WHERE local_id = ?`, [localId]);
+}
+
+export function cacheTodayMedications(data: TodayMedicationResponse) {
+  const payload = JSON.stringify(data);
+  db.runSync(`DELETE FROM today_medications_cache WHERE cache_key = ?`, ['today']);
+  db.runSync(
+    `INSERT INTO today_medications_cache VALUES (?,?,?)`,
+    ['today', payload, new Date().toISOString()]
+  );
+}
+
+export function getCachedTodayMedications(): TodayMedicationResponse | null {
+  const rows = db.getAllSync(`SELECT * FROM today_medications_cache WHERE cache_key = 'today' LIMIT 1`);
+  const row = rows?.[0];
+  if (!row?.payload) return null;
+  try {
+    return JSON.parse(row.payload) as TodayMedicationResponse;
+  } catch {
+    return null;
+  }
 }

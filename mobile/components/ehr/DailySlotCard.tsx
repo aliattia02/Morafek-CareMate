@@ -1,63 +1,71 @@
 import React from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { E, ET } from '@/constants/elderlyTheme';
-import type { TodayMedicationSlotItem } from '@/services/api/medications';
 
-interface DailySlotCardProps {
-  item: TodayMedicationSlotItem;
-  onOpenDetails: (item: TodayMedicationSlotItem) => void;
-  onConfirm: (item: TodayMedicationSlotItem, status: 'taken' | 'skipped') => void;
-  isUpdating?: boolean;
+export interface DailySlotCardProps {
+  medicationName: string;
+  activeSubstance: string;
+  dosage: number;
+  unit: string;
+  intakeId: string;
+  status: 'pending' | 'taken' | 'skipped';
+  onConfirm: (intakeId: string, status: 'taken' | 'skipped') => void;
+  disabled?: boolean;
 }
 
-const STATUS_META: Record<TodayMedicationSlotItem['status'], { label: string; bg: string; fg: string }> = {
-  pending: { label: 'Pending', bg: E.colors.warningLight, fg: E.colors.warning },
-  taken: { label: 'Taken', bg: E.colors.successLight, fg: E.colors.success },
-  skipped: { label: 'Skipped', bg: E.colors.dangerLight, fg: E.colors.danger },
-};
-
-export default function DailySlotCard({ item, onOpenDetails, onConfirm, isUpdating }: DailySlotCardProps) {
-  const status = STATUS_META[item.status];
-  const canConfirm = item.status === 'pending' && !isUpdating;
+export default function DailySlotCard({
+  medicationName,
+  activeSubstance,
+  dosage,
+  unit,
+  intakeId,
+  status,
+  onConfirm,
+  disabled = false,
+}: DailySlotCardProps) {
+  const isPending = status === 'pending';
+  const isTaken = status === 'taken';
+  const isSkipped = status === 'skipped';
 
   return (
-    <View style={styles.card}>
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>{item.medication.trade_name}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: status.bg }]}>
-          <Text style={[styles.statusText, { color: status.fg }]}>{status.label}</Text>
+    <View
+      style={[
+        styles.card,
+        isTaken && styles.cardTaken,
+        isSkipped && styles.cardSkipped,
+      ]}
+    >
+      <Text style={styles.name}>{medicationName}</Text>
+      <Text style={styles.dosage}>{`${dosage} ${unit}`}</Text>
+      <Text style={styles.substance}>{activeSubstance}</Text>
+
+      {isPending ? (
+        <View style={styles.pendingActions}>
+          <TouchableOpacity
+            style={[styles.takeButton, disabled && styles.disabled]}
+            onPress={() => onConfirm(intakeId, 'taken')}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${medicationName} nehmen`}
+          >
+            <Text style={styles.takeButtonText}>Nehmen</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.skipLink}
+            onPress={() => onConfirm(intakeId, 'skipped')}
+            disabled={disabled}
+            accessibilityRole="button"
+            accessibilityLabel={`${medicationName} überspringen`}
+          >
+            <Text style={[styles.skipLinkText, disabled && styles.disabledText]}>Überspringen</Text>
+          </TouchableOpacity>
         </View>
-      </View>
-
-      {item.medication.active_substance ? (
-        <Text style={styles.subtitle}>{item.medication.active_substance}</Text>
-      ) : null}
-
-      <Text style={styles.dose}>💊 {item.dosage} {item.unit}</Text>
-
-      <View style={styles.actionsRow}>
-        <TouchableOpacity style={styles.detailButton} onPress={() => onOpenDetails(item)}>
-          <Text style={styles.detailButtonText}>Details</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionButton, styles.takenButton, !canConfirm && styles.disabledButton]}
-          onPress={() => onConfirm(item, 'taken')}
-          disabled={!canConfirm}
-        >
-          <Text style={styles.actionText}>Taken</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionButton, styles.skippedButton, !canConfirm && styles.disabledButton]}
-          onPress={() => onConfirm(item, 'skipped')}
-          disabled={!canConfirm}
-        >
-          <Text style={styles.actionText}>Skip</Text>
-        </TouchableOpacity>
-      </View>
-
-      {isUpdating ? <ActivityIndicator color={E.colors.primary} style={styles.loader} /> : null}
+      ) : (
+        <View style={styles.statusRow}>
+          <Text style={styles.statusIcon}>{isTaken ? '✅' : '✖️'}</Text>
+          <Text style={styles.statusLabel}>{isTaken ? 'Genommen' : 'Übersprungen'}</Text>
+        </View>
+      )}
     </View>
   );
 }
@@ -65,78 +73,72 @@ export default function DailySlotCard({ item, onOpenDetails, onConfirm, isUpdati
 const styles = StyleSheet.create({
   card: {
     backgroundColor: E.colors.surface,
-    borderRadius: E.radius,
     borderWidth: 1,
     borderColor: E.colors.border,
+    borderRadius: E.radius,
     padding: E.padSm,
-    gap: 8,
+    gap: 6,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
+  cardTaken: {
+    backgroundColor: E.colors.successLight,
+    borderColor: E.colors.success,
   },
-  title: {
+  cardSkipped: {
+    backgroundColor: E.colors.surfaceAlt,
+    borderColor: E.colors.border,
+  },
+  name: {
     ...ET.bodyBold,
-    flex: 1,
   },
-  subtitle: {
-    ...ET.small,
-  },
-  dose: {
+  dosage: {
     ...ET.body,
+    color: E.colors.textPrimary,
+  },
+  substance: {
+    ...ET.small,
     color: E.colors.textSecondary,
   },
-  statusBadge: {
-    borderRadius: E.radiusFull,
-    paddingHorizontal: 10,
+  pendingActions: {
+    gap: 8,
+    marginTop: 4,
+  },
+  takeButton: {
+    minHeight: 52,
+    backgroundColor: E.colors.primary,
+    borderRadius: E.radiusSm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  takeButtonText: {
+    ...ET.bodyBold,
+    color: E.colors.textInverse,
+  },
+  skipLink: {
+    alignSelf: 'center',
     paddingVertical: 4,
   },
-  statusText: {
+  skipLinkText: {
     ...ET.small,
-    fontWeight: '700',
+    color: E.colors.textSecondary,
+    textDecorationLine: 'underline',
   },
-  actionsRow: {
+  statusRow: {
+    marginTop: 6,
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
   },
-  detailButton: {
-    flex: 1.1,
-    borderRadius: E.radiusSm,
-    borderWidth: 1,
-    borderColor: E.colors.border,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+  statusIcon: {
+    fontSize: 18,
   },
-  detailButtonText: {
-    ...ET.small,
-    fontWeight: '700',
-    color: E.colors.textSecondary,
+  statusLabel: {
+    ...ET.bodyBold,
+    color: E.colors.textPrimary,
   },
-  actionButton: {
-    flex: 1,
-    borderRadius: E.radiusSm,
-    minHeight: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
+  disabled: {
+    opacity: 0.5,
   },
-  takenButton: {
-    backgroundColor: E.colors.success,
-  },
-  skippedButton: {
-    backgroundColor: E.colors.warning,
-  },
-  actionText: {
-    ...ET.small,
-    color: E.colors.textInverse,
-    fontWeight: '700',
-  },
-  disabledButton: {
-    opacity: 0.45,
-  },
-  loader: {
-    marginTop: 4,
+  disabledText: {
+    opacity: 0.5,
   },
 });
