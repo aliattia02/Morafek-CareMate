@@ -847,8 +847,9 @@ def build_medication_resource(med: dict) -> dict:
     extensions: list[dict[str, Any]] = []
     extensions.append({
         "url": "https://fhir.kbv.de/StructureDefinition/KBV_EX_ERP_Medication_Category",
-        "valueCodeableConcept": {
-            "text": _KBV_MEDICATION_CATEGORY_CODE,
+        "valueCoding": {
+            "system": "https://fhir.kbv.de/CodeSystem/KBV_CS_ERP_Medication_Category",
+            "code": _KBV_MEDICATION_CATEGORY_CODE,
         },
     })
     extensions.append({
@@ -877,6 +878,7 @@ def build_medication_request(med: dict) -> dict:
     timing_when = _build_timing_when(med)
     coverage = str(med.get("coverage", "") or "").strip()
     co_payment_code = _KBV_STATUS_CO_PAYMENT_CODE_MAP.get(coverage, "2")
+    is_chronic = bool(med.get("is_chronic", False))
     resource: dict[str, Any] = {
         "resourceType": "MedicationRequest",
         "id": request_id,
@@ -919,7 +921,7 @@ def build_medication_request(med: dict) -> dict:
         bounds_period: dict[str, str] = {}
         if start_date:
             bounds_period["start"] = start_date
-        if end_date and not bool(med.get("is_chronic", False)):
+        if end_date and not is_chronic:
             bounds_period["end"] = end_date
         if bounds_period:
             repeat["boundsPeriod"] = bounds_period
@@ -936,7 +938,6 @@ def build_medication_request(med: dict) -> dict:
         resource["requester"] = {"reference": f"Practitioner/{med['doctor_id']}"}
     if med.get("visit_id"):
         resource["encounter"] = {"reference": f"Encounter/{med['visit_id']}"}
-    is_chronic = bool(med.get("is_chronic", False))
     if start_date or (end_date and not is_chronic):
         validity_period: dict[str, str] = {}
         if start_date:
@@ -1059,9 +1060,10 @@ def _is_valid_iso8601(value: Any, *, date_only_allowed: bool) -> bool:
     raw = str(value).strip()
     if not raw:
         return False
-    if date_only_allowed and re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+    is_date_only = bool(re.match(r"^\d{4}-\d{2}-\d{2}$", raw))
+    if date_only_allowed and is_date_only:
         return True
-    if not date_only_allowed and re.match(r"^\d{4}-\d{2}-\d{2}$", raw):
+    if not date_only_allowed and is_date_only:
         return False
     try:
         datetime.fromisoformat(raw.replace("Z", "+00:00"))
@@ -1095,7 +1097,7 @@ def validate_medication_bundle_entries(entries: list) -> dict:
                 add_error(resource, "resourceType", "must be Medication")
 
             profiles = resource.get("meta", {}).get("profile", [])
-            if not isinstance(profiles, list) or not profiles or "KBV_PR_ERP_Medication_PZN" not in str(profiles[0]):
+            if not isinstance(profiles, list) or not profiles or PROFILE.KBV_ERP_MEDICATION_PZN not in profiles:
                 add_error(resource, "meta.profile[0]", "must contain KBV_PR_ERP_Medication_PZN")
 
             coding = ((resource.get("code", {}) or {}).get("coding", []) or [{}])[0]
