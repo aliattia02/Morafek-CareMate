@@ -31,6 +31,7 @@ References
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 from typing import Any
 from uuid import uuid4
 
@@ -653,21 +654,41 @@ def _normalize_fhir_date(value: Any) -> str | None:
 
 
 def _build_dosage_text(medication_doc: dict) -> str:
-    dosage_pattern = "-".join(
-        str(int(medication_doc.get(f"dosage_{slot}", 0) or 0))
+    dosage_values = [
+        int(medication_doc.get(f"dosage_{slot}") or 0)
         for slot in ("morning", "noon", "evening", "night")
-    )
+    ]
+    dosage_pattern = "-".join(str(value) for value in dosage_values)
     dosage_unit = str(medication_doc.get("dosage_unit", "") or "").strip()
     dosage_note = str(medication_doc.get("dosage_note", "") or "").strip()
+    if not any(dosage_values) and not dosage_unit and not dosage_note:
+        return ""
     text = f"{dosage_pattern} {dosage_unit}".strip()
     if dosage_note:
         text = f"{text} ({dosage_note})" if text else dosage_note
     return text
 
 
+def _parse_strength_text(strength_text: str) -> tuple[float, str] | None:
+    match = re.match(r"^\s*(\d+(?:[.,]\d+)?)\s*(.+?)\s*$", strength_text or "")
+    if not match:
+        return None
+    numeric_part = match.group(1).replace(",", ".")
+    unit_part = match.group(2).strip()
+    if not unit_part:
+        return None
+    try:
+        value = float(numeric_part)
+    except ValueError:
+        return None
+    return value, unit_part
+
+
 def build_kbv_medication_resource(medication_doc: dict) -> dict:
     medication_id = str(medication_doc.get("_id") or medication_doc.get("id") or uuid4())
     pzn = str(medication_doc.get("pzn", "") or "").strip()
+    if not pzn:
+        raise ValueError(f"Medication PZN is required for KBV medication export (id={medication_id}).")
     trade_name = str(medication_doc.get("trade_name", "") or "").strip()
     active_substance = str(medication_doc.get("active_substance", "") or "").strip()
     form = str(medication_doc.get("form", "") or "").strip()
@@ -694,27 +715,36 @@ def build_kbv_medication_resource(medication_doc: dict) -> dict:
     if active_substance:
         ingredient: dict[str, Any] = {"itemCodeableConcept": {"text": active_substance}}
         if strength:
-            ingredient["strength"] = {"numerator": {"value": 1, "unit": strength}}
+            parsed_strength = _parse_strength_text(strength)
+            if parsed_strength:
+                amount_value, amount_unit = parsed_strength
+                ingredient["strength"] = {"numerator": {"value": amount_value, "unit": amount_unit}}
         resource["ingredient"] = [ingredient]
 
-    resource["extension"] = [
-        {
+    extensions: list[dict[str, Any]] = []
+    if norm_size:
+        extensions.append({
             "url": "https://morafek.app/fhir/StructureDefinition/medication-norm-size",
             "valueString": norm_size,
-        },
-        {
+        })
+    coverage = str(medication_doc.get("coverage", "") or "").strip()
+    if coverage:
+        extensions.append({
             "url": "https://morafek.app/fhir/StructureDefinition/medication-coverage",
-            "valueString": str(medication_doc.get("coverage", "") or ""),
-        },
-        {
+            "valueString": coverage,
+        })
+    if "aut_idem" in medication_doc:
+        extensions.append({
             "url": "https://morafek.app/fhir/StructureDefinition/medication-aut-idem",
             "valueBoolean": bool(medication_doc.get("aut_idem", False)),
-        },
-        {
+        })
+    if "is_chronic" in medication_doc:
+        extensions.append({
             "url": "https://morafek.app/fhir/StructureDefinition/medication-is-chronic",
             "valueBoolean": bool(medication_doc.get("is_chronic", False)),
-        },
-    ]
+        })
+    if extensions:
+        resource["extension"] = extensions
     return resource
 
 
@@ -728,6 +758,7 @@ def build_kbv_medication_request_resource(
     start_date = _normalize_fhir_date(medication_doc.get("start_date"))
     end_date = _normalize_fhir_date(medication_doc.get("end_date"))
 
+    dosage_text = _build_dosage_text(medication_doc)
     resource: dict[str, Any] = {
         "resourceType": "MedicationRequest",
         "id": request_id,
@@ -736,8 +767,9 @@ def build_kbv_medication_request_resource(
         "intent": "order",
         "medicationReference": {"reference": f"Medication/{medication_id}"},
         "subject": {"reference": f"Patient/{patient_id}"},
-        "dosageInstruction": [{"text": _build_dosage_text(medication_doc)}],
     }
+    if dosage_text:
+        resource["dosageInstruction"] = [{"text": dosage_text}]
 
     if start_date:
         resource["authoredOn"] = start_date
@@ -781,8 +813,9 @@ def build_medication_statement_resource(
     if intake_date:
         resource["effectiveDateTime"] = intake_date
         resource["dateAsserted"] = intake_date
-    if intake_doc.get("note"):
-        resource["note"] = [{"text": str(intake_doc.get("note", ""))}]
+    note = str(intake_doc.get("note", "") or "").strip()
+    if note:
+        resource["note"] = [{"text": note}]
     return resource
 
 
@@ -793,7 +826,10 @@ def validate_kbv_medication_resource(resource: dict) -> None:
     if PROFILE.KBV_ERP_MEDICATION_PZN not in profiles:
         raise ValueError("KBV medication profile URL is missing.")
     code = resource.get("code", {})
-    coding = (code.get("coding") or [{}])[0]
+    coding_list = code.get("coding")
+    if not isinstance(coding_list, list) or not coding_list:
+        raise ValueError("Medication.code.coding is required.")
+    coding = coding_list[0]
     if coding.get("system") != "http://fhir.de/CodeSystem/ifa/pzn":
         raise ValueError("Medication must use the IFA PZN coding system.")
     if not coding.get("code"):
