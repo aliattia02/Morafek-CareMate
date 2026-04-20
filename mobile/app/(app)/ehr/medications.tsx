@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Platform,
   RefreshControl,
   ScrollView,
@@ -369,7 +370,7 @@ export default function MedicationsScreen() {
 
       {loading ? (
         <ActivityIndicator color={E.colors.primary} style={styles.loader} size="large" />
-      ) : (
+      ) : activeTab === 'today' ? (
         <ScrollView
           style={styles.scroll}
           contentContainerStyle={styles.content}
@@ -381,111 +382,120 @@ export default function MedicationsScreen() {
             </View>
           ) : null}
 
-          {activeTab === 'today' ? (
-            <>
-              {usingCache ? (
-                <View style={styles.cacheBanner}>
-                  <Text style={styles.cacheText}>⚠️ Showing cached data</Text>
-                </View>
-              ) : null}
+          {usingCache ? (
+            <View style={styles.cacheBanner}>
+              <Text style={styles.cacheText}>⚠️ Showing cached data</Text>
+            </View>
+          ) : null}
 
-              <View style={styles.summaryCard}>
-                <Text style={styles.summaryTitle}>
-                  {todayData?.summary.taken ?? 0} of {todayData?.summary.total ?? 0} taken today
-                </Text>
-                <View style={styles.progressTrack}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      {
-                        width: `${Math.max(0, Math.min(100, Math.round(summaryRate * 100)))}%`,
-                        backgroundColor: progressColor(summaryRate),
-                      },
-                    ]}
-                  />
-                </View>
-              </View>
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>
+              {todayData?.summary.taken ?? 0} of {todayData?.summary.total ?? 0} taken today
+            </Text>
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  {
+                    width: `${Math.max(0, Math.min(100, Math.round(summaryRate * 100)))}%`,
+                    backgroundColor: progressColor(summaryRate),
+                  },
+                ]}
+              />
+            </View>
+          </View>
 
-              {(Object.keys(SLOT_META) as SlotKey[]).map((slot) => {
-                const items = todayData?.slots[slot] ?? [];
-                if (items.length === 0) return null;
+          {(Object.keys(SLOT_META) as SlotKey[]).map((slot) => {
+            const items = todayData?.slots[slot] ?? [];
+            if (items.length === 0) return null;
 
-                const taken = items.filter((item) => item.status === 'taken').length;
-                const expanded = expandedSlots[slot];
+            const taken = items.filter((item) => item.status === 'taken').length;
+            const expanded = expandedSlots[slot];
 
-                return (
-                  <View key={slot} style={styles.section}>
-                    <TouchableOpacity style={styles.sectionHeader} onPress={() => toggleSlot(slot)}>
-                      <Text style={styles.sectionTitle}>{SLOT_META[slot].label}</Text>
-                      <View style={styles.sectionRight}>
-                        <Text style={styles.badgeText}>
-                          {taken} / {items.length} taken
-                        </Text>
-                        <Text style={styles.chevron}>{expanded ? '⌃' : '⌄'}</Text>
-                      </View>
-                    </TouchableOpacity>
-
-                    {expanded ? (
-                      <View style={styles.sectionCards}>
-                        {items.map((item) => (
-                          <DailySlotCard
-                            key={item.intake_id}
-                            medicationName={item.medication.trade_name}
-                            activeSubstance={item.medication.active_substance || '—'}
-                            dosage={item.dosage}
-                            unit={item.unit}
-                            intakeId={item.intake_id}
-                            status={item.status}
-                            onConfirm={handleConfirm}
-                            disabled={item.status !== 'pending' || updatingIntakeId === item.intake_id}
-                          />
-                        ))}
-                      </View>
-                    ) : null}
+            return (
+              <View key={slot} style={styles.section}>
+                <TouchableOpacity style={styles.sectionHeader} onPress={() => toggleSlot(slot)}>
+                  <Text style={styles.sectionTitle}>{SLOT_META[slot].label}</Text>
+                  <View style={styles.sectionRight}>
+                    <Text style={styles.badgeText}>
+                      {taken} / {items.length} taken
+                    </Text>
+                    <Text style={styles.chevron}>{expanded ? '⌃' : '⌄'}</Text>
                   </View>
-                );
-              })}
-            </>
-          ) : (
-            <>
-              {myMedications.map((med) => {
-                const medicationId = med.id ?? med._id;
-                return (
-                  <TouchableOpacity
-                    key={String(medicationId)}
-                    style={styles.medicationCard}
-                    onPress={() => openMedicationDetail(medicationId)}
-                  >
-                    <Text style={styles.medicationName}>{med.trade_name}</Text>
-                    <Text style={styles.medicationSubline}>
-                      {med.active_substance} • {med.strength} • {med.form}
-                    </Text>
+                </TouchableOpacity>
 
-                    <View style={styles.pillsRow}>
-                      <View style={styles.dosageBadge}>
-                        <Text style={styles.dosageBadgeText}>{med.dosage_label ?? '—'}</Text>
-                      </View>
-                      <View style={styles.coverageBadge}>
-                        <Text style={styles.coverageBadgeText}>{coverageLabel(med.coverage)}</Text>
-                      </View>
-                    </View>
-
-                    <Text style={styles.dateLine}>
-                      Start: {normalizeDate(med.start_date)} •{' '}
-                      {med.is_chronic ? 'Dauermedikation' : `Ende: ${normalizeDate(med.end_date)}`}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-
-              {adherence ? (
-                <View style={styles.heatmapWrapper}>
-                  <AdherenceHeatmap days={adherence.days} overallRate={adherence.overall_rate} />
-                </View>
-              ) : null}
-            </>
-          )}
+                {expanded ? (
+                  <View style={styles.sectionCards}>
+                    {items.map((item) => (
+                      <DailySlotCard
+                        key={item.intake_id}
+                        medicationName={item.medication.trade_name}
+                        activeSubstance={item.medication.active_substance || '—'}
+                        dosage={item.dosage}
+                        unit={item.unit}
+                        intakeId={item.intake_id}
+                        status={item.status}
+                        onConfirm={handleConfirm}
+                        disabled={item.status !== 'pending' || updatingIntakeId === item.intake_id}
+                      />
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
         </ScrollView>
+      ) : (
+        <FlatList
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          data={myMedications}
+          keyExtractor={(item) => String(item.id ?? item._id)}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          renderItem={({ item }) => {
+            const medicationId = item.id ?? item._id;
+            return (
+              <TouchableOpacity
+                style={styles.medicationCard}
+                onPress={() => openMedicationDetail(medicationId)}
+              >
+                <Text style={styles.medicationName}>{item.trade_name}</Text>
+                <Text style={styles.medicationSubline}>
+                  {item.active_substance} • {item.strength} • {item.form}
+                </Text>
+
+                <View style={styles.pillsRow}>
+                  <View style={styles.dosageBadge}>
+                    <Text style={styles.dosageBadgeText}>{item.dosage_label ?? '—'}</Text>
+                  </View>
+                  <View style={styles.coverageBadge}>
+                    <Text style={styles.coverageBadgeText}>{coverageLabel(item.coverage)}</Text>
+                  </View>
+                </View>
+
+                <Text style={styles.dateLine}>
+                  Start: {normalizeDate(item.start_date)} •{' '}
+                  {item.is_chronic ? 'Dauermedikation' : `Ende: ${normalizeDate(item.end_date)}`}
+                </Text>
+              </TouchableOpacity>
+            );
+          }}
+          ListHeaderComponent={
+            error ? (
+              <View style={styles.errorBanner}>
+                <Text style={styles.errorText}>⚠️ {error}</Text>
+              </View>
+            ) : null
+          }
+          ListFooterComponent={
+            adherence ? (
+              <View style={styles.heatmapWrapper}>
+                <AdherenceHeatmap days={adherence.days} overallRate={adherence.overall_rate} />
+              </View>
+            ) : null
+          }
+        />
       )}
 
       <MedicationDetailModal medication={selectedMedication} onClose={() => setSelectedMedication(null)} />
