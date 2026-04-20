@@ -11,7 +11,7 @@ import { E, ET } from '@/constants/elderlyTheme';
 import { getAdherence, type MedicationAdherenceDay } from '@/services/api/medications';
 
 interface AdherenceHeatmapProps {
-  days: Array<{ date: string; total: number; taken: number; rate: number }>;
+  days?: Array<{ date: string; total: number; taken: number; rate: number }>; // made optional
   overallRate: number;
 }
 
@@ -139,7 +139,7 @@ function ShimmerGrid() {
 
 export default function AdherenceHeatmap({ days, overallRate }: AdherenceHeatmapProps) {
   const [loading, setLoading] = useState(true);
-  const [remoteDays, setRemoteDays] = useState<HeatmapDay[]>(days);
+  const [remoteDays, setRemoteDays] = useState<HeatmapDay[]>(days ?? []); // FIX 1: guard undefined prop
   const [remoteOverallRate, setRemoteOverallRate] = useState(overallRate);
   const [selected, setSelected] = useState<HeatmapDay | null>(null);
 
@@ -150,7 +150,7 @@ export default function AdherenceHeatmap({ days, overallRate }: AdherenceHeatmap
       try {
         const response = await getAdherence();
         if (!active) return;
-        setRemoteDays(response.days);
+        setRemoteDays(response.days ?? []); // FIX 2: guard undefined API response
         setRemoteOverallRate(response.overall_rate);
       } catch {
         // keep fallback props data

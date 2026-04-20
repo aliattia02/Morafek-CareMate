@@ -24,6 +24,19 @@
  *   2. handleAIAssist re-calls setShowList(true) after results arrive.
  *   3. onBlur respects aiLoadingRef and skips dismissal while loading.
  *
+ * Fix (503 / retry UX)
+ * ─────────────────────
+ * The shared apiClient retries failed requests up to 4 times with
+ * exponential back-off (total ~30 s). When the AI-suggest service is
+ * down (503) this locked the ✨ KI button for half a minute with no
+ * feedback. Fixed by:
+ *   1. raceWithTimeout — wraps the apiClient call in a Promise.race
+ *      against a short deadline (AI_TIMEOUT_MS). The UI fails fast
+ *      and shows an error; the underlying retries continue in the
+ *      background but are ignored once the timeout fires.
+ *   2. Status-specific error messages (503/502 → "service unavailable",
+ *      429 → "rate limited", generic fallback).
+ *
  * Props
  * ────────
  * value          – current ICD-10 code string (controlled)
@@ -89,7 +102,50 @@ interface AISuggestion {
 const MAX_LOCAL_RESULTS = 30;
 const DEBOUNCE_MS       = 200;
 
+/**
+ * How long to wait for the AI-suggest endpoint before giving up.
+ * The shared apiClient may retry a 503 for up to ~30 s; this deadline
+ * lets the UI fail fast and show a clear error while those retries
+ * continue (and are ignored) in the background.
+ */
+const AI_TIMEOUT_MS = 8_000;
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Race a promise against a timeout.
+ * If the timeout fires first, rejects with Error('TIMEOUT').
+ */
+function raceWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('TIMEOUT')), ms);
+    promise.then(
+      (val) => { clearTimeout(timer); resolve(val); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
+/**
+ * Return a user-friendly error string for AI-suggest failures.
+ */
+function aiErrorMessage(err: unknown): string {
+  const status = (err as any)?.response?.status as number | undefined;
+
+  if (status === 503 || status === 502) {
+    return 'KI-Dienst vorübergehend nicht verfügbar. Bitte lokale Suche verwenden.';
+  }
+  if (status === 429) {
+    return 'Zu viele Anfragen. Bitte kurz warten und erneut versuchen.';
+  }
+  if (err instanceof Error && err.message === 'TIMEOUT') {
+    return 'KI-Anfrage hat zu lange gedauert. Bitte erneut versuchen.';
+  }
+  if (err instanceof Error) {
+    return err.message;
+  }
+  return 'KI-Vorschläge nicht verfügbar';
+}
 
 /**
  * Fast local search:
@@ -207,9 +263,9 @@ export default function ICD10SearchInput({
 
   // ── AI Assist ─────────────────────────────────────────────────────────────
   //
-  // BUG FIX: On web, clicking this button fires onBlur on the TextInput,
-  // which schedules dismissList after 150 ms. The AI call takes longer, so
-  // the dropdown was being closed before results arrived.
+  // BUG FIX (blur race): On web, clicking this button fires onBlur on the
+  // TextInput, which schedules dismissList after 150 ms. The AI call takes
+  // longer, so the dropdown was being closed before results arrived.
   //
   // Solution:
   //   • Set aiLoadingRef.current = true synchronously before the request so
@@ -217,6 +273,10 @@ export default function ICD10SearchInput({
   //   • Re-call setShowList(true) after results arrive in case onBlur already
   //     fired before the ref was set (very fast clicks / slow JS thread).
   //   • Clear the ref in finally so normal blur-to-close resumes afterwards.
+  //
+  // BUG FIX (503 / retry UX): The shared apiClient retries on server errors,
+  // blocking the UI for up to ~30 s. We race the call against AI_TIMEOUT_MS
+  // so the user gets a fast, clear error instead of a frozen button.
   const handleAIAssist = useCallback(async () => {
     // On native this dismisses the keyboard; on web it's a no-op — that's fine.
     Keyboard.dismiss();
@@ -228,21 +288,21 @@ export default function ICD10SearchInput({
     setShowList(true);
 
     try {
-      const res = await apiClient.post<{ suggestions: AISuggestion[] }>(
+      const apiCall = apiClient.post<{ suggestions: AISuggestion[] }>(
         API.EHR.ICD10_SUGGEST,
         {
           chief_complaint: chiefComplaint,
           diagnosis_hint:  diagnosisHint || query,
         }
       );
+
+      const res = await raceWithTimeout(apiCall, AI_TIMEOUT_MS);
       const suggestions = res.data.suggestions ?? [];
       setAiResults(suggestions);
       // Re-open in case onBlur fired and closed the list while we were waiting
       setShowList(true);
     } catch (err: unknown) {
-      setAiError(
-        err instanceof Error ? err.message : 'AI-Vorschläge nicht verfügbar'
-      );
+      setAiError(aiErrorMessage(err));
       setShowList(false);
     } finally {
       aiLoadingRef.current = false;

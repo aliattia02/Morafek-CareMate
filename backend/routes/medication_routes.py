@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 from bson.errors import InvalidId
 from bson.objectid import ObjectId
@@ -539,6 +540,102 @@ def list_own_medication_intakes(current_user):
 @api_error_handler
 def list_patient_medication_intakes(current_user, patient_id):
     return _not_implemented("list_patient_medication_intakes")
+
+
+@medication_routes.route("/adherence", methods=["GET"], strict_slashes=False)
+@token_required
+@api_error_handler
+def get_medication_adherence(current_user):
+    patient_id, err_resp = _require_patient_user(current_user)
+    if err_resp:
+        return err_resp
+
+    # period_days query param — default 28, cap at 90
+    try:
+        period_days = int(request.args.get("period_days", 28))
+    except (TypeError, ValueError):
+        return jsonify({"error": "period_days must be an integer"}), 400
+    period_days = max(1, min(period_days, 90))
+
+    today = datetime.now(timezone.utc).date()
+    start_date = (today - timedelta(days=period_days - 1)).isoformat()
+    end_date = today.isoformat()
+
+    # All intakes within the window
+    intakes = list(
+        med_intakes_col.find(
+            {
+                "patient_id": patient_id,
+                "date": {"$gte": start_date, "$lte": end_date},
+            }
+        )
+    )
+
+    # Overall counts
+    total = len(intakes)
+    taken = sum(1 for i in intakes if i.get("status") == "taken")
+    skipped = sum(1 for i in intakes if i.get("status") == "skipped")
+    pending = sum(1 for i in intakes if i.get("status") == "pending")
+    adherence_rate = round((taken / total * 100), 1) if total > 0 else None
+
+    # Per-medication breakdown
+    med_map = defaultdict(lambda: {"taken": 0, "skipped": 0, "pending": 0, "total": 0})
+    for intake in intakes:
+        mid = intake.get("medication_id", "unknown")
+        med_map[mid][intake.get("status", "pending")] += 1
+        med_map[mid]["total"] += 1
+
+    # Enrich with trade_name from medications collection
+    per_medication = []
+    for med_id, counts in med_map.items():
+        med_doc = None
+        if ObjectId.is_valid(med_id):
+            med_doc = medications_col.find_one(
+                {"_id": ObjectId(med_id), "patient_id": patient_id},
+                {"trade_name": 1, "active_substance": 1, "dosage_unit": 1},
+            )
+        t = counts["total"]
+        per_medication.append(
+            {
+                "medication_id": med_id,
+                "trade_name": med_doc.get("trade_name", "") if med_doc else "",
+                "active_substance": med_doc.get("active_substance", "") if med_doc else "",
+                "taken": counts["taken"],
+                "skipped": counts["skipped"],
+                "pending": counts["pending"],
+                "total": t,
+                "adherence_rate": round(counts["taken"] / t * 100, 1) if t > 0 else None,
+            }
+        )
+
+    # Daily summary for heatmap (date → status counts)
+    daily_map = defaultdict(lambda: {"taken": 0, "skipped": 0, "pending": 0})
+    for intake in intakes:
+        d = intake.get("date")
+        if d:
+            daily_map[d][intake.get("status", "pending")] += 1
+
+    daily_list = sorted(
+        [{"date": d, **counts} for d, counts in daily_map.items()],
+        key=lambda x: x["date"],
+    )
+
+    return jsonify(
+        {
+            "period_days": period_days,
+            "start_date": start_date,
+            "end_date": end_date,
+            "summary": {
+                "total": total,
+                "taken": taken,
+                "skipped": skipped,
+                "pending": pending,
+                "adherence_rate": adherence_rate,
+            },
+            "per_medication": per_medication,
+            "daily": daily_list,
+        }
+    ), 200
 
 
 @medication_routes.route("/fhir/MedicationRequest/", methods=["GET"], strict_slashes=False)
