@@ -22,6 +22,7 @@ import {
   TextInput,
   Linking,
   Alert,
+  Platform,
   StyleSheet,
 } from 'react-native';
 
@@ -478,6 +479,33 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
     if (!medicationId) return;
     if (med.is_active === false) return;
 
+    const runDeactivate = async () => {
+      try {
+        setMedicationActionLoadingId(medicationId);
+        setMedicationsError(null);
+        await deactivateMedication(patient.id, medicationId);
+        setMedications((prev) =>
+          prev.map((item) =>
+            medicationIdOf(item) === medicationId ? { ...item, is_active: false } : item
+          )
+        );
+        if (editingMedicationId === medicationId) {
+          cancelDosageEdit();
+        }
+      } catch (err: unknown) {
+        setMedicationsError(err instanceof Error ? err.message : 'Failed to deactivate medication');
+      } finally {
+        setMedicationActionLoadingId(null);
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm(`Deactivate medication\n\nDeactivate ${med.trade_name}?`)) {
+        void runDeactivate();
+      }
+      return;
+    }
+
     Alert.alert(
       'Deactivate medication',
       `Deactivate ${med.trade_name}?`,
@@ -486,24 +514,8 @@ export function PatientDataView({ patient, onBack }: PatientDataViewProps) {
         {
           text: 'Deactivate',
           style: 'destructive',
-          onPress: async () => {
-            try {
-              setMedicationActionLoadingId(medicationId);
-              setMedicationsError(null);
-              await deactivateMedication(patient.id, medicationId);
-              setMedications((prev) =>
-                prev.map((item) =>
-                  medicationIdOf(item) === medicationId ? { ...item, is_active: false } : item
-                )
-              );
-              if (editingMedicationId === medicationId) {
-                cancelDosageEdit();
-              }
-            } catch (err: unknown) {
-              setMedicationsError(err instanceof Error ? err.message : 'Failed to deactivate medication');
-            } finally {
-              setMedicationActionLoadingId(null);
-            }
+          onPress: () => {
+            void runDeactivate();
           },
         },
       ]
