@@ -548,10 +548,10 @@ def list_own_medications(current_user):
 
 @medication_routes.route("/patient/<medication_id>/intake", methods=["POST"])
 @medication_routes.route("/intake/", methods=["POST"], strict_slashes=False)
-@medication_routes.route("/intake/<intake_id>", methods=["POST"], strict_slashes=False)
+@medication_routes.route("/intake/<url_intake_id>", methods=["POST"], strict_slashes=False)
 @token_required
 @api_error_handler
-def confirm_medication_intake(current_user, medication_id=None, intake_id=None):
+def confirm_medication_intake(current_user, medication_id=None, url_intake_id=None):
     patient_id, err_resp = _require_patient_user(current_user)
     if err_resp:
         return err_resp
@@ -567,8 +567,18 @@ def confirm_medication_intake(current_user, medication_id=None, intake_id=None):
     now_utc = datetime.now(timezone.utc)
 
     intake_doc = None
-    intake_id_raw = intake_id if intake_id not in (None, "") else data.get("intake_id", "")
-    intake_id = str(intake_id_raw).strip() if intake_id_raw not in (None, "") else ""
+    body_intake_id_raw = data.get("intake_id", "")
+    body_intake_id = (
+        str(body_intake_id_raw).strip() if body_intake_id_raw not in (None, "") else ""
+    )
+    if url_intake_id is not None and body_intake_id:
+        if body_intake_id != str(url_intake_id).strip():
+            return jsonify({"error": "Conflicting intake_id in URL and body"}), 400
+
+    intake_id_raw = (
+        str(url_intake_id).strip() if url_intake_id is not None else body_intake_id
+    )
+    intake_id = intake_id_raw
 
     if intake_id:
         try:
