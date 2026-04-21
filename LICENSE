@@ -1,143 +1,145 @@
-Business Source License 1.1
-
-Licensor:             Ali Attia / Health Info Tech
-Licensed Work:        Morafek CareMate
-                      © 2025 Ali Attia / Health Info Tech. All rights reserved.
-Additional Use Grant: You may use the Licensed Work for personal, educational,
-                      research, and non-commercial self-hosting purposes, free
-                      of charge, provided that you retain all copyright and
-                      license notices.
-Change Date:          2029-01-01
-Change License:       Apache License, Version 2.0
-
--------------------------------------------------------------------------------
-
-TERMS
-
-The Licensor hereby grants you the right to copy, modify, create derivative
-works, redistribute, and make non-production or non-commercial use of the
-Licensed Work subject to the limitations set out below.
-
-1. PERMITTED USE
-
-   The following uses are permitted free of charge under this License:
-
-   a. Personal use — running the Licensed Work for your own private health
-      record management, with no external users.
-
-   b. Educational and academic use — studying, teaching, or demonstrating the
-      Licensed Work in a non-commercial academic setting.
-
-   c. Research use — using or modifying the Licensed Work solely for
-      non-commercial research purposes, including publication of results,
-      provided that any derivative works used for publication remain subject
-      to this License.
-
-   d. Non-commercial self-hosting — deploying the Licensed Work for a small
-      group of individuals (e.g., a family or volunteer community health
-      project) where no fees, subscriptions, or commercial services are
-      exchanged.
-
-2. RESTRICTIONS
-
-   The following uses require a separate commercial license obtained from the
-   Licensor:
-
-   a. Offering the Licensed Work or a derivative work as a commercial product
-      or service (including SaaS, PaaS, or any hosted offering).
-
-   b. Deploying the Licensed Work within a clinic, hospital, health system,
-      insurance provider, or any healthcare organization that processes data
-      of patients in a commercial or professional capacity.
-
-   c. Integrating the Licensed Work, in whole or in part, into a product or
-      service that is sold, licensed, or otherwise monetized.
-
-   d. Using the Licensed Work to provide consulting, implementation, or
-      integration services to third parties.
-
-3. CHANGE DATE
-
-   On the Change Date specified above, the Licensed Work will automatically
-   become available under the Change License (Apache License, Version 2.0).
-   From that date forward, you may use the Licensed Work under the terms of
-   the Apache License 2.0 in addition to the terms of this License.
-
-4. ATTRIBUTION
-
-   Any permitted use or redistribution of the Licensed Work must:
-
-   a. Retain this License file and all copyright notices in all copies or
-      substantial portions of the Licensed Work.
-
-   b. Include the following attribution in any user-facing interface,
-      documentation, or publication:
-
-         "Powered by Morafek CareMate — © 2025 Ali Attia / Health Info Tech"
-
-5. HEALTHCARE DATA & COMPLIANCE DISCLAIMER
-
-   THE LICENSED WORK IS PROVIDED FOR INFORMATIONAL AND TECHNICAL PURPOSES
-   ONLY. IT IS NOT A CERTIFIED MEDICAL DEVICE AND IS NOT INTENDED TO
-   DIAGNOSE, TREAT, CURE, OR PREVENT ANY DISEASE OR MEDICAL CONDITION.
-
-   If you deploy the Licensed Work in any jurisdiction, you are solely
-   responsible for ensuring compliance with applicable laws and regulations,
-   including but not limited to:
-
-   - EU General Data Protection Regulation (GDPR / DSGVO)
-   - German Federal Data Protection Act (BDSG)
-   - German Digital Supply Act (DVG) and Digital Care Applications (DiGA)
-   - Medical Device Regulation (MDR) 2017/745 where applicable
-   - HL7 FHIR R4 conformance requirements
-
-6. PATENTS
-
-   The Licensor does not grant any patent rights under this License. If your
-   use of the Licensed Work requires a patent license from the Licensor,
-   please contact the Licensor for a separate agreement.
-
-7. TRADEMARKS
-
-   This License does not grant you any rights to use the name "Morafek",
-   "Morafek CareMate", "Health Info Tech", or any associated logos or
-   trademarks. Such use requires explicit written permission from the Licensor.
-
-8. DISCLAIMER OF WARRANTIES
-
-   THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
-   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
-   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
-   IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
-   LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE LICENSED WORK
-   OR THE USE OR OTHER DEALINGS IN THE LICENSED WORK.
-
-9. TERMINATION
-
-   Any breach of this License automatically terminates your rights under it.
-   Sections 5, 6, 7, and 8 survive termination.
-
--------------------------------------------------------------------------------
-
-COMMERCIAL LICENSING
-
-To obtain a commercial license for deploying Morafek CareMate in a clinic,
-hospital, health network, or any commercial product or service, please contact:
-
-   Ali Attia / Health Info Tech
-   GitHub:  https://github.com/aliattia02
-   Project: https://aliattia02.github.io/Health-InfoTech/morafek.html
-
-Commercial licenses are available for:
-  • Single-clinic deployments
-  • Multi-site health system deployments
-  • SaaS / white-label arrangements
-  • OEM integration into third-party health platforms
-
--------------------------------------------------------------------------------
-
-For the full text of the Business Source License 1.1, see:
-https://mariadb.com/bsl11/
-
-For the full text of the Apache License 2.0 (the Change License), see:
+Apache License
+Version 2.0, January 2004
 https://www.apache.org/licenses/LICENSE-2.0
+
+TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+1. Definitions.
+
+   "License" shall mean the terms and conditions for use, reproduction,
+   and distribution as defined by Sections 1 through 9 of this document.
+
+   "Licensor" shall mean Ali Attia / Health Info Tech, the copyright owner
+   granting the License.
+
+   "Legal Entity" shall mean the union of the acting entity and all other
+   entities that control, are controlled by, or are under common control
+   with that entity.
+
+   "You" (or "Your") shall mean an individual or Legal Entity exercising
+   permissions granted by this License.
+
+   "Source" form shall mean the preferred form for making modifications,
+   including but not limited to software source code, documentation source,
+   and configuration files.
+
+   "Object" form shall mean any form resulting from mechanical transformation
+   or translation of a Source form, including but not limited to compiled
+   object code, generated documentation, and conversions to other media types.
+
+   "Work" shall mean Morafek CareMate, made available under the License,
+   as indicated by a copyright notice included in or attached to the Work.
+
+   "Derivative Works" shall mean any work that is based on the Work, for
+   which the editorial revisions, annotations, elaborations, or other
+   modifications represent, as a whole, an original work of authorship.
+
+   "Contribution" shall mean any work of authorship submitted to the
+   Licensor for inclusion in the Work, including any modifications or
+   additions to the Work or Derivative Works thereof, submitted by You.
+
+   "Contributor" shall mean the Licensor and any Legal Entity on behalf
+   of whom a Contribution has been received by the Licensor.
+
+2. Grant of Copyright License.
+
+   Subject to the terms and conditions of this License, each Contributor
+   hereby grants to You a perpetual, worldwide, non-exclusive, no-charge,
+   royalty-free, irrevocable copyright license to reproduce, prepare
+   Derivative Works of, publicly display, publicly perform, sublicense,
+   and distribute the Work and such Derivative Works in Source or Object form.
+
+3. Grant of Patent License.
+
+   Subject to the terms and conditions of this License, each Contributor
+   hereby grants to You a perpetual, worldwide, non-exclusive, no-charge,
+   royalty-free, irrevocable patent license to make, have made, use, offer
+   to sell, sell, import, and otherwise transfer the Work.
+
+4. Redistribution.
+
+   You may reproduce and distribute copies of the Work or Derivative Works
+   thereof in any medium, with or without modifications, in Source or Object
+   form, provided that You meet the following conditions:
+
+   (a) You must give any other recipients of the Work or Derivative Works
+       a copy of this License; and
+
+   (b) You must cause any modified files to carry prominent notices stating
+       that You changed the files; and
+
+   (c) You must retain, in the Source form of any Derivative Works that You
+       distribute, all copyright, patent, trademark, and attribution notices
+       from the Source form of the Work; and
+
+   (d) If the Work includes a "NOTICE" file, You must include a readable copy
+       of the attribution notices contained within that NOTICE file.
+
+5. Submission of Contributions.
+
+   Unless You explicitly state otherwise, any Contribution intentionally
+   submitted for inclusion in the Work shall be under the terms and conditions
+   of this License, without any additional terms or conditions.
+
+   IMPORTANT: All Contributors must sign the Contributor License Agreement
+   (CLA) before any Contribution can be merged. See CLA.md for details.
+   The CLA grants the Licensor the right to relicense Contributions for
+   commercial use, ensuring the project's long-term sustainability.
+
+6. Trademarks.
+
+   This License does not grant permission to use the trade names, trademarks,
+   service marks, or product names of the Licensor, including "Morafek",
+   "Morafek CareMate", and "Health Info Tech", except as required for
+   reasonable and customary use in describing the origin of the Work and
+   reproducing the content of the NOTICE file.
+
+7. Disclaimer of Warranty.
+
+   Unless required by applicable law or agreed to in writing, the Licensor
+   provides the Work on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS
+   OF ANY KIND, either express or implied, including, without limitation,
+   any warranties or conditions of TITLE, NON-INFRINGEMENT, MERCHANTABILITY,
+   or FITNESS FOR A PARTICULAR PURPOSE. You are solely responsible for
+   determining the appropriateness of using or redistributing the Work and
+   assume any risks associated with Your exercise of permissions under this
+   License.
+
+8. Limitation of Liability.
+
+   In no event and under no legal theory shall the Licensor be liable to You
+   for damages, including any direct, indirect, special, incidental, or
+   consequential damages of any character arising as a result of this License
+   or out of the use or inability to use the Work.
+
+9. Accepting Warranty or Additional Liability.
+
+   While redistributing the Work or Derivative Works thereof, You may choose
+   to offer, and charge a fee for, acceptance of support, warranty, indemnity,
+   or other liability obligations and/or rights consistent with this License.
+   However, in accepting such obligations, You may act only on Your own behalf
+   and on Your sole responsibility, not on behalf of any other Contributor.
+
+-------------------------------------------------------------------------------
+
+HEALTHCARE DATA & COMPLIANCE DISCLAIMER (Supplemental Notice)
+
+THE WORK IS PROVIDED FOR INFORMATIONAL AND TECHNICAL PURPOSES ONLY.
+IT IS NOT A CERTIFIED MEDICAL DEVICE AND IS NOT INTENDED TO DIAGNOSE,
+TREAT, CURE, OR PREVENT ANY DISEASE OR MEDICAL CONDITION.
+
+If You deploy the Work in any jurisdiction, You are solely responsible for
+ensuring compliance with applicable laws and regulations, including but not
+limited to:
+
+  - EU General Data Protection Regulation (GDPR / DSGVO)
+  - German Federal Data Protection Act (BDSG)
+  - German Digital Supply Act (DVG) and Digital Care Applications (DiGA)
+  - Medical Device Regulation (MDR) 2017/745 where applicable
+  - HL7 FHIR R4 conformance requirements
+
+-------------------------------------------------------------------------------
+
+Copyright 2025 Ali Attia / Health Info Tech
+https://github.com/aliattia02
+https://aliattia02.github.io/Health-InfoTech/morafek.html

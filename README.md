@@ -9,7 +9,9 @@ Morafek CareMate is a **Personal Health Record (PHR)** app that connects patient
 [![FHIR R4](https://img.shields.io/badge/FHIR-R4-blue?style=flat-square)](https://hl7.org/fhir/R4/)
 [![ISiK Stage 1](https://img.shields.io/badge/ISiK-Stage%201-green?style=flat-square)](https://simplifier.net/isik)
 [![DSGVO Compliant](https://img.shields.io/badge/DSGVO-Compliant-orange?style=flat-square)]()
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue?style=flat-square)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-iOS%20%7C%20Android%20%7C%20Web-lightgrey?style=flat-square)]()
+[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen?style=flat-square)](CONTRIBUTING.md)
 
 ### 🌐 [Try it live → morafek-care-mate.vercel.app](https://morafek-care-mate.vercel.app/)
 
@@ -199,36 +201,19 @@ Use the demo accounts below, or tap the **"Demo Account"** banner on the login s
 
 ## 🚀 Getting Started
 
-### Prerequisites
-- Node.js ≥ 18 and Python ≥ 3.11
-- A MongoDB Atlas cluster, Cloudinary account, and Google AI API key
+### 🌐 Try it instantly — no setup needed
+**[morafek-care-mate.vercel.app](https://morafek-care-mate.vercel.app/)** — use the demo accounts on the login screen.
 
-### Installation
-
+### Run locally
 ```bash
-# 1. Clone the repo
-git clone https://github.com/aliattia02/Morafek-CareMate.git
-cd Morafek-CareMate
-
-# 2. Backend
-cd backend
-python -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill in your credentials
+# Backend
+cd backend && python -m venv venv && source venv/bin/activate
+pip install -r requirements.txt && cp .env.example .env
 python main.py
 
-# 3. Mobile / Web
-cd mobile
-npm install
-cp .env.example .env   # set EXPO_PUBLIC_API_URL to your backend
-npm start
+# Mobile
+cd mobile && npm install && cp .env.example .env && npm start
 ```
-
-### Environment Variables
-
-**Backend:** `MONGO_URI`, `SECRET_KEY`, `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`, `GOOGLE_API_KEY`
-
-**Mobile:** `EXPO_PUBLIC_API_URL` (your backend URL)
 
 ---
 
@@ -244,16 +229,25 @@ npm start
 
 ## 🤝 Contributing
 
-1. Fork the repo and create a feature branch
-2. Make your changes with clear commit messages
-3. Open a Pull Request describing what you changed and why
+We welcome contributions of all kinds — bug fixes, features, documentation, translations.
+
+1. **Sign the CLA** — add `I have read and agree to the Contributor License Agreement in CLA.md.` as a comment in your PR. This is required before any merge. See [CLA.md](CLA.md).
+2. Fork the repo and create a feature branch from `main`.
+3. Make your changes with clear, focused commits.
+4. Open a Pull Request describing what you changed and why.
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
 
 ---
 
 ## 📄 License
 
-Business Source License 1.1 (Source Available) — see [LICENSE](LICENSE) for details.
+Licensed under the **Apache License 2.0** — see [LICENSE](LICENSE) for details.
+
+**Trademark notice:** The names "Morafek", "Morafek CareMate", and "Health Info Tech" are trademarks of Ali Attia / Health Info Tech. You may not use them without explicit written permission.
+
+**Healthcare disclaimer:** This software is not a certified medical device and is not intended to diagnose, treat, cure, or prevent any disease. Deployers are solely responsible for regulatory compliance.
 
 ---
 
-<div align="center">Built with ❤️ for better healthcare</div>
+<div align="center">Built with ❤️ for better healthcare — © 2025 Ali Attia / Health Info Tech</div>
