@@ -1,0 +1,143 @@
+Business Source License 1.1
+
+Licensor:             Ali Attia / Health Info Tech
+Licensed Work:        Morafek CareMate
+                      © 2025 Ali Attia / Health Info Tech. All rights reserved.
+Additional Use Grant: You may use the Licensed Work for personal, educational,
+                      research, and non-commercial self-hosting purposes, free
+                      of charge, provided that you retain all copyright and
+                      license notices.
+Change Date:          2029-01-01
+Change License:       Apache License, Version 2.0
+
+-------------------------------------------------------------------------------
+
+TERMS
+
+The Licensor hereby grants you the right to copy, modify, create derivative
+works, redistribute, and make non-production or non-commercial use of the
+Licensed Work subject to the limitations set out below.
+
+1. PERMITTED USE
+
+   The following uses are permitted free of charge under this License:
+
+   a. Personal use — running the Licensed Work for your own private health
+      record management, with no external users.
+
+   b. Educational and academic use — studying, teaching, or demonstrating the
+      Licensed Work in a non-commercial academic setting.
+
+   c. Research use — using or modifying the Licensed Work solely for
+      non-commercial research purposes, including publication of results,
+      provided that any derivative works used for publication remain subject
+      to this License.
+
+   d. Non-commercial self-hosting — deploying the Licensed Work for a small
+      group of individuals (e.g., a family or volunteer community health
+      project) where no fees, subscriptions, or commercial services are
+      exchanged.
+
+2. RESTRICTIONS
+
+   The following uses require a separate commercial license obtained from the
+   Licensor:
+
+   a. Offering the Licensed Work or a derivative work as a commercial product
+      or service (including SaaS, PaaS, or any hosted offering).
+
+   b. Deploying the Licensed Work within a clinic, hospital, health system,
+      insurance provider, or any healthcare organization that processes data
+      of patients in a commercial or professional capacity.
+
+   c. Integrating the Licensed Work, in whole or in part, into a product or
+      service that is sold, licensed, or otherwise monetized.
+
+   d. Using the Licensed Work to provide consulting, implementation, or
+      integration services to third parties.
+
+3. CHANGE DATE
+
+   On the Change Date specified above, the Licensed Work will automatically
+   become available under the Change License (Apache License, Version 2.0).
+   From that date forward, you may use the Licensed Work under the terms of
+   the Apache License 2.0 in addition to the terms of this License.
+
+4. ATTRIBUTION
+
+   Any permitted use or redistribution of the Licensed Work must:
+
+   a. Retain this License file and all copyright notices in all copies or
+      substantial portions of the Licensed Work.
+
+   b. Include the following attribution in any user-facing interface,
+      documentation, or publication:
+
+         "Powered by Morafek CareMate — © 2025 Ali Attia / Health Info Tech"
+
+5. HEALTHCARE DATA & COMPLIANCE DISCLAIMER
+
+   THE LICENSED WORK IS PROVIDED FOR INFORMATIONAL AND TECHNICAL PURPOSES
+   ONLY. IT IS NOT A CERTIFIED MEDICAL DEVICE AND IS NOT INTENDED TO
+   DIAGNOSE, TREAT, CURE, OR PREVENT ANY DISEASE OR MEDICAL CONDITION.
+
+   If you deploy the Licensed Work in any jurisdiction, you are solely
+   responsible for ensuring compliance with applicable laws and regulations,
+   including but not limited to:
+
+   - EU General Data Protection Regulation (GDPR / DSGVO)
+   - German Federal Data Protection Act (BDSG)
+   - German Digital Supply Act (DVG) and Digital Care Applications (DiGA)
+   - Medical Device Regulation (MDR) 2017/745 where applicable
+   - HL7 FHIR R4 conformance requirements
+
+6. PATENTS
+
+   The Licensor does not grant any patent rights under this License. If your
+   use of the Licensed Work requires a patent license from the Licensor,
+   please contact the Licensor for a separate agreement.
+
+7. TRADEMARKS
+
+   This License does not grant you any rights to use the name "Morafek",
+   "Morafek CareMate", "Health Info Tech", or any associated logos or
+   trademarks. Such use requires explicit written permission from the Licensor.
+
+8. DISCLAIMER OF WARRANTIES
+
+   THE LICENSED WORK IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+   IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+   LIABILITY ARISING FROM, OUT OF, OR IN CONNECTION WITH THE LICENSED WORK
+   OR THE USE OR OTHER DEALINGS IN THE LICENSED WORK.
+
+9. TERMINATION
+
+   Any breach of this License automatically terminates your rights under it.
+   Sections 5, 6, 7, and 8 survive termination.
+
+-------------------------------------------------------------------------------
+
+COMMERCIAL LICENSING
+
+To obtain a commercial license for deploying Morafek CareMate in a clinic,
+hospital, health network, or any commercial product or service, please contact:
+
+   Ali Attia / Health Info Tech
+   GitHub:  https://github.com/aliattia02
+   Project: https://aliattia02.github.io/Health-InfoTech/morafek.html
+
+Commercial licenses are available for:
+  • Single-clinic deployments
+  • Multi-site health system deployments
+  • SaaS / white-label arrangements
+  • OEM integration into third-party health platforms
+
+-------------------------------------------------------------------------------
+
+For the full text of the Business Source License 1.1, see:
+https://mariadb.com/bsl11/
+
+For the full text of the Apache License 2.0 (the Change License), see:
+https://www.apache.org/licenses/LICENSE-2.0
