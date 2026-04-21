@@ -57,7 +57,7 @@ def login():
 
     except Exception as e:
         current_app.logger.error(f"Login error: {str(e)}")
-        return jsonify({"error": "Login failed", "details": str(e)}), 500
+        return jsonify({"error": "Login failed"}), 500
 
 
 # ─── Register ─────────────────────────────────────────────────────────────────
@@ -163,7 +163,7 @@ def register():
 
     except Exception as e:
         current_app.logger.error(f"Registration error: {str(e)}")
-        return jsonify({"error": "Registration failed", "details": str(e)}), 500
+        return jsonify({"error": "Registration failed"}), 500
 
 
 # ─── Doctors listing (unchanged) ─────────────────────────────────────────────
@@ -386,7 +386,8 @@ def forgot_password():
                 {"_id": user['_id']},
                 {"$set": {"reset_code": code, "reset_code_expires": expires}},
             )
-            logger.info(f"Password reset code for {email}: {code}")
+            # NOTE: In production, send `code` via email — do not log it.
+            logger.info(f"Password reset code generated for {email}")
 
         return jsonify({"message": "If this email is registered, a reset link has been sent."}), 200
 
