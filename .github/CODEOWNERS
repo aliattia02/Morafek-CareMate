@@ -1,8 +1,54 @@
-# Default owner for all repository files
+# Default owner
 * @aliattia02
 
-# Security-sensitive backend paths
-/backend/routes/auth_routes.py @aliattia02
-/backend/utils/auth.py @aliattia02
+# Governance and repo policy
+/.github/ @aliattia02
+/.github/workflows/ @aliattia02
+/.github/CODEOWNERS @aliattia02
+/SECURITY.md @aliattia02
+/LICENSE @aliattia02
+/CODE_OF_CONDUCT.md @aliattia02
+/CONTRIBUTING.md @aliattia02
+
+# Backend (Flask/Python)
+/backend/ @aliattia02
+/backend/main.py @aliattia02
 /backend/config.py @aliattia02
-/backend/utils/fhir_de.py @aliattia02
+/backend/routes/ @aliattia02
+/backend/utils/ @aliattia02
+/backend/models/ @aliattia02
+/backend/tests/ @aliattia02
+
+# Mobile (Expo/TypeScript)
+/mobile/ @aliattia02
+/mobile/app/ @aliattia02
+/mobile/components/ @aliattia02
+/mobile/services/ @aliattia02
+/mobile/store/ @aliattia02
+/mobile/hooks/ @aliattia02
+/mobile/config/ @aliattia02
+/mobile/utils/ @aliattia02
+/mobile/types/ @aliattia02
+/mobile/constants/ @aliattia02
+/mobile/assets/ @aliattia02
+
+# Documentation & media
+/docs/ @aliattia02
+/*.md @aliattia02
+
+# Sensitive file patterns
+*.yml @aliattia02
+*.yaml @aliattia02
+*.env @aliattia02
+*.env.* @aliattia02
+**/Dockerfile @aliattia02
+**/Dockerfile.* @aliattia02
+**/*.pem @aliattia02
+**/*.key @aliattia02
+**/*.p12 @aliattia02
+**/*.jks @aliattia02
+
+# Dependency manifests
+/backend/requirements.txt @aliattia02
+/mobile/package.json @aliattia02
+/mobile/package-lock.json @aliattia02
