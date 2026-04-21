@@ -1,0 +1,8 @@
+# Default owner for all repository files
+* @aliattia02
+
+# Security-sensitive backend paths
+/backend/routes/auth_routes.py @aliattia02
+/backend/utils/auth.py @aliattia02
+/backend/config.py @aliattia02
+/backend/utils/fhir_de.py @aliattia02

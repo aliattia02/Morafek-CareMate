@@ -252,7 +252,7 @@ npm start
 
 ## 📄 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+Business Source License 1.1 (Source Available) — see [LICENSE](LICENSE) for details.
 
 ---
 

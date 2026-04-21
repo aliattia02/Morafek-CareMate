@@ -1,1 +1,55 @@
-.vercel
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Python virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Node / Expo
+node_modules/
+.expo/
+.expo-shared/
+*.tsbuildinfo
+
+# Build outputs
+build/
+dist/
+web-build/
+
+# Env files (never commit secrets)
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+mobile/.env
+mobile/.env.*
+
+# Local databases / PHI risk
+*.sqlite
+*.sqlite3
+*.db
+
+# Logs and reports
+*.log
+logs/
+security-reports/
+
+# Deployment / misc
+.vercel/
