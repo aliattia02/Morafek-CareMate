@@ -9,8 +9,8 @@ from utils.fhir_de import (
     build_observations_from_vitals_doc,
     build_document_bundle,
     build_isik_observation_vitals_fields,
+    build_fhir_medication_request,
     build_medication_resource,
-    build_medication_request,
     build_medication_statement,
     validate_kbv_medication_resource,
     validate_kbv_medication_request_resource,
@@ -1820,7 +1820,7 @@ def fhir_export(current_user):
         med_with_patient = dict(med_doc)
         med_with_patient.setdefault('patient_id', patient_id)
         medication_resource = build_medication_resource(med_with_patient)
-        medication_request = build_medication_request(med_with_patient)
+        medication_request = build_fhir_medication_request(med_with_patient)
         validate_kbv_medication_resource(medication_resource)
         validate_kbv_medication_request_resource(medication_request)
 

@@ -948,6 +948,35 @@ def build_medication_request(med: dict) -> dict:
     return resource
 
 
+def build_fhir_medication_request(med: dict) -> dict:
+    """
+    Build a MedicationRequest resource that includes trade name, active substance,
+    dosage instructions, and a patient link.
+    """
+    resource = build_medication_request(med)
+
+    trade_name = str(med.get("trade_name", "") or "").strip()
+    active_substance = str(med.get("active_substance", "") or "").strip()
+    display_parts = [part for part in (trade_name, active_substance) if part]
+    display = " — ".join(display_parts)
+
+    if display:
+        medication_ref = resource.setdefault("medicationReference", {})
+        medication_ref["display"] = display
+
+    if not resource.get("dosageInstruction"):
+        dosage_label = _build_dosage_label(med)
+        if dosage_label:
+            resource["dosageInstruction"] = [{"text": dosage_label}]
+
+    if "subject" not in resource:
+        patient_id = str(med.get("patient_id", "") or "").strip()
+        if patient_id:
+            resource["subject"] = {"reference": f"Patient/{patient_id}"}
+
+    return resource
+
+
 def build_kbv_medication_resource(medication_doc: dict) -> dict:
     return build_medication_resource(medication_doc)
 
