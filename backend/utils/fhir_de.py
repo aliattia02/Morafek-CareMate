@@ -958,7 +958,7 @@ def build_fhir_medication_request(med: dict) -> dict:
     trade_name = str(med.get("trade_name", "") or "").strip()
     active_substance = str(med.get("active_substance", "") or "").strip()
     display_parts = [part for part in (trade_name, active_substance) if part]
-    display = " — ".join(display_parts)
+    display = " - ".join(display_parts)
 
     if display:
         medication_ref = resource.setdefault("medicationReference", {})
