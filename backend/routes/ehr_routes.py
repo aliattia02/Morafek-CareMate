@@ -1712,8 +1712,6 @@ def fhir_export(current_user):
         return jsonify({'error': 'Unauthorized access'}), 403
 
     patient_id = str(current_user['_id'])
-    # The patient is both the subject and the author of their own summary.
-    author_ref = f'Patient/{patient_id}'
     entries = []
 
     # ── Patient resource (self-contained bundle requirement) ──────────────────
@@ -1724,6 +1722,18 @@ def fhir_export(current_user):
     user    = _mongo.db.users.find_one({'_id': _ObjId(patient_id)}, {'password': 0}) or {}
     id_doc  = _mongo.db.patient_fhir_identifiers.find_one({'patient_id': patient_id}) or {}
     medical = _mongo.db.patient_profiles.find_one({'patient_id': patient_id}) or {}
+
+    # Use the gPAS pseudonym as the Patient resource id when available so that
+    # the exported bundle never exposes the internal MongoDB ObjectId.
+    # Falls back to the real patient_id when consent hasn't been granted yet or
+    # gPAS was unavailable during the grant flow.
+    pseudonym = id_doc.get('pseudonym')
+    fhir_pid  = pseudonym if pseudonym else patient_id
+
+    # author_ref uses fhir_pid so every Patient/{x} reference in the bundle
+    # is consistent with the Patient resource id written below.
+    author_ref = f'Patient/{fhir_pid}'
+
     fhir_patient = build_fhir_patient(
         user,
         gkv_kvid    = id_doc.get('gkv_kvid'),
@@ -1734,8 +1744,12 @@ def fhir_export(current_user):
         postal_code = id_doc.get('postal_code'),
         city        = id_doc.get('city'),
     )
+    # Override the id that build_fhir_patient set (which defaults to patient_id)
+    # so the resource id matches every Patient/{fhir_pid} reference in the bundle.
+    fhir_patient['id'] = fhir_pid
+
     entries.append({
-        'fullUrl':  f'urn:uuid:{patient_id}',
+        'fullUrl':  f'urn:uuid:{fhir_pid}',
         'resource': fhir_patient,
     })
 
@@ -1882,6 +1896,24 @@ def fhir_export(current_user):
         logger.warning(
             'Medication structural validation failed with %d error(s).',
             len(med_validation.get('errors', [])),
+        )
+
+    # ── Pseudonym reference rewrite ───────────────────────────────────────────
+    # Raw documents stored in MongoDB carry subject/performer references that
+    # were written with the real patient_id at record time (e.g.
+    # "subject": {"reference": "Patient/<mongo_id>"}).  When a pseudonym is
+    # available we must rewrite every such reference so the exported bundle is
+    # internally consistent: all Patient/{x} strings must resolve to the single
+    # Patient entry whose id is fhir_pid.
+    if fhir_pid != patient_id:
+        import json as _bundle_json
+        raw = _bundle_json.dumps(entries)
+        raw = raw.replace(f'Patient/{patient_id}', f'Patient/{fhir_pid}')
+        raw = raw.replace(f'urn:uuid:{patient_id}', f'urn:uuid:{fhir_pid}')
+        entries = _bundle_json.loads(raw)
+        logger.info(
+            'FHIR export: rewrote Patient/%s → Patient/%s (pseudonym)',
+            patient_id, fhir_pid,
         )
 
     bundle = build_document_bundle(patient_id, entries, author_ref=author_ref)

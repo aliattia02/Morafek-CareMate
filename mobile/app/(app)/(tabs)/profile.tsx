@@ -194,10 +194,22 @@ export default function ProfileScreen() {
                 <Text style={styles.arrow}>›</Text>
               </TouchableOpacity>
               <View style={styles.divider} />
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/ehr/consent')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>🔐</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>Data &amp; Consent</Text>
+                  <Text style={styles.linkSub}>Manage your research data sharing consent</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+              <View style={styles.divider} />
 
               {/* ── FHIR Export — navigates to the dedicated screen ── */}
               <TouchableOpacity style={styles.link}
-                onPress={() => router.push('/(app)/ehr/fhir-export')}>
+                onPress={() => router.push('/ehr/fhir-export')}>
                 <View style={styles.linkIconWrap}>
                   <Text style={styles.linkIcon}>📤</Text>
                 </View>

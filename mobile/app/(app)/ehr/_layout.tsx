@@ -12,6 +12,7 @@ export default function EhrLayout() {
       <Stack.Screen name="visit-form"      options={{ title: 'New Visit',        headerShown: true }} />
       <Stack.Screen name="patient-profile" options={{ title: 'Medical Profile',  headerShown: true }} />
       <Stack.Screen name="fhir-export"     options={{ title: 'FHIR Data Export', headerShown: true }} />
+      <Stack.Screen name="consent"          options={{ title: 'Data & Consent',   headerShown: true }} />
     </Stack>
   );
 }

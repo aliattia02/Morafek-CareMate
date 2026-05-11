@@ -1,3 +1,5 @@
 [mysqld]
 sql_mode=
 innodb_strict_mode=0
+innodb_large_prefix     = ON
+innodb_file_format      = Barracuda
