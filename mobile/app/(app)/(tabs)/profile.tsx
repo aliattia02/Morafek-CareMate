@@ -6,12 +6,9 @@ import {
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import { useAuth } from '@/hooks/useAuth';
 import { E, ET } from '@/constants/elderlyTheme';
 import { uploadAvatar } from '@/services/api/profile';
-import { getBaseUrl } from '@/services/api/client';
 import apiClient from '@/services/api/client';
 
 const showAlert = (title: string, message: string) => {
@@ -21,10 +18,9 @@ const showAlert = (title: string, message: string) => {
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, token, logout, updateProfilePicture } = useAuth();
+  const { user, logout, updateProfilePicture } = useAuth();
   const isDoctor = user?.user_type === 'doctor' || user?.user_type === 'admin';
   const [isUploading, setIsUploading] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
 
   // ── DSGVO delete-account modal ────────────────────────────────────────────
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -74,55 +70,6 @@ export default function ProfileScreen() {
       setDeleteError(msg);
     } finally {
       setIsDeleting(false);
-    }
-  };
-
-  const handleFhirExport = async () => {
-    setIsExporting(true);
-    try {
-      const res = await fetch(`${getBaseUrl()}/api/patient/fhir-export`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error(`Server returned ${res.status}`);
-      const bundle = await res.json();
-      const json   = JSON.stringify(bundle, null, 2);
-      const count  = bundle.entry?.length ?? 0;
-      const filename = `fhir-export-${new Date().toISOString().slice(0, 10)}.json`;
-
-      if (Platform.OS === 'web') {
-        const blob = new Blob([json], { type: 'application/json' });
-        const url  = URL.createObjectURL(blob);
-        const a    = document.createElement('a');
-        a.href     = url;
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showAlert('Export complete', `${count} resources saved as ${filename}`);
-        return;
-      }
-
-      const path = `${FileSystem.cacheDirectory}${filename}`;
-      await FileSystem.writeAsStringAsync(path, json, {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
-
-      const canShare = await Sharing.isAvailableAsync();
-      if (canShare) {
-        await Sharing.shareAsync(path, {
-          mimeType: 'application/json',
-          dialogTitle: 'Save or share your FHIR export',
-          UTI: 'public.json',
-        });
-      } else {
-        showAlert('Export saved', `${count} resources written to:\n${path}`);
-      }
-    } catch (err) {
-      console.error('[FHIR Export]', err);
-      showAlert('Export failed', 'Could not export FHIR data. Please try again.');
-    } finally {
-      setIsExporting(false);
     }
   };
 
@@ -247,20 +194,20 @@ export default function ProfileScreen() {
                 <Text style={styles.arrow}>›</Text>
               </TouchableOpacity>
               <View style={styles.divider} />
-              <TouchableOpacity style={styles.link} onPress={handleFhirExport} disabled={isExporting}>
+
+              {/* ── FHIR Export — navigates to the dedicated screen ── */}
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/ehr/fhir-export')}>
                 <View style={styles.linkIconWrap}>
                   <Text style={styles.linkIcon}>📤</Text>
                 </View>
                 <View style={styles.linkBody}>
                   <Text style={styles.linkTitle}>Export FHIR R4 Data</Text>
-                  <Text style={styles.linkSub}>
-                    {isExporting ? 'Preparing export…' : 'Download your health records bundle'}
-                  </Text>
+                  <Text style={styles.linkSub}>View bundle structure &amp; download</Text>
                 </View>
-                {isExporting
-                  ? <ActivityIndicator size="small" color={E.colors.primary} />
-                  : <Text style={styles.arrow}>›</Text>}
+                <Text style={styles.arrow}>›</Text>
               </TouchableOpacity>
+
             </View>
           </>
         )}
