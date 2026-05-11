@@ -18,9 +18,10 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Share,
-  Alert,
+  Platform,
 } from 'react-native';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -221,16 +222,36 @@ export default function FhirExportScreen() {
     }
   }, []);
 
-  // ── Share bundle JSON ────────────────────────────────────────────────────────
+  // ── Download / share bundle JSON ────────────────────────────────────────────
   const handleShare = useCallback(async () => {
     if (!bundle) return;
-    try {
-      await Share.share({
-        title:   'Morafek CareMate — FHIR R4 Bundle',
-        message: JSON.stringify(bundle, null, 2),
+    const json     = JSON.stringify(bundle, null, 2);
+    const filename = `fhir-export-${new Date().toISOString().slice(0, 10)}.json`;
+
+    if (Platform.OS === 'web') {
+      const blob = new Blob([json], { type: 'application/json' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    const path = `${FileSystem.cacheDirectory}${filename}`;
+    await FileSystem.writeAsStringAsync(path, json, {
+      encoding: FileSystem.EncodingType.UTF8,
+    });
+    const canShare = await Sharing.isAvailableAsync();
+    if (canShare) {
+      await Sharing.shareAsync(path, {
+        mimeType:    'application/json',
+        dialogTitle: 'Save or share your FHIR export',
+        UTI:         'public.json',
       });
-    } catch {
-      Alert.alert('Share failed', 'Could not open the share sheet.');
     }
   }, [bundle]);
 

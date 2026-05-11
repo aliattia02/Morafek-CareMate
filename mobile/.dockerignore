@@ -1,7 +1,14 @@
-node_modules/
-.expo/
-dist/
+# Exclude Python bytecode — prevents stale .pyc baked into image
+**/__pycache__
+**/*.pyc
+**/*.pyo
+
+# Exclude local env / secrets
 .env
-*.log
-android/
-ios/
+.env.*
+*.env
+
+# Exclude development artifacts
+.git
+.gitignore
+*.md

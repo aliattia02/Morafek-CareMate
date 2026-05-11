@@ -99,6 +99,12 @@ const API = {
       v(`/api/doctor/patient/${patientId}/exercises/${exerciseId}`),
     EXERCISE_DONE: (exerciseId: string) => v(`/api/patient/exercises/${exerciseId}/done`),
 
+    // ── FHIR exports ──────────────────────────────────────────────────────
+    // Full export  — all PII included, for personal health records
+    FHIR_EXPORT:               v('/api/patient/fhir-export'),
+    // Pseudonymised — name/telecom/address stripped, requires consent grant
+    FHIR_EXPORT_PSEUDONYMISED: v('/api/patient/fhir-export/pseudonymised'),
+
     // ── ICD-10-GM AI Assist ───────────────────────────────────────────────
     // POST  { chief_complaint, diagnosis_hint }
     // →     { suggestions: [{ code, description, rationale }] }

@@ -506,9 +506,9 @@ _SECTION_META: dict[str, tuple[str, str, str]] = {
     "Encounter":         ("Besuche",        "46240-8", "History of encounters"),
     "Condition":         ("Diagnosen",      "11450-4", "Problem list"),
     "DocumentReference": ("Dokumente",      "46209-3", "Provider orders"),
-    "Medication":        ("Medikationen",   "10160-0", "History of medication use"),
-    "MedicationRequest": ("Verordnungen",   "57833-6", "Prescription for medication"),
-    "MedicationStatement": ("Einnahmen",    "10160-0", "History of medication use"),
+    "Medication":          ("Medikationen",   "10160-0", "History of medication use"),
+    "MedicationRequest":   ("Verordnungen",   "57833-6", "Prescription for medication"),
+    "MedicationStatement": ("Einnahmen",      "56445-0", "Medication summary document"),
 }
 
 

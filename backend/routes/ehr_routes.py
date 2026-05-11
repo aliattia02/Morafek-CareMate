@@ -9,6 +9,8 @@ from utils.fhir_de import (
     build_observations_from_vitals_doc,
     build_document_bundle,
     build_isik_observation_vitals_fields,
+    build_isik_encounter_fields,
+    build_isik_condition_fields,
     build_fhir_medication_request,
     build_medication_resource,
     build_medication_statement,
@@ -1681,6 +1683,173 @@ def icd10_suggest_test():
 
 # ─── FHIR R4 Bundle Export ────────────────────────────────────────────────────
 
+def _build_ehr_entries(patient_id: str, default_performer_ref: str) -> list:
+    """
+    Collect all clinical entries (Observations, Encounters, Conditions,
+    DocumentReferences, Medications) for *patient_id*.
+
+    The Patient entry itself is intentionally excluded — each export route
+    constructs its own Patient resource (full-PII vs. pseudonymised) and
+    prepends it separately.
+
+    Returns a flat list of FHIR entry dicts ready to be appended to a bundle.
+    """
+    entries: list = []
+
+    # ── Vitals — one Observation per vital sign ───────────────────────────────
+    for doc in mongo.db.ehr_vitals.find({'patient_id': patient_id}):
+        recorded_by = doc.get('recorded_by')
+        if recorded_by:
+            doc_user = mongo.db.users.find_one(
+                {'_id': ObjectId(recorded_by)}, {'user_type': 1}
+            ) or {}
+            utype       = doc_user.get('user_type', 'patient')
+            performer_r = f"{'Practitioner' if utype == 'doctor' else 'Patient'}/{recorded_by}"
+        else:
+            performer_r = default_performer_ref
+
+        for obs in build_observations_from_vitals_doc(
+            doc, patient_id, performer_ref=performer_r
+        ):
+            entries.append({'fullUrl': f'urn:uuid:{obs["id"]}', 'resource': obs})
+
+    # ── Visits — Encounter resources ──────────────────────────────────────────
+    # Collected separately so we can strip dangling Condition refs after the
+    # Conditions pass (below) identifies which condition IDs were skipped.
+    bundled_encounter_ids: set[str] = set()
+    encounter_entries: list[dict] = []
+
+    for doc in mongo.db.ehr_visits.find({'patient_id': patient_id}):
+        resource = {k: v for k, v in doc.items()
+                    if k not in ('_id', 'patient_id', 'doctor_id')}
+        resource['resourceType'] = 'Encounter'
+        resource.setdefault('id', str(doc['_id']))
+        # build_isik_encounter_fields() stamps profiles AND adds identifier/type/serviceType
+        # (replaces bare add_de_profile call which was missing those required fields)
+        build_isik_encounter_fields(resource)
+        bundled_encounter_ids.add(resource['id'])
+        encounter_entries.append({'fullUrl': f'urn:uuid:{resource["id"]}', 'resource': resource})
+
+    # ── Conditions ────────────────────────────────────────────────────────────
+    skipped_condition_ids: set[str] = set()
+    condition_entries: list[dict] = []
+
+    for doc in mongo.db.ehr_conditions.find({'patient_id': patient_id}):
+        resource = {k: v for k, v in doc.items()
+                    if k not in ('_id', 'patient_id', 'encounter_id')}
+        resource['resourceType'] = 'Condition'
+        resource.setdefault('id', str(doc['_id']))
+
+        coding = resource.get('code', {}).get('coding', [])
+        if not coding or not coding[0].get('code'):
+            logger.warning(
+                'Condition %s skipped in FHIR export: empty code.coding (no ICD code recorded)',
+                resource['id'],
+            )
+            skipped_condition_ids.add(resource['id'])
+            continue
+
+        # build_isik_condition_fields() stamps profiles AND adds recordedDate
+        build_isik_condition_fields(resource)
+        condition_entries.append({'fullUrl': f'urn:uuid:{resource["id"]}', 'resource': resource})
+
+    # ── Clean dangling Encounter.diagnosis refs → skipped Conditions ──────────
+    # FHIR R4 §3.3: a document bundle must be self-contained. Any Condition that
+    # was skipped (empty ICD code) must be removed from the referring Encounter's
+    # diagnosis array, otherwise validators flag a broken reference.
+    if skipped_condition_ids:
+        for enc_entry in encounter_entries:
+            enc_res  = enc_entry['resource']
+            orig_diag = enc_res.get('diagnosis', [])
+            if not orig_diag:
+                continue
+            cleaned = [
+                d for d in orig_diag
+                if d.get('condition', {}).get('reference', '').split('/')[-1]
+                   not in skipped_condition_ids
+            ]
+            if len(cleaned) != len(orig_diag):
+                logger.info(
+                    'Encounter %s: removed %d dangling diagnosis ref(s) to skipped Condition(s)',
+                    enc_res['id'], len(orig_diag) - len(cleaned),
+                )
+                if cleaned:
+                    enc_res['diagnosis'] = cleaned
+                else:
+                    enc_res.pop('diagnosis', None)
+
+    entries.extend(encounter_entries)
+    entries.extend(condition_entries)
+
+    # ── Documents — DocumentReference resources ───────────────────────────────
+    for doc in mongo.db.ehr_documents.find({'patient_id': patient_id}):
+        resource = {k: v for k, v in doc.items()
+                    if k not in ('_id', 'patient_id', 'uploaded_by', 'cloudinary_public_id')}
+        resource['resourceType'] = 'DocumentReference'
+        resource.setdefault('id', str(doc['_id']))
+        entries.append({'fullUrl': f'urn:uuid:{resource["id"]}', 'resource': resource})
+
+    # ── Medications — KBV Medication + MedicationRequest + MedicationStatement ─
+    medication_docs = list(mongo.db.medications.find({'patient_id': patient_id, 'is_active': True}))
+    medication_ids  = [str(doc['_id']) for doc in medication_docs]
+    intake_cutoff   = (
+        datetime.now(timezone.utc) - timedelta(days=MEDICATION_INTAKE_LOOKBACK_DAYS)
+    ).strftime('%Y-%m-%d')
+    intake_docs = list(
+        mongo.db.med_intakes.find({
+            'patient_id':    patient_id,
+            'medication_id': {'$in': medication_ids},
+            'date':          {'$gte': intake_cutoff},
+        })
+    ) if medication_ids else []
+
+    intakes_by_medication: dict[str, list[dict]] = {}
+    for intake_doc in intake_docs:
+        mid = str(intake_doc.get('medication_id', ''))
+        if mid:
+            intakes_by_medication.setdefault(mid, []).append(intake_doc)
+
+    for med_doc in medication_docs:
+        med_with_patient = dict(med_doc)
+        med_with_patient.setdefault('patient_id', patient_id)
+        medication_resource = build_medication_resource(med_with_patient)
+        medication_request  = build_fhir_medication_request(med_with_patient)
+        validate_kbv_medication_resource(medication_resource)
+        validate_kbv_medication_request_resource(medication_request)
+
+        enc_ref = medication_request.get('encounter', {}).get('reference', '')
+        if enc_ref:
+            enc_id = enc_ref.split('/')[-1]
+            if enc_id not in bundled_encounter_ids:
+                logger.warning(
+                    'MedicationRequest %s: dropping encounter reference %s — '
+                    'encounter not present in bundle',
+                    medication_request['id'], enc_ref,
+                )
+                medication_request.pop('encounter', None)
+
+        entries.append({'fullUrl': f'urn:uuid:{medication_resource["id"]}', 'resource': medication_resource})
+        entries.append({'fullUrl': f'urn:uuid:{medication_request["id"]}',  'resource': medication_request})
+
+        med_id = str(med_doc['_id'])
+        for intake_doc in intakes_by_medication.get(med_id, []):
+            statement = build_medication_statement(intake_doc, med_doc, patient_id)
+            entries.append({'fullUrl': f'urn:uuid:{statement["id"]}', 'resource': statement})
+
+    med_validation = validate_medication_bundle_entries(entries)
+    if not med_validation.get('valid', True):
+        logger.warning(
+            'Medication structural validation failed with %d error(s).',
+            len(med_validation.get('errors', [])),
+        )
+
+    return entries
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /api/patient/fhir-export  — full export (personal use, all PII included)
+# ─────────────────────────────────────────────────────────────────────────────
+
 @ehr_routes.route('/api/patient/fhir-export', methods=['GET'])
 @token_required
 @api_error_handler
@@ -1698,6 +1867,9 @@ def fhir_export(current_user):
       - MedicationRequest resources (KBV_PR_ERP_Prescription)
       - MedicationStatement resources (patient intake status)
 
+    All personally identifying data (name, address, telecom, etc.) is included.
+    For a research-safe pseudonymised version use /api/patient/fhir-export/pseudonymised.
+
     Conformance fixes applied vs. previous version:
       • Bundle.total removed        (invalid for type=document)
       • Bundle.identifier added     (required by KBV / gematik ePA)
@@ -1712,9 +1884,7 @@ def fhir_export(current_user):
         return jsonify({'error': 'Unauthorized access'}), 403
 
     patient_id = str(current_user['_id'])
-    entries = []
 
-    # ── Patient resource (self-contained bundle requirement) ──────────────────
     from utils.fhir_de import build_fhir_patient
     from config import mongo as _mongo
     from bson.objectid import ObjectId as _ObjId
@@ -1723,15 +1893,10 @@ def fhir_export(current_user):
     id_doc  = _mongo.db.patient_fhir_identifiers.find_one({'patient_id': patient_id}) or {}
     medical = _mongo.db.patient_profiles.find_one({'patient_id': patient_id}) or {}
 
-    # Use the gPAS pseudonym as the Patient resource id when available so that
-    # the exported bundle never exposes the internal MongoDB ObjectId.
-    # Falls back to the real patient_id when consent hasn't been granted yet or
-    # gPAS was unavailable during the grant flow.
-    pseudonym = id_doc.get('pseudonym')
-    fhir_pid  = pseudonym if pseudonym else patient_id
-
-    # author_ref uses fhir_pid so every Patient/{x} reference in the bundle
-    # is consistent with the Patient resource id written below.
+    pseudonym  = id_doc.get('pseudonym')
+    # Full PII export always uses the real MongoDB _id as Patient.id.
+    # The pseudonym belongs only in the pseudonymised export's identifier list.
+    fhir_pid   = patient_id
     author_ref = f'Patient/{fhir_pid}'
 
     fhir_patient = build_fhir_patient(
@@ -1744,184 +1909,155 @@ def fhir_export(current_user):
         postal_code = id_doc.get('postal_code'),
         city        = id_doc.get('city'),
     )
-    # Override the id that build_fhir_patient set (which defaults to patient_id)
-    # so the resource id matches every Patient/{fhir_pid} reference in the bundle.
-    fhir_patient['id'] = fhir_pid
+    # build_fhir_patient() already sets id = str(user["_id"]) == patient_id.
+    # No override needed; the line below is intentionally removed.
 
-    entries.append({
-        'fullUrl':  f'urn:uuid:{fhir_pid}',
-        'resource': fhir_patient,
-    })
+    entries = [{'fullUrl': f'urn:uuid:{fhir_pid}', 'resource': fhir_patient}]
+    entries.extend(_build_ehr_entries(patient_id, default_performer_ref=author_ref))
 
-    # ── Vitals — split each stored doc into separate Observations ─────────────
-    for doc in mongo.db.ehr_vitals.find({'patient_id': patient_id}):
-        # performer: the doctor who recorded it, or the patient for self-reports
-        recorded_by = doc.get('recorded_by')
-        if recorded_by:
-            doc_user = mongo.db.users.find_one(
-                {'_id': ObjectId(recorded_by)}, {'user_type': 1}
-            ) or {}
-            utype        = doc_user.get('user_type', 'patient')
-            performer_r  = f"{'Practitioner' if utype == 'doctor' else 'Patient'}/{recorded_by}"
-        else:
-            performer_r = author_ref
-
-        for obs in build_observations_from_vitals_doc(
-            doc, patient_id, performer_ref=performer_r
-        ):
-            entries.append({
-                'fullUrl':  f'urn:uuid:{obs["id"]}',
-                'resource': obs,
-            })
-
-    # ── Visits — Encounter resources ──────────────────────────────────────────
-    # FIX (Bug 2): track every encounter ID that lands in the bundle so we can
-    # validate MedicationRequest.encounter references below.
-    bundled_encounter_ids: set[str] = set()
-
-    for doc in mongo.db.ehr_visits.find({'patient_id': patient_id}):
-        resource = {k: v for k, v in doc.items()
-                    if k not in ('_id', 'patient_id', 'doctor_id')}
-        resource['resourceType'] = 'Encounter'
-        resource.setdefault('id', str(doc['_id']))
-        from utils.fhir_de import add_de_profile, PROFILE
-        add_de_profile(resource, PROFILE.ENCOUNTER_DE, PROFILE.ISIK_ENCOUNTER)
-        bundled_encounter_ids.add(resource['id'])          # ← track it
-        entries.append({
-            'fullUrl':  f'urn:uuid:{resource["id"]}',
-            'resource': resource,
-        })
-
-    # ── Conditions ────────────────────────────────────────────────────────────
-    for doc in mongo.db.ehr_conditions.find({'patient_id': patient_id}):
-        resource = {k: v for k, v in doc.items()
-                    if k not in ('_id', 'patient_id', 'encounter_id')}
-        resource['resourceType'] = 'Condition'
-        resource.setdefault('id', str(doc['_id']))
-        from utils.fhir_de import add_de_profile, PROFILE
-        add_de_profile(resource, PROFILE.CONDITION_DE, PROFILE.ISIK_CONDITION)
-
-        # FIX (Bug 1): skip Conditions that have no ICD code — an empty
-        # code.coding makes the resource non-conformant (ISiKDiagnose requires
-        # at least one ICD-10-GM coding).  The visit reason text already
-        # captures the free-text complaint on the Encounter; omitting the
-        # Condition is safer than emitting an invalid resource.
-        coding = resource.get('code', {}).get('coding', [])
-        if not coding or not coding[0].get('code'):
-            logger.warning(
-                'Condition %s skipped in FHIR export: empty code.coding (no ICD code recorded)',
-                resource['id'],
-            )
-            continue
-
-        entries.append({
-            'fullUrl':  f'urn:uuid:{resource["id"]}',
-            'resource': resource,
-        })
-
-    # ── Documents — DocumentReference resources ───────────────────────────────
-    for doc in mongo.db.ehr_documents.find({'patient_id': patient_id}):
-        resource = {k: v for k, v in doc.items()
-                    if k not in ('_id', 'patient_id', 'uploaded_by', 'cloudinary_public_id')}
-        resource['resourceType'] = 'DocumentReference'
-        resource.setdefault('id', str(doc['_id']))
-        entries.append({
-            'fullUrl':  f'urn:uuid:{resource["id"]}',
-            'resource': resource,
-        })
-
-    # ── Medications — KBV Medication + MedicationRequest + MedicationStatement ─
-    medication_docs = list(mongo.db.medications.find({'patient_id': patient_id, 'is_active': True}))
-    medication_ids = [str(doc['_id']) for doc in medication_docs]
-    intake_cutoff_date = (
-        datetime.now(timezone.utc) - timedelta(days=MEDICATION_INTAKE_LOOKBACK_DAYS)
-    ).strftime('%Y-%m-%d')
-    intake_docs = list(
-        mongo.db.med_intakes.find({
-            'patient_id': patient_id,
-            'medication_id': {'$in': medication_ids},
-            'date': {'$gte': intake_cutoff_date},
-        })
-    ) if medication_ids else []
-
-    intakes_by_medication: dict[str, list[dict]] = {}
-    for intake_doc in intake_docs:
-        med_id = str(intake_doc.get('medication_id', ''))
-        if med_id:
-            intakes_by_medication.setdefault(med_id, []).append(intake_doc)
-
-    for med_doc in medication_docs:
-        med_with_patient = dict(med_doc)
-        med_with_patient.setdefault('patient_id', patient_id)
-        medication_resource = build_medication_resource(med_with_patient)
-        medication_request = build_fhir_medication_request(med_with_patient)
-        validate_kbv_medication_resource(medication_resource)
-        validate_kbv_medication_request_resource(medication_request)
-
-        # FIX (Bug 2): MedicationRequest.encounter must resolve within the bundle.
-        # The visit_id on the medication doc may reference an encounter that is
-        # not in this patient's ehr_visits collection (e.g. created in a different
-        # context). Strip the reference if the encounter is not bundled — a
-        # dangling reference breaks FHIR document conformance.
-        enc_ref = medication_request.get('encounter', {}).get('reference', '')
-        if enc_ref:
-            enc_id = enc_ref.split('/')[-1]
-            if enc_id not in bundled_encounter_ids:
-                logger.warning(
-                    'MedicationRequest %s: dropping encounter reference %s — '
-                    'encounter not present in bundle',
-                    medication_request['id'], enc_ref,
-                )
-                medication_request.pop('encounter', None)
-
-        entries.append({
-            'fullUrl': f'urn:uuid:{medication_resource["id"]}',
-            'resource': medication_resource,
-        })
-        entries.append({
-            'fullUrl': f'urn:uuid:{medication_request["id"]}',
-            'resource': medication_request,
-        })
-
-        med_id = str(med_doc['_id'])
-        for intake_doc in intakes_by_medication.get(med_id, []):
-            statement = build_medication_statement(intake_doc, med_doc, patient_id)
-            entries.append({
-                'fullUrl': f'urn:uuid:{statement["id"]}',
-                'resource': statement,
-            })
-
-    med_validation = validate_medication_bundle_entries(entries)
-    if not med_validation.get('valid', True):
-        logger.warning(
-            'Medication structural validation failed with %d error(s).',
-            len(med_validation.get('errors', [])),
-        )
-
-    # ── Pseudonym reference rewrite ───────────────────────────────────────────
-    # Raw documents stored in MongoDB carry subject/performer references that
-    # were written with the real patient_id at record time (e.g.
-    # "subject": {"reference": "Patient/<mongo_id>"}).  When a pseudonym is
-    # available we must rewrite every such reference so the exported bundle is
-    # internally consistent: all Patient/{x} strings must resolve to the single
-    # Patient entry whose id is fhir_pid.
+    # Rewrite any Patient/<mongo_id> references when a pseudonym is in use
     if fhir_pid != patient_id:
-        import json as _bundle_json
-        raw = _bundle_json.dumps(entries)
+        import json as _j
+        raw = _j.dumps(entries)
         raw = raw.replace(f'Patient/{patient_id}', f'Patient/{fhir_pid}')
         raw = raw.replace(f'urn:uuid:{patient_id}', f'urn:uuid:{fhir_pid}')
-        entries = _bundle_json.loads(raw)
-        logger.info(
-            'FHIR export: rewrote Patient/%s → Patient/%s (pseudonym)',
-            patient_id, fhir_pid,
-        )
+        entries = _j.loads(raw)
+        logger.info('FHIR export: rewrote Patient/%s → Patient/%s', patient_id, fhir_pid)
 
-    bundle = build_document_bundle(patient_id, entries, author_ref=author_ref)
-    # FIX (Bug 3): Bundle.total is only valid for type=searchset, not type=document.
-    # build_document_bundle already produces a correct bundle without it.
-    # The previous line `bundle['total'] = len(bundle.get('entry', []))` has been removed.
+    bundle = build_document_bundle(fhir_pid, entries, author_ref=author_ref)
     logger.info(
         'FHIR R4 document Bundle exported (%d entries, %d observations)',
+        len(bundle['entry']),
+        sum(1 for e in entries if e['resource'].get('resourceType') == 'Observation'),
+    )
+    return jsonify(bundle), 200
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GET /api/patient/fhir-export/pseudonymised  — research-safe export
+# ─────────────────────────────────────────────────────────────────────────────
+
+@ehr_routes.route('/api/patient/fhir-export/pseudonymised', methods=['GET'])
+@token_required
+@api_error_handler
+def fhir_export_pseudonymised(current_user):
+    """GET /api/patient/fhir-export/pseudonymised — pseudonymised FHIR R4 Bundle.
+
+    Identical clinical content to /api/patient/fhir-export but all patient-
+    identifying data is stripped from the Patient resource before export:
+
+      • Patient.name    — removed
+      • Patient.telecom — removed
+      • Patient.address — removed
+      • Patient.identifier — replaced with pseudonym-only entry
+        (system: https://morafek.app/fhir/sid/pseudonym)
+      • All Patient/<mongo_id> references rewritten to Patient/<pseudonym>
+      • Composition.subject uses pseudonym (build_document_bundle called with
+        fhir_pid, not patient_id)
+
+    Clinical fields retained for research utility: gender, birthDate.
+
+    Requires:
+      • Authenticated patient (user_type == 'patient')
+      • Consent status == 'granted' in patient_consents
+      • A gPAS pseudonym stored in patient_fhir_identifiers or patient_consents
+
+    Returns 403 if consent not granted, 503 if pseudonym not yet assigned.
+    """
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Unauthorized access'}), 403
+
+    patient_id = str(current_user['_id'])
+
+    from config import mongo as _mongo
+    from bson.objectid import ObjectId as _ObjId  # noqa: F401 (kept for id_doc queries)
+
+    # ── Require active consent ─────────────────────────────────────────────────
+    consent_record = _mongo.db.patient_consents.find_one({'patient_id': patient_id}) or {}
+    if consent_record.get('status') != 'granted':
+        return jsonify({
+            'error': 'Consent not granted. Enable data-sharing consent before exporting a pseudonymised bundle.'
+        }), 403
+
+    # ── Require pseudonym ──────────────────────────────────────────────────────
+    id_doc    = _mongo.db.patient_fhir_identifiers.find_one({'patient_id': patient_id}) or {}
+    pseudonym = id_doc.get('pseudonym') or consent_record.get('pseudonym')
+
+    if not pseudonym:
+        return jsonify({
+            'error': 'Pseudonym not yet assigned. Please try again in a moment.'
+        }), 503
+
+    medical    = _mongo.db.patient_profiles.find_one({'patient_id': patient_id}) or {}
+    fhir_pid   = pseudonym
+    author_ref = f'Patient/{fhir_pid}'
+
+    # ── Build pseudonymised Patient resource (allowlist approach) ─────────────
+    # Do NOT call build_fhir_patient() and then pop() fields.  The pop() chain
+    # is fragile: a stale .pyc, an indentation drift, or a future signature
+    # change in build_fhir_patient() can silently leave PII in the bundle.
+    # Instead we construct *only* the fields a research bundle may expose:
+    #   resourceType · id · meta.profile · identifier (pseudonym only)
+    #   active · gender · birthDate
+    # Explicitly excluded: name, telecom, address, MongoDB _id in identifier.
+    fhir_patient: dict = {
+        'resourceType': 'Patient',
+        'id': fhir_pid,
+        'meta': {
+            'profile': [
+                'https://morafek.app/fhir/StructureDefinition/PseudonymisedPatient',
+            ]
+        },
+        'identifier': [{
+            'system': 'https://morafek.app/fhir/sid/pseudonym',
+            'value':  pseudonym,
+        }],
+        'active': True,
+    }
+
+    # GKV-KVID is a statutory identifier, not directly re-identifying on its
+    # own — include it when present so researchers can link to GKV records.
+    gkv_kvid = id_doc.get('gkv_kvid')
+    if gkv_kvid:
+        fhir_patient['identifier'].append({
+            'type': {'coding': [{
+                'system':  'http://fhir.de/CodeSystem/identifier-type-de-basis',
+                'code':    'GKV',
+                'display': 'Gesetzliche Krankenversicherung',
+            }]},
+            'system': 'http://fhir.de/sid/gkv/kvid-10',
+            'value':  gkv_kvid,
+        })
+
+    _gender    = medical.get('gender')
+    _birthdate = medical.get('date_of_birth')
+    if _gender:
+        fhir_patient['gender'] = _gender
+    if _birthdate:
+        fhir_patient['birthDate'] = _birthdate
+
+    # ── Collect clinical entries (shared helper) ───────────────────────────────
+    entries = [{'fullUrl': f'urn:uuid:{fhir_pid}', 'resource': fhir_patient}]
+    entries.extend(_build_ehr_entries(patient_id, default_performer_ref=author_ref))
+
+    # ── Rewrite every Patient/<mongo_id> reference → Patient/<pseudonym> ───────
+    # This covers subject/performer/author references in Observations, Encounters,
+    # Conditions, MedicationRequests and MedicationStatements that were written
+    # with the real patient_id at record time.
+    import json as _j
+    raw = _j.dumps(entries)
+    raw = raw.replace(f'Patient/{patient_id}', f'Patient/{fhir_pid}')
+    raw = raw.replace(f'urn:uuid:{patient_id}', f'urn:uuid:{fhir_pid}')
+    entries = _j.loads(raw)
+    logger.info(
+        'FHIR pseudonymised export: rewrote Patient/%s → Patient/%s',
+        patient_id, fhir_pid,
+    )
+
+    # ── Build bundle — pass fhir_pid so Composition.subject uses pseudonym ─────
+    bundle = build_document_bundle(fhir_pid, entries, author_ref=author_ref)
+    logger.info(
+        'FHIR R4 pseudonymised Bundle exported (%d entries, %d observations)',
         len(bundle['entry']),
         sum(1 for e in entries if e['resource'].get('resourceType') == 'Observation'),
     )
