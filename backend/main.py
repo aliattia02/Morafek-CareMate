@@ -66,6 +66,7 @@ def create_app():
         from routes.upload_routes     import upload_routes
         from routes.monitoring_routes import monitoring_routes
         from routes.clinic_routes     import clinic_routes
+        from routes.consent_routes    import consent_routes
 
         # ── German FHIR additions ─────────────────────────────────────────
         # metadata_bp → GET /metadata  (FHIR CapabilityStatement, no auth)
@@ -82,6 +83,7 @@ def create_app():
             (upload_routes,     ''),
             (monitoring_routes, ''),
             (clinic_routes,     ''),
+            (consent_routes,    ''),
             (metadata_bp,       ''),   # /metadata — must be unauthenticated
         ]
 
@@ -126,6 +128,11 @@ def _ensure_mongo_indexes(logger):
             [("pseudonym", ASCENDING)],
             sparse=True,
             name="idx_pseudonym_sparse",
+        )
+        mongo.db.patient_consents.create_index(
+            [("patient_id", ASCENDING)],
+            unique=True,
+            name="idx_patient_consents_unique",
         )
 
         for coll_name in ("ehr_vitals", "ehr_visits", "ehr_conditions"):

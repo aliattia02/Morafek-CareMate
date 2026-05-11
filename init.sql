@@ -8,3 +8,6 @@ GRANT ALL PRIVILEGES ON gpas.* TO 'gpas_user'@'%' IDENTIFIED BY 'gpas_pass';
 GRANT ALL PRIVILEGES ON notification_service.* TO 'gpas_user'@'%' IDENTIFIED BY 'gpas_pass';
 GRANT ALL PRIVILEGES ON gras.* TO 'gpas_user'@'%' IDENTIFIED BY 'gpas_pass';
 FLUSH PRIVILEGES;
+CREATE DATABASE IF NOT EXISTS gics;
+GRANT ALL PRIVILEGES ON gics.* TO 'gpas_user'@'%' IDENTIFIED BY 'gpas_pass';
+FLUSH PRIVILEGES;

@@ -95,5 +95,42 @@ services:
         echo 'Schema widened. gPAS will succeed on its next restart.'
       "
 
+  gics:
+    image: mosaicgreifswald/gics:latest
+    container_name: gics
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8082:8080"
+    environment:
+      TTP_DB_HOST: mysql
+      TTP_DB_PORT: 3306
+      TTP_DB_NAME: gics
+      TTP_DB_USER: gpas_user
+      TTP_DB_PASS: gpas_pass
+
+  gics-schema-fix:
+    image: mariadb:10.11
+    container_name: gics-schema-fix
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo 'Waiting for gICS to create its tables...' &&
+        until mariadb -h mysql -uroot -pgpas_root gics -e 'DESCRIBE consent' 2>/dev/null; do
+          sleep 5;
+        done &&
+        echo 'Widening gICS columns...' &&
+        mariadb -h mysql -uroot -pgpas_root gics -e \"
+          ALTER TABLE consent MODIFY COLUMN comment MEDIUMTEXT;
+          ALTER TABLE policy  MODIFY COLUMN comment MEDIUMTEXT;
+        \" &&
+        echo 'gICS schema fix done.'
+      "
+
 volumes:
   gpas-db-data:
