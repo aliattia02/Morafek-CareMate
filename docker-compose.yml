@@ -1,0 +1,99 @@
+services:
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: morafek-backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./backend/.env
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./mobile
+      dockerfile: Dockerfile
+      args:
+        EXPO_PUBLIC_API_URL: http://localhost:5000
+        EXPO_PUBLIC_API_VERSION: v1
+        GEMINI_API_KEY: ${GEMINI_API_KEY}
+    container_name: morafek-frontend
+    restart: unless-stopped
+    ports:
+      - "8081:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  mysql:
+    image: mariadb:10.11
+    container_name: mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: gpas_root
+      MYSQL_DATABASE: gpas
+      MYSQL_USER: gpas_user
+      MYSQL_PASSWORD: gpas_pass
+    volumes:
+      - gpas-db-data:/var/lib/mysql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./mysql.cnf:/etc/mysql/conf.d/gpas.cnf:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pgpas_root"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  gpas:
+    image: mosaicgreifswald/gpas:latest
+    container_name: gpas
+    restart: unless-stopped   # auto-retries after crash; succeeds once schema-fix is done
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      TTP_DB_HOST: mysql
+      TTP_DB_PORT: 3306
+      TTP_DB_NAME: gpas
+      TTP_DB_USER: gpas_user
+      TTP_DB_PASS: gpas_pass
+
+  gpas-schema-fix:
+    image: mariadb:10.11
+    container_name: gpas-schema-fix
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo 'Polling for gPAS to create the domain table...' &&
+        until mariadb -h mysql -uroot -pgpas_root gpas -e 'DESCRIBE domain' 2>/dev/null; do
+          echo '  domain table not yet present, retrying in 5s...' &&
+          sleep 5;
+        done &&
+        echo 'domain table detected — widening columns now...' &&
+        mariadb -h mysql -uroot -pgpas_root gpas -e \"
+          ALTER TABLE domain MODIFY COLUMN properties        MEDIUMTEXT;
+          ALTER TABLE domain MODIFY COLUMN COMMENT          MEDIUMTEXT;
+          ALTER TABLE domain MODIFY COLUMN expiration_properties MEDIUMTEXT;
+          ALTER TABLE domain MODIFY COLUMN LABEL            VARCHAR(1000);
+          ALTER TABLE psn    MODIFY COLUMN PSEUDONYM        VARCHAR(500);
+          ALTER TABLE mpsn   MODIFY COLUMN PSEUDONYM        VARCHAR(500);
+        \" &&
+        echo 'Schema widened. gPAS will succeed on its next restart.'
+      "
+
+volumes:
+  gpas-db-data:

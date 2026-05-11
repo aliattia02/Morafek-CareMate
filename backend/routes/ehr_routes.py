@@ -1699,12 +1699,14 @@ def fhir_export(current_user):
       - MedicationStatement resources (patient intake status)
 
     Conformance fixes applied vs. previous version:
-      • Bundle.total removed   (invalid for type=document)
-      • Bundle.identifier added (required by KBV / gematik ePA)
+      • Bundle.total removed        (invalid for type=document)
+      • Bundle.identifier added     (required by KBV / gematik ePA)
       • Composition added as first entry (FHIR R4 §3.3)
       • Observations split per vital sign (MII / ISiK requirement)
-      • Patient resource bundled (document must be self-contained)
+      • Patient resource bundled    (document must be self-contained)
       • performer added to all Observations
+      • Conditions with empty code.coding skipped (ISiKDiagnose non-conformant)
+      • MedicationRequest.encounter stripped when encounter not in bundle
     """
     if current_user.get('user_type') != 'patient':
         return jsonify({'error': 'Unauthorized access'}), 403
@@ -1759,14 +1761,18 @@ def fhir_export(current_user):
             })
 
     # ── Visits — Encounter resources ──────────────────────────────────────────
+    # FIX (Bug 2): track every encounter ID that lands in the bundle so we can
+    # validate MedicationRequest.encounter references below.
+    bundled_encounter_ids: set[str] = set()
+
     for doc in mongo.db.ehr_visits.find({'patient_id': patient_id}):
         resource = {k: v for k, v in doc.items()
                     if k not in ('_id', 'patient_id', 'doctor_id')}
         resource['resourceType'] = 'Encounter'
         resource.setdefault('id', str(doc['_id']))
-        # Add ISiK profile stamp if missing
         from utils.fhir_de import add_de_profile, PROFILE
         add_de_profile(resource, PROFILE.ENCOUNTER_DE, PROFILE.ISIK_ENCOUNTER)
+        bundled_encounter_ids.add(resource['id'])          # ← track it
         entries.append({
             'fullUrl':  f'urn:uuid:{resource["id"]}',
             'resource': resource,
@@ -1780,6 +1786,20 @@ def fhir_export(current_user):
         resource.setdefault('id', str(doc['_id']))
         from utils.fhir_de import add_de_profile, PROFILE
         add_de_profile(resource, PROFILE.CONDITION_DE, PROFILE.ISIK_CONDITION)
+
+        # FIX (Bug 1): skip Conditions that have no ICD code — an empty
+        # code.coding makes the resource non-conformant (ISiKDiagnose requires
+        # at least one ICD-10-GM coding).  The visit reason text already
+        # captures the free-text complaint on the Encounter; omitting the
+        # Condition is safer than emitting an invalid resource.
+        coding = resource.get('code', {}).get('coding', [])
+        if not coding or not coding[0].get('code'):
+            logger.warning(
+                'Condition %s skipped in FHIR export: empty code.coding (no ICD code recorded)',
+                resource['id'],
+            )
+            continue
+
         entries.append({
             'fullUrl':  f'urn:uuid:{resource["id"]}',
             'resource': resource,
@@ -1824,6 +1844,22 @@ def fhir_export(current_user):
         validate_kbv_medication_resource(medication_resource)
         validate_kbv_medication_request_resource(medication_request)
 
+        # FIX (Bug 2): MedicationRequest.encounter must resolve within the bundle.
+        # The visit_id on the medication doc may reference an encounter that is
+        # not in this patient's ehr_visits collection (e.g. created in a different
+        # context). Strip the reference if the encounter is not bundled — a
+        # dangling reference breaks FHIR document conformance.
+        enc_ref = medication_request.get('encounter', {}).get('reference', '')
+        if enc_ref:
+            enc_id = enc_ref.split('/')[-1]
+            if enc_id not in bundled_encounter_ids:
+                logger.warning(
+                    'MedicationRequest %s: dropping encounter reference %s — '
+                    'encounter not present in bundle',
+                    medication_request['id'], enc_ref,
+                )
+                medication_request.pop('encounter', None)
+
         entries.append({
             'fullUrl': f'urn:uuid:{medication_resource["id"]}',
             'resource': medication_resource,
@@ -1849,7 +1885,9 @@ def fhir_export(current_user):
         )
 
     bundle = build_document_bundle(patient_id, entries, author_ref=author_ref)
-    bundle['total'] = len(bundle.get('entry', []))
+    # FIX (Bug 3): Bundle.total is only valid for type=searchset, not type=document.
+    # build_document_bundle already produces a correct bundle without it.
+    # The previous line `bundle['total'] = len(bundle.get('entry', []))` has been removed.
     logger.info(
         'FHIR R4 document Bundle exported (%d entries, %d observations)',
         len(bundle['entry']),

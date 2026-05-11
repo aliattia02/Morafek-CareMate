@@ -6,6 +6,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from bson.objectid import ObjectId
 from utils.auth import token_required, generate_token
+from services.gpas_service import gpas
 
 auth_routes = Blueprint('auth_routes', __name__)
 
@@ -154,6 +155,33 @@ def register():
                 upsert=True,
             )
             logger.info(f"GKV identifier stored for new patient {user_id_str}")
+
+        # ── gPAS pseudonymisation ─────────────────────────────────────────────
+        # Request a pseudonym for the new patient's MongoDB ID.
+        # This mirrors the Treuhandstelle pattern: the MongoDB _id (MDAT key)
+        # is the "original value"; gPAS stores the IDAT→pseudonym mapping.
+        #
+        # Design decisions:
+        #   • Only patients are pseudonymised (doctors have LANR for that).
+        #   • If gPAS is unreachable the registration still succeeds — the
+        #     pseudonym can be created on-demand later via gpas.get_or_create().
+        #   • The pseudonym is stored in patient_fhir_identifiers alongside the
+        #     GKV number so it is always co-located with other FHIR identity data.
+        if data['user_type'] == 'patient':
+            pseudonym = gpas.get_or_create(user_id_str)
+            if pseudonym:
+                current_app.mongo.db.patient_fhir_identifiers.update_one(
+                    {"patient_id": user_id_str},
+                    {"$set": {"pseudonym": pseudonym}},
+                    upsert=True,
+                )
+                logger.info(f"gPAS pseudonym stored for patient {user_id_str}: {pseudonym}")
+            else:
+                # gPAS is down — not fatal, pseudonym will be created on next call.
+                logger.warning(
+                    f"gPAS unavailable at registration for patient {user_id_str}. "
+                    "Pseudonym will be created on next gpas.get_or_create() call."
+                )
 
         logger.info(f"User registered: {user_id_str}")
         return jsonify({
@@ -525,6 +553,16 @@ def delete_account(current_user):
         # ── Delete user document ──────────────────────────────────────────────
         db.users.delete_one({"_id": user_id})
         deleted['user'] = 1
+
+        # ── gPAS pseudonym — intentionally NOT deleted ────────────────────────
+        # The pseudonym record in gPAS is kept by design.
+        # In a Treuhandstelle architecture the pseudonym link (original_id ↔ psn)
+        # is held by a trusted third party precisely so it can be resolved later
+        # if legally required (e.g. court order, serious adverse event follow-up).
+        # Deleting it would defeat the purpose and could itself be a compliance
+        # violation. The patient_fhir_identifiers document (which stored the psn
+        # locally as a cache) IS deleted above — the authoritative record stays
+        # in gPAS, not in MongoDB.
 
         logger.info(
             f"DSGVO Art.17 erasure complete | user={user_id_str} "

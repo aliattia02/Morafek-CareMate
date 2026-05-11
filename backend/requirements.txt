@@ -9,3 +9,4 @@ bcrypt==4.2.1
 gunicorn==25.1.0
 cloudinary==1.44.1
 google-genai>=1.0.0
+requests>=2.31.0

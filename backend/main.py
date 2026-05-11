@@ -121,6 +121,12 @@ def _ensure_mongo_indexes(logger):
             sparse=True,
             name="idx_gkv_kvid_sparse",
         )
+        # Allows efficient lookup by gPAS pseudonym (de-pseudonymisation path)
+        mongo.db.patient_fhir_identifiers.create_index(
+            [("pseudonym", ASCENDING)],
+            sparse=True,
+            name="idx_pseudonym_sparse",
+        )
 
         for coll_name in ("ehr_vitals", "ehr_visits", "ehr_conditions"):
             mongo.db[coll_name].create_index(
