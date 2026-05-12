@@ -66,10 +66,10 @@ services:
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
       - ./mysql.cnf:/etc/mysql/conf.d/gpas.cnf:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pgpas_root"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pgpas_root", "--silent"]
       interval: 10s
       timeout: 5s
-      retries: 5
+      retries: 10
       start_period: 30s
 
   gpas:
@@ -93,6 +93,7 @@ services:
       TTP_DB_NAME: gpas
       TTP_DB_USER: gpas_user
       TTP_DB_PASS: gpas_pass
+      WILDFLY_DISABLE_SSL: "true"
     # gPAS (WildFly) takes 60-90 s to boot; give it plenty of start_period
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/gpas/gpasService?wsdl"]
@@ -108,7 +109,7 @@ services:
     # tables (e.g. slow first boot).  There is no max_attempts here because
     # deploy.restart_policy is Swarm-only and is silently ignored in Compose;
     # the plain restart: on-failure is what actually governs retries.
-    restart: on-failure
+    restart: "no"
     depends_on:
       mysql:
         condition: service_healthy
@@ -127,7 +128,12 @@ services:
           ALTER TABLE domain MODIFY COLUMN expiration_properties MEDIUMTEXT;
           ALTER TABLE domain MODIFY COLUMN LABEL                 VARCHAR(768);
           ALTER TABLE psn    MODIFY COLUMN PSEUDONYM             VARCHAR(500);
-          ALTER TABLE mpsn   MODIFY COLUMN PSEUDONYM             VARCHAR(500);
+          ALTER TABLE mpsn   DROP PRIMARY KEY;
+          ALTER TABLE mpsn
+            MODIFY COLUMN PSEUDONYM             VARCHAR(500)
+            CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+          ALTER TABLE mpsn
+            ADD PRIMARY KEY (DOMAIN_NAME(191), PSEUDONYM(500));
         \" &&
         echo 'Schema widened. gPAS will use correct column widths on next write.'
       "
