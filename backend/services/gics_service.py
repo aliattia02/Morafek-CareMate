@@ -55,7 +55,7 @@ import logging
 import os
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import requests
 
@@ -67,6 +67,9 @@ GICS_BASE_URL      = os.environ.get("GICS_URL",            "http://gics:8080").r
 GICS_DOMAIN        = os.environ.get("GICS_DOMAIN",         "morafek-data-sharing")
 GICS_SIGNER_ID_TYPE = os.environ.get("GICS_SIGNER_ID_TYPE", "morafek-patient-id")
 GICS_TIMEOUT       = int(os.environ.get("GICS_TIMEOUT",    "5"))
+GICS_FHIR_BASE_URL = os.environ.get("GICS_FHIR_URL", f"{GICS_BASE_URL}/ttp-fhir/fhir").rstrip("/")
+
+_CONSENT_TEMPLATE_SYSTEM = "https://morafek.app/consent-template"
 
 _SOAP_ENDPOINT = f"{GICS_BASE_URL}/gics/gicsService"
 

@@ -33,6 +33,14 @@ MONGO_URI = os.environ.get('MONGO_URI')
 if not MONGO_URI:
     raise ValueError("MONGO_URI not set in environment variables. Check your .env file or Render environment settings.")
 
+# ─── gICS / gPAS configuration ────────────────────────────────────────────────
+GICS_BASE_URL = os.environ.get("GICS_URL", "http://gics:8080").rstrip("/")
+GPAS_BASE_URL = os.environ.get("GPAS_URL", "http://gpas:8080").rstrip("/")
+GICS_DOMAIN = os.environ.get("GICS_DOMAIN", "morafek-data-sharing")
+GPAS_DOMAIN = os.environ.get("GPAS_DOMAIN", "morafek-caremate")
+GICS_FHIR_BASE_URL = os.environ.get("GICS_FHIR_URL", f"{GICS_BASE_URL}/ttp-fhir/fhir")
+CONSENT_TEMPLATE_ID = os.environ.get("CONSENT_TEMPLATE_ID", "data-sharing")
+
 
 def test_mongo_connection():
     """Test MongoDB Atlas connection on startup"""
