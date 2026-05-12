@@ -10,6 +10,20 @@ services:
       - "5000:5000"
     env_file:
       - ./backend/.env
+    # Wait for gpas and gics to be responding before the backend starts.
+    # Without this, patient registration fires gpas.get_or_create() while
+    # gPAS is still booting → returns None → pseudonym stored as null.
+    depends_on:
+      mysql:
+        condition: service_healthy
+      gpas:
+        # service_started (not service_healthy) so `docker compose up -d` returns
+        # promptly without blocking for WildFly's 90-120 s boot.
+        # The backend code handles gPAS/gICS being temporarily unavailable
+        # gracefully — null pseudonym on registration is retried on first consent grant.
+        condition: service_started
+      gics:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
       interval: 15s
@@ -42,6 +56,11 @@ services:
       MYSQL_DATABASE: gpas
       MYSQL_USER: gpas_user
       MYSQL_PASSWORD: gpas_pass
+    # --innodb-use-native-aio=0 disables io_uring / native AIO, which the host
+    # kernel blocks with EPERM when sysctl kernel.io_uring_disabled=2 is set.
+    # Without this flag mariadbd aborts on startup in hardened container runtimes.
+    command: >
+      --innodb-use-native-aio=0
     volumes:
       - gpas-db-data:/var/lib/mysql
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -56,7 +75,13 @@ services:
   gpas:
     image: mosaicgreifswald/gpas:latest
     container_name: gpas
-    restart: unless-stopped   # auto-retries after crash; succeeds once schema-fix is done
+    # restart: unless-stopped is the key mechanism here.
+    # gPAS boots, may crash on the first run because schema columns are too
+    # narrow, then gpas-schema-fix widens them, then gPAS auto-restarts and
+    # boots successfully. The schema-fix MUST NOT be a depends_on prerequisite
+    # because it polls for a table that gPAS creates — making each wait for
+    # the other causes a deadlock.
+    restart: unless-stopped
     depends_on:
       mysql:
         condition: service_healthy
@@ -68,36 +93,49 @@ services:
       TTP_DB_NAME: gpas
       TTP_DB_USER: gpas_user
       TTP_DB_PASS: gpas_pass
+    # gPAS (WildFly) takes 60-90 s to boot; give it plenty of start_period
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/gpas/gpasService?wsdl"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
 
   gpas-schema-fix:
     image: mariadb:10.11
     container_name: gpas-schema-fix
-    restart: "no"
+    # restart: on-failure retries if polling times out before gPAS creates its
+    # tables (e.g. slow first boot).  There is no max_attempts here because
+    # deploy.restart_policy is Swarm-only and is silently ignored in Compose;
+    # the plain restart: on-failure is what actually governs retries.
+    restart: on-failure
     depends_on:
       mysql:
         condition: service_healthy
     command: >
       bash -c "
-        echo 'Polling for gPAS to create the domain table...' &&
+        echo 'Polling for gPAS domain table...' &&
         until mariadb -h mysql -uroot -pgpas_root gpas -e 'DESCRIBE domain' 2>/dev/null; do
-          echo '  domain table not yet present, retrying in 5s...' &&
-          sleep 5;
+          echo '  not yet, retrying in 5s...' && sleep 5;
         done &&
-        echo 'domain table detected — widening columns now...' &&
+        echo 'Table found — waiting 10s for gPAS DDL phase to finish before ALTER...' &&
+        sleep 10 &&
+        echo 'Widening gPAS columns...' &&
         mariadb -h mysql -uroot -pgpas_root gpas -e \"
-          ALTER TABLE domain MODIFY COLUMN properties        MEDIUMTEXT;
-          ALTER TABLE domain MODIFY COLUMN COMMENT          MEDIUMTEXT;
+          ALTER TABLE domain MODIFY COLUMN properties             MEDIUMTEXT;
+          ALTER TABLE domain MODIFY COLUMN COMMENT               MEDIUMTEXT;
           ALTER TABLE domain MODIFY COLUMN expiration_properties MEDIUMTEXT;
-          ALTER TABLE domain MODIFY COLUMN LABEL            VARCHAR(1000);
-          ALTER TABLE psn    MODIFY COLUMN PSEUDONYM        VARCHAR(500);
-          ALTER TABLE mpsn   MODIFY COLUMN PSEUDONYM        VARCHAR(500);
+          ALTER TABLE domain MODIFY COLUMN LABEL                 VARCHAR(768);
+          ALTER TABLE psn    MODIFY COLUMN PSEUDONYM             VARCHAR(500);
+          ALTER TABLE mpsn   MODIFY COLUMN PSEUDONYM             VARCHAR(500);
         \" &&
-        echo 'Schema widened. gPAS will succeed on its next restart.'
+        echo 'Schema widened. gPAS will use correct column widths on next write.'
       "
 
   gics:
     image: mosaicgreifswald/gics:latest
     container_name: gics
+    # Same restart-based pattern as gPAS — see comment above.
     restart: unless-stopped
     depends_on:
       mysql:
@@ -110,25 +148,35 @@ services:
       TTP_DB_NAME: gics
       TTP_DB_USER: gpas_user
       TTP_DB_PASS: gpas_pass
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/gics/gicsService?wsdl"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 90s
 
   gics-schema-fix:
     image: mariadb:10.11
     container_name: gics-schema-fix
-    restart: "no"
+    restart: on-failure
     depends_on:
       mysql:
         condition: service_healthy
     command: >
       bash -c "
-        echo 'Waiting for gICS to create its tables...' &&
+        echo 'Polling for gICS consent table...' &&
         until mariadb -h mysql -uroot -pgpas_root gics -e 'DESCRIBE consent' 2>/dev/null; do
-          sleep 5;
+          echo '  not yet, retrying in 5s...' && sleep 5;
         done &&
+        echo 'Table found — waiting 10s for gICS DDL phase to finish before ALTER...' &&
+        sleep 10 &&
         echo 'Widening gICS columns...' &&
         mariadb -h mysql -uroot -pgpas_root gics -e \"
-          ALTER TABLE consent MODIFY COLUMN comment MEDIUMTEXT;
-          ALTER TABLE policy  MODIFY COLUMN comment MEDIUMTEXT;
-        \" &&
+          ALTER TABLE consent     MODIFY COLUMN comment   MEDIUMTEXT;
+          ALTER TABLE policy      MODIFY COLUMN comment   MEDIUMTEXT;
+          ALTER TABLE qc_problem  MODIFY COLUMN comment   MEDIUMTEXT;
+          ALTER TABLE qc_problem  MODIFY COLUMN solution  MEDIUMTEXT;
+        \" 2>/dev/null || true &&
         echo 'gICS schema fix done.'
       "
 

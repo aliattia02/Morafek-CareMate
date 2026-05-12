@@ -1,5 +1,47 @@
+# mysql.cnf — MariaDB 10.11 tuning for gPAS + gICS
+# Mounted at: /etc/mysql/conf.d/gpas.cnf
+#
+# Why these settings:
+#   innodb_default_row_format = DYNAMIC
+#     → gICS creates tables without explicit ROW_FORMAT; the MariaDB default
+#       is DYNAMIC in 10.2+ but some builds fall back to COMPACT, which limits
+#       index key prefixes to 767 bytes.  Making DYNAMIC explicit prevents both
+#       SQL-1071 (key too long) and SQL-1118 (row size > 65535).
+#
+#   innodb_strict_mode = OFF
+#     → gICS 2.x creates qc_problem with columns that technically exceed the
+#       soft row-size limit.  Strict mode would abort the CREATE TABLE; with
+#       strict mode off MariaDB issues a warning and uses overflow pages instead.
+#       Safe for this use-case: gICS manages its own schema and these are
+#       infrequently-written audit rows, not hot data.
+#
+#   character-set-server / collation-server
+#     → Required for gICS/gPAS to store non-ASCII consent text and labels.
+
 [mysqld]
-sql_mode=
-innodb_strict_mode=0
-innodb_large_prefix     = ON
-innodb_file_format      = Barracuda
+# ── SQL mode ──────────────────────────────────────────────────────────────────
+# Remove STRICT_TRANS_TABLES so that gPAS/gICS "Data too long for column"
+# becomes a silent truncation warning rather than a hard error that crashes
+# WildFly on first boot.  The schema-fix services widen the affected columns
+# immediately after boot, so subsequent writes store full-length data.
+# NO_AUTO_CREATE_USER and NO_ENGINE_SUBSTITUTION are kept — they enforce
+# sensible defaults without affecting gPAS/gICS behaviour.
+sql_mode                         = NO_AUTO_CREATE_USER,NO_ENGINE_SUBSTITUTION
+
+# ── InnoDB row format & index limits ─────────────────────────────────────────
+innodb_default_row_format        = DYNAMIC
+innodb_strict_mode               = OFF
+
+# ── io_uring / native AIO ─────────────────────────────────────────────────────
+# Hardened container runtimes (and hosts with kernel.io_uring_disabled=2) block
+# io_uring.  Setting this to 0 makes MariaDB fall back to synchronous pread/pwrite
+# without any performance regression at the single-instance scale used here.
+innodb_use_native_aio            = 0
+
+# ── Character set ─────────────────────────────────────────────────────────────
+character-set-server             = utf8mb4
+collation-server                 = utf8mb4_unicode_ci
+
+# ── Performance (minimal, suitable for dev/staging) ───────────────────────────
+innodb_buffer_pool_size          = 256M
+max_allowed_packet               = 64M

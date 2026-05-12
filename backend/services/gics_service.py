@@ -26,14 +26,27 @@ The gICS SOAP endpoint is at:
 The domain "morafek-data-sharing" must exist in gICS before this runs.
 Create it once via the gICS admin UI at http://localhost:8082/gics-web/.
 
+    When creating the domain, set Signer-IDs to: morafek-patient-id
+    This is the identifier type that all SOAP calls below use.
+
 gICS being down NEVER raises — every method returns None / False / "unknown"
 on RequestException, and MongoDB (patient_consents) is the fallback.
 
+SOAP API version
+----------------
+These envelopes target gICS 2.x (Mosaic Greifswald 2024+).
+gICS 2.x replaced <patientIdentifier><value> with <signerIds><signerId>,
+and addConsent now requires <scans/> and uses <legalConsentDate>.
+
 Environment variables
 ---------------------
-GICS_URL      — base URL of the gICS container  (default: http://gics:8080)
-GICS_DOMAIN   — consent domain name             (default: morafek-data-sharing)
-GICS_TIMEOUT  — request timeout in seconds      (default: 5)
+GICS_URL             — base URL of the gICS container  (default: http://gics:8080)
+GICS_DOMAIN          — consent domain name             (default: morafek-data-sharing)
+GICS_SIGNER_ID_TYPE  — signer-id type configured in the gICS domain
+                        (default: morafek-patient-id)
+                        MUST match the "Signer-IDs" field you entered when
+                        creating the domain in the gICS web UI.
+GICS_TIMEOUT         — request timeout in seconds      (default: 5)
 """
 
 from __future__ import annotations
@@ -50,9 +63,10 @@ logger = logging.getLogger(__name__)
 
 # ─── Configuration ─────────────────────────────────────────────────────────────
 
-GICS_BASE_URL = os.environ.get("GICS_URL", "http://gics:8080").rstrip("/")
-GICS_DOMAIN   = os.environ.get("GICS_DOMAIN", "morafek-data-sharing")
-GICS_TIMEOUT  = int(os.environ.get("GICS_TIMEOUT", "5"))
+GICS_BASE_URL      = os.environ.get("GICS_URL",            "http://gics:8080").rstrip("/")
+GICS_DOMAIN        = os.environ.get("GICS_DOMAIN",         "morafek-data-sharing")
+GICS_SIGNER_ID_TYPE = os.environ.get("GICS_SIGNER_ID_TYPE", "morafek-patient-id")
+GICS_TIMEOUT       = int(os.environ.get("GICS_TIMEOUT",    "5"))
 
 _SOAP_ENDPOINT = f"{GICS_BASE_URL}/gics/gicsService"
 
@@ -67,10 +81,41 @@ _POLICY_NAME    = "data-sharing"
 _POLICY_VERSION = "1.0"
 
 
-# ─── SOAP envelope builders ────────────────────────────────────────────────────
+# ─── SOAP envelope builders (gICS 2.x) ────────────────────────────────────────
+#
+# gICS 2.x API changes vs 1.x:
+#   • <patientIdentifier><value>  →  <signerIds><signerId> with <idType> + <id>
+#   • <consentDate>               →  <legalConsentDate>
+#   • <scans/>                    →  required (empty element is fine)
+#
+# The idType value in every envelope MUST match the "Signer-IDs" string you
+# entered when creating the domain in the gICS admin UI.
+# Default: "morafek-patient-id"  (set via GICS_SIGNER_ID_TYPE env var).
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _signer_id_block(patient_id: str) -> str:
+    """Build the reusable <signerIds> XML block for a single patient."""
+    return f"""<signerIds>
+      <signerId>
+        <idType>{_xml_escape(GICS_SIGNER_ID_TYPE)}</idType>
+        <id>{_xml_escape(patient_id)}</id>
+        <orderNumber>1</orderNumber>
+        <isDisplayId>true</isDisplayId>
+      </signerId>
+    </signerIds>"""
+
+
+def _consent_template_key_block(domain: str) -> str:
+    """Build the reusable <consentTemplateKey> XML block."""
+    return f"""<consentTemplateKey>
+          <domainName>{_xml_escape(domain)}</domainName>
+          <name>{_POLICY_NAME}</name>
+          <version>{_POLICY_VERSION}</version>
+        </consentTemplateKey>"""
+
 
 def _envelope_add_consent(patient_id: str, domain: str) -> str:
-    """Build the SOAP XML for addConsent."""
+    """Build the SOAP XML for addConsent (gICS 2.x)."""
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
@@ -80,17 +125,12 @@ def _envelope_add_consent(patient_id: str, domain: str) -> str:
   <soapenv:Body>
     <gics:addConsent>
       <consent>
-        <patientIdentifier>
-          <value>{_xml_escape(patient_id)}</value>
-        </patientIdentifier>
-        <consentTemplateKey>
-          <domainName>{_xml_escape(domain)}</domainName>
-          <name>{_POLICY_NAME}</name>
-          <version>{_POLICY_VERSION}</version>
-        </consentTemplateKey>
+        {_signer_id_block(patient_id)}
+        {_consent_template_key_block(domain)}
         <consentDates>
-          <consentDate>{now_iso}</consentDate>
+          <legalConsentDate>{now_iso}</legalConsentDate>
         </consentDates>
+        <scans/>
         <signatureIsFromGuardian>false</signatureIsFromGuardian>
       </consent>
     </gics:addConsent>
@@ -99,7 +139,14 @@ def _envelope_add_consent(patient_id: str, domain: str) -> str:
 
 
 def _envelope_revoke_consent(patient_id: str, domain: str) -> str:
-    """Build the SOAP XML for revokeConsent."""
+    """Build the SOAP XML for revokeConsent (gICS 2.x).
+
+    gICS 2.x requires signerIds + consentTemplateKey to be wrapped inside
+    a <consentKey> element — submitting them at the top level of <revokeConsent>
+    causes the CXF dispatcher to emit:
+        Fault: Message part ...revokeConsent was not recognized.
+    This matches the ConsentKeyDTO type in the gICS 2.x WSDL.
+    """
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -107,21 +154,22 @@ def _envelope_revoke_consent(patient_id: str, domain: str) -> str:
   <soapenv:Header/>
   <soapenv:Body>
     <gics:revokeConsent>
-      <patientIdentifier>
-        <value>{_xml_escape(patient_id)}</value>
-      </patientIdentifier>
-      <consentTemplateKey>
-        <domainName>{_xml_escape(domain)}</domainName>
-        <name>{_POLICY_NAME}</name>
-        <version>{_POLICY_VERSION}</version>
-      </consentTemplateKey>
+      <consentKey>
+        {_signer_id_block(patient_id)}
+        {_consent_template_key_block(domain)}
+      </consentKey>
     </gics:revokeConsent>
   </soapenv:Body>
 </soapenv:Envelope>"""
 
 
 def _envelope_get_policy_states(patient_id: str, domain: str) -> str:
-    """Build the SOAP XML for getCurrentPolicyStatesForPersonAndTemplate."""
+    """Build the SOAP XML for getCurrentPolicyStatesForPersonAndTemplate (gICS 2.x).
+
+    Same ConsentKeyDTO wrapping as revokeConsent — gICS 2.x WSDL consistently
+    takes a <consentKey> child for operations that identify a consent by
+    signer + template, rather than accepting those elements at the operation root.
+    """
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
     xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
@@ -129,14 +177,10 @@ def _envelope_get_policy_states(patient_id: str, domain: str) -> str:
   <soapenv:Header/>
   <soapenv:Body>
     <gics:getCurrentPolicyStatesForPersonAndTemplate>
-      <patientIdentifier>
-        <value>{_xml_escape(patient_id)}</value>
-      </patientIdentifier>
-      <consentTemplateKey>
-        <domainName>{_xml_escape(domain)}</domainName>
-        <name>{_POLICY_NAME}</name>
-        <version>{_POLICY_VERSION}</version>
-      </consentTemplateKey>
+      <consentKey>
+        {_signer_id_block(patient_id)}
+        {_consent_template_key_block(domain)}
+      </consentKey>
     </gics:getCurrentPolicyStatesForPersonAndTemplate>
   </soapenv:Body>
 </soapenv:Envelope>"""
@@ -171,6 +215,12 @@ def _parse_soap_tag(xml_text: str, tag: str) -> Optional[str]:
     except ET.ParseError as exc:
         logger.error("gICS SOAP XML parse error: %s | raw: %.200s", exc, xml_text)
     return None
+
+
+def _parse_soap_fault(xml_text: str) -> Optional[str]:
+    """Return the SOAP fault string if present, else None."""
+    fault = _parse_soap_tag(xml_text, "faultstring") or _parse_soap_tag(xml_text, "Fault")
+    return fault
 
 
 def _parse_consent_id(xml_text: str) -> Optional[str]:
@@ -208,7 +258,7 @@ def _parse_consent_status(xml_text: str) -> str:
 # ─── Public service class ──────────────────────────────────────────────────────
 
 class GICSService:
-    """Thin wrapper around the gICS SOAP web service."""
+    """Thin wrapper around the gICS 2.x SOAP web service."""
 
     # ── Core operations ──────────────────────────────────────────────────────
 
@@ -227,6 +277,8 @@ class GICSService:
         Failure is logged but NEVER re-raised — MongoDB is the fallback store.
         """
         payload = _envelope_add_consent(patient_id, domain)
+        logger.debug("gICS addConsent request for patient %.20s…:\n%s", patient_id, payload)
+
         try:
             resp = requests.post(
                 _SOAP_ENDPOINT,
@@ -237,6 +289,17 @@ class GICSService:
             resp.raise_for_status()
         except requests.RequestException as exc:
             logger.error("gICS get_or_create_consent request failed: %s", exc)
+            return None
+
+        logger.debug("gICS addConsent raw response (status=%s):\n%.500s", resp.status_code, resp.text)
+
+        # Check for SOAP fault before trying to extract consent ID
+        fault = _parse_soap_fault(resp.text)
+        if fault:
+            logger.error(
+                "gICS addConsent SOAP fault for patient %.20s…  domain=%s  fault=%s",
+                patient_id, domain, fault,
+            )
             return None
 
         consent_id = _parse_consent_id(resp.text)
@@ -277,6 +340,8 @@ class GICSService:
         Returns True on success, False if gICS is unreachable or errors.
         """
         payload = _envelope_revoke_consent(patient_id, domain)
+        logger.debug("gICS revokeConsent request for patient %.20s…:\n%s", patient_id, payload)
+
         try:
             resp = requests.post(
                 _SOAP_ENDPOINT,
@@ -285,14 +350,22 @@ class GICSService:
                 timeout=GICS_TIMEOUT,
             )
             resp.raise_for_status()
-            logger.info(
-                "gICS consent revoked  domain=%s  patient=%.20s…",
-                domain, patient_id,
-            )
-            return True
         except requests.RequestException as exc:
             logger.error("gICS revoke_consent request failed: %s", exc)
             return False
+
+        logger.debug("gICS revokeConsent raw response (status=%s):\n%.300s", resp.status_code, resp.text)
+
+        fault = _parse_soap_fault(resp.text)
+        if fault:
+            logger.error("gICS revokeConsent SOAP fault: %s", fault)
+            return False
+
+        logger.info(
+            "gICS consent revoked  domain=%s  patient=%.20s…",
+            domain, patient_id,
+        )
+        return True
 
     def get_consent_status(
         self,
@@ -318,6 +391,7 @@ class GICSService:
             logger.error("gICS get_consent_status request failed: %s", exc)
             return "unknown"
 
+        logger.debug("gICS policyStates raw response:\n%.300s", resp.text)
         return _parse_consent_status(resp.text)
 
     # ── Health check ─────────────────────────────────────────────────────────
