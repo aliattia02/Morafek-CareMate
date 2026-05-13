@@ -7,6 +7,8 @@
  *   - Create a new clinic (auto-joins as creator)
  *   - Edit clinics they created (name, address, phone, description)
  *   - Leave any clinic they're a member of
+ *
+ * FIX: user?.id → user?._id (store User interface uses _id, not id)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -234,7 +236,8 @@ const formStyles = StyleSheet.create({
 
 export default function ClinicManagementScreen() {
   const { user } = useAuthStore();
-  const currentUserId = user?.id ?? '';
+  // FIX: was user?.id — store User interface declares _id, not id
+  const currentUserId = user?._id ?? '';
 
   const [clinics,       setClinics]       = useState<Clinic[]>([]);
   const [isLoading,     setIsLoading]     = useState(true);

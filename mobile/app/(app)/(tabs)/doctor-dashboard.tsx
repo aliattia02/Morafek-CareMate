@@ -1,6 +1,8 @@
 /**
  * Doctor Dashboard Screen
  * Shows patient list and patient data for doctors
+ *
+ * FIX: user?.id → user?._id (store User interface uses _id, not id)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -189,7 +191,8 @@ export default function DoctorDashboardScreen() {
                       {item.doctor_count} doctor{item.doctor_count !== 1 ? 's' : ''}
                     </Text>
                   </View>
-                  {item.created_by === user?.id && (
+                  {/* FIX: was user?.id — store User type uses _id, not id */}
+                  {item.created_by === user?._id && (
                     <View style={styles.ownerBadge}>
                       <Text style={styles.ownerBadgeText}>Owner</Text>
                     </View>

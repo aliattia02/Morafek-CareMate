@@ -124,6 +124,13 @@ def create_app_config(app):
         APP_TIMEZONE=timezone.utc,
         TOKEN_EXPIRY=timedelta(hours=24),          # Web / short-lived
         MOBILE_TOKEN_EXPIRY=timedelta(days=90),    # Mobile — stays logged in for 90 days
+        # Consent + pseudonymisation
+        CONSENT_TEMPLATE_ID=os.environ.get("GICS_DOMAIN", "morafek-data-sharing"),
+        GPAS_DOMAIN=os.environ.get("GPAS_DOMAIN", "morafek-patients"),
+        # Set GPAS_ENABLED=false in .env to skip gPAS pseudonym creation when the
+        # gPAS container is not running (e.g. local dev without the full stack).
+        # Consent is still recorded in gICS and MongoDB; pseudonym is left null.
+        GPAS_ENABLED=os.environ.get("GPAS_ENABLED", "true").strip().lower() in ("1", "true", "yes"),
     )
 
     # CORS configuration

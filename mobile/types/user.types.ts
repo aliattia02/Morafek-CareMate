@@ -34,6 +34,16 @@ export interface Patient extends User {
   patientConstants?: Record<string, unknown>;
   medications?: string[];
   conditions?: string[];
+  /**
+   * Full pseudonym value returned by gPAS.
+   * SECURITY: Never render this in the UI — use pseudonymSuffix instead.
+   */
+  pseudonym?: string;
+  /**
+   * Last 4 characters of the pseudonym — safe to display in the UI.
+   * Set after the patient accepts consent; cleared on revoke.
+   */
+  pseudonymSuffix?: string;
 }
 
 /**

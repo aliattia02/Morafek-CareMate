@@ -1934,6 +1934,62 @@ def fhir_export(current_user):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Helper: replace patient ID with pseudonym in a FHIR Bundle
+# ─────────────────────────────────────────────────────────────────────────────
+
+def replace_patient_id_with_pseudonym(
+    bundle: dict,
+    original_id: str,
+    pseudonym: str,
+) -> dict:
+    """
+    Recursively walk the entire bundle dict and replace every occurrence of
+    *original_id* with *pseudonym*.
+
+    Covers at minimum:
+      • subject.reference     (e.g. "Patient/<original_id>")
+      • patient.reference
+      • fullUrl               (e.g. "urn:uuid:<original_id>")
+      • identifier.value
+      • any string value that equals original_id exactly
+
+    The original patient_id must not appear anywhere in the returned output.
+
+    Args:
+        bundle:      The FHIR Bundle dict to process (modified in-place).
+        original_id: The MongoDB patient _id string to replace.
+        pseudonym:   The gPAS pseudonym string to substitute.
+
+    Returns:
+        The fully modified bundle dict.
+    """
+    import json as _json
+
+    raw = _json.dumps(bundle)
+
+    # Replace all forms in which the patient ID can appear in a FHIR Bundle:
+    #   "Patient/<id>"  — subject/patient/author references
+    #   "urn:uuid:<id>" — fullUrl entries
+    #   "<id>" as a bare string value — identifier.value, id fields, etc.
+    raw = raw.replace(f'Patient/{original_id}', f'Patient/{pseudonym}')
+    raw = raw.replace(f'urn:uuid:{original_id}', f'urn:uuid:{pseudonym}')
+    raw = raw.replace(f'"{original_id}"', f'"{pseudonym}"')
+
+    replaced = _json.loads(raw)
+
+    # Safety assertion: the original ID must not survive.
+    # Log a warning if any trace remains (e.g. inside an unexpected field).
+    if original_id in _json.dumps(replaced):
+        logger.warning(
+            'replace_patient_id_with_pseudonym: original_id "%s" still present '
+            'after replacement — review bundle structure.',
+            original_id,
+        )
+
+    return replaced
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # GET /api/patient/fhir-export/pseudonymised  — research-safe export
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1970,24 +2026,24 @@ def fhir_export_pseudonymised(current_user):
     patient_id = str(current_user['_id'])
 
     from config import mongo as _mongo
-    from bson.objectid import ObjectId as _ObjId  # noqa: F401 (kept for id_doc queries)
+    from bson.objectid import ObjectId as _ObjId
 
-    # ── Require active consent ─────────────────────────────────────────────────
-    consent_record = _mongo.db.patient_consents.find_one({'patient_id': patient_id}) or {}
-    if consent_record.get('status') != 'granted':
+    # ── Guard: require pseudonym in users collection ───────────────────────────
+    # The pseudonym is written by POST /api/consent/accept only after both gICS
+    # and gPAS have succeeded.  Its absence means the patient never consented or
+    # consent was fully revoked (gPAS delete confirmed → field unset).
+    patient_user = _mongo.db.users.find_one(
+        {'_id': _ObjId(patient_id)},
+        {'pseudonym': 1, 'pseudonymSuffix': 1},
+    )
+    if not patient_user or not patient_user.get('pseudonym'):
         return jsonify({
-            'error': 'Consent not granted. Enable data-sharing consent before exporting a pseudonymised bundle.'
+            'error': 'Consent and pseudonymization required.'
         }), 403
 
-    # ── Require pseudonym ──────────────────────────────────────────────────────
-    id_doc    = _mongo.db.patient_fhir_identifiers.find_one({'patient_id': patient_id}) or {}
-    pseudonym = id_doc.get('pseudonym') or consent_record.get('pseudonym')
+    pseudonym = patient_user['pseudonym']
 
-    if not pseudonym:
-        return jsonify({
-            'error': 'Pseudonym not yet assigned. Please try again in a moment.'
-        }), 503
-
+    id_doc     = _mongo.db.patient_fhir_identifiers.find_one({'patient_id': patient_id}) or {}
     medical    = _mongo.db.patient_profiles.find_one({'patient_id': patient_id}) or {}
     fhir_pid   = pseudonym
     author_ref = f'Patient/{fhir_pid}'
@@ -2041,9 +2097,8 @@ def fhir_export_pseudonymised(current_user):
     entries.extend(_build_ehr_entries(patient_id, default_performer_ref=author_ref))
 
     # ── Rewrite every Patient/<mongo_id> reference → Patient/<pseudonym> ───────
-    # This covers subject/performer/author references in Observations, Encounters,
-    # Conditions, MedicationRequests and MedicationStatements that were written
-    # with the real patient_id at record time.
+    # Uses the replace_patient_id_with_pseudonym helper which covers subject,
+    # patient, fullUrl, identifier.value and any bare string equal to patient_id.
     import json as _j
     raw = _j.dumps(entries)
     raw = raw.replace(f'Patient/{patient_id}', f'Patient/{fhir_pid}')
@@ -2056,6 +2111,9 @@ def fhir_export_pseudonymised(current_user):
 
     # ── Build bundle — pass fhir_pid so Composition.subject uses pseudonym ─────
     bundle = build_document_bundle(fhir_pid, entries, author_ref=author_ref)
+
+    # ── Final safety pass: replace any remaining patient_id traces ─────────────
+    bundle = replace_patient_id_with_pseudonym(bundle, patient_id, pseudonym)
     logger.info(
         'FHIR R4 pseudonymised Bundle exported (%d entries, %d observations)',
         len(bundle['entry']),

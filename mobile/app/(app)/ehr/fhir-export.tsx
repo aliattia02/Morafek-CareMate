@@ -8,6 +8,16 @@
  *
  * After a successful export the screen shows a per-resource summary and
  * offers a Share sheet so the patient can send the JSON to their GP / KIS.
+ *
+ * PSEUDONYM GATE:
+ *   Export is disabled (opacity 0.4, not pressable) when pseudonymSuffix
+ *   is absent from the auth store — i.e. before consent is accepted.
+ *   The gate is automatic: revoking consent clears the suffix and
+ *   the button locks without any extra wiring.
+ *
+ * TYPESCRIPT FIXES applied in this version:
+ *   • FileSystem.cacheDirectory  → FileSystem.documentDirectory
+ *   • FileSystem.EncodingType.UTF8 → string literal 'utf8'
  */
 
 import React, { useState, useCallback } from 'react';
@@ -26,6 +36,7 @@ import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { apiClient } from '@/services/api/client';
+import { useAuthStore } from '@/store/auth.store';
 import { E, ET } from '@/constants/elderlyTheme';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -202,12 +213,19 @@ interface FhirBundle {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function FhirExportScreen() {
+  // ── pseudonym gate ─────────────────────────────────────────────────────────
+  // Export is only enabled when the patient has an accepted pseudonymSuffix in
+  // the store. The gate clears automatically when consent is revoked.
+  const pseudonymSuffix = useAuthStore((s) => s.pseudonymSuffix);
+  const exportEnabled   = Boolean(pseudonymSuffix);
+
   const [exporting,  setExporting]  = useState(false);
   const [bundle,     setBundle]     = useState<FhirBundle | null>(null);
   const [error,      setError]      = useState<string | null>(null);
 
   // ── Trigger export ──────────────────────────────────────────────────────────
   const handleExport = useCallback(async () => {
+    if (!exportEnabled) return; // belt-and-suspenders guard
     try {
       setExporting(true);
       setError(null);
@@ -220,7 +238,7 @@ export default function FhirExportScreen() {
     } finally {
       setExporting(false);
     }
-  }, []);
+  }, [exportEnabled]);
 
   // ── Download / share bundle JSON ────────────────────────────────────────────
   const handleShare = useCallback(async () => {
@@ -241,10 +259,10 @@ export default function FhirExportScreen() {
       return;
     }
 
-    const path = `${FileSystem.cacheDirectory}${filename}`;
-    await FileSystem.writeAsStringAsync(path, json, {
-      encoding: FileSystem.EncodingType.UTF8,
-    });
+    // FIX: documentDirectory (was cacheDirectory — not valid on all platforms)
+    const path = `${FileSystem.documentDirectory}${filename}`;
+    // FIX: 'utf8' string literal (was FileSystem.EncodingType.UTF8 — enum not exported by expo-file-system types)
+    await FileSystem.writeAsStringAsync(path, json, { encoding: 'utf8' });
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
       await Sharing.shareAsync(path, {
@@ -313,20 +331,41 @@ export default function FhirExportScreen() {
           </Text>
         </View>
 
+        {/* ── Pseudonym identifier preview ── */}
+        {exportEnabled && pseudonymSuffix && (
+          <View style={styles.identifierBanner}>
+            <Text style={styles.identifierBannerText}>
+              🔐  Export will use identifier: ****{pseudonymSuffix}
+            </Text>
+          </View>
+        )}
+
         {/* ── Export button / result ── */}
         {!bundle ? (
-          <TouchableOpacity
-            style={[styles.exportBtn, exporting && styles.exportBtnDisabled]}
-            onPress={handleExport}
-            disabled={exporting}
-            activeOpacity={0.8}
-          >
-            {exporting ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.exportBtnText}>⬇️  Export my FHIR bundle</Text>
+          <>
+            <TouchableOpacity
+              style={[
+                styles.exportBtn,
+                (exporting || !exportEnabled) && styles.exportBtnDisabled,
+              ]}
+              onPress={handleExport}
+              disabled={exporting || !exportEnabled}
+              activeOpacity={exportEnabled ? 0.8 : 1}
+            >
+              {exporting ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.exportBtnText}>⬇️  Export my FHIR bundle</Text>
+              )}
+            </TouchableOpacity>
+
+            {/* Gate message — shown when pseudonymSuffix is absent */}
+            {!exportEnabled && (
+              <Text style={styles.gateMessage}>
+                Accept data consent to enable pseudonymized export.
+              </Text>
             )}
-          </TouchableOpacity>
+          </>
         ) : (
           <>
             <BundleSummaryCard entries={entries} />
@@ -521,6 +560,21 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
+  // ── Identifier preview banner ──
+  identifierBanner: {
+    backgroundColor: E.colors.primary + '15',
+    borderRadius: E.radius,
+    borderWidth: 1,
+    borderColor: E.colors.primary + '44',
+    padding: E.padSm,
+  },
+  identifierBannerText: {
+    ...ET.bodyBold,
+    color: E.colors.primary,
+    fontFamily: 'Courier New',
+    fontSize: 13,
+  },
+
   // ── Export button ──
   exportBtn: {
     backgroundColor: E.colors.primary,
@@ -532,13 +586,22 @@ const styles = StyleSheet.create({
     ...E.shadow,
   },
   exportBtnDisabled: {
-    opacity: 0.6,
+    opacity: 0.4,
   },
   exportBtnText: {
     ...ET.bodyBold,
     color: E.colors.textInverse,
     fontWeight: '700',
     fontSize: 16,
+  },
+
+  // ── Gate message ──
+  gateMessage: {
+    ...ET.small,
+    color: E.colors.textSecondary,
+    textAlign: 'center',
+    marginTop: -E.padXs,
+    fontStyle: 'italic',
   },
 
   // ── Bundle summary ──

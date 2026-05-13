@@ -1,0 +1,3067 @@
+﻿<?xml version='1.0' encoding='UTF-8'?><wsdl:definitions xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:wsdl="http://schemas.xmlsoap.org/wsdl/" xmlns:tns="http://cm2.ttp.ganimed.icmvc.emau.org/" xmlns:soap="http://schemas.xmlsoap.org/wsdl/soap/" xmlns:ns1="http://schemas.xmlsoap.org/soap/http" name="GICSManagementServiceImplService" targetNamespace="http://cm2.ttp.ganimed.icmvc.emau.org/">
+  <wsdl:types>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/signature" xmlns:ns2="http://cm2.ttp.ganimed.icmvc.emau.org/" xmlns:ns1="http://www.ttp.ganimed.icmvc.emau.org/cm2/config" targetNamespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/signature" version="1.0">
+
+  <xs:import namespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config"/>
+
+  <xs:import namespace="http://cm2.ttp.ganimed.icmvc.emau.org/"/>
+
+  <xs:element name="signature-config" type="tns:SignatureConfig"/>
+
+  <xs:complexType name="SignatureConfig">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="group" type="tns:SignatureTypeGroup"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="type" type="tns:SignatureType"/>
+    </xs:sequence>
+    <xs:attribute name="signatures-require-proof" type="tns:signaturesRequireProof"/>
+  </xs:complexType>
+
+  <xs:complexType name="SignatureTypeGroup">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="label" type="ns1:Label"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="type" type="xs:IDREF"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="template-type" type="tns:SignatureTypeGroupTarget"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID"/>
+  </xs:complexType>
+
+  <xs:complexType name="SignatureType">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="label" type="ns1:Label"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="identifier" type="tns:SignatureIdentifier"/>
+      <xs:element minOccurs="0" name="extern-properties" type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID"/>
+    <xs:attribute name="group" type="xs:IDREF"/>
+    <xs:attribute name="mandatory-within-group" type="xs:boolean"/>
+    <xs:attribute name="from-participant" type="xs:boolean"/>
+    <xs:attribute name="legacy-type" type="ns2:legacySignatureType"/>
+  </xs:complexType>
+
+  <xs:complexType name="SignatureIdentifier">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="label" type="ns1:Label"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID"/>
+    <xs:attribute name="mandatory" type="xs:boolean"/>
+  </xs:complexType>
+
+  <xs:complexType name="SignatureTypeGroupTarget">
+    <xs:sequence/>
+    <xs:attribute name="name" type="ns2:consentTemplateType"/>
+    <xs:attribute name="optional" type="xs:boolean"/>
+    <xs:attribute name="exclude" type="xs:boolean"/>
+  </xs:complexType>
+
+  <xs:simpleType name="signaturesRequireProof">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ALL"/>
+      <xs:enumeration value="MANDATORY"/>
+      <xs:enumeration value="NONE"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/qc" xmlns:ns1="http://www.ttp.ganimed.icmvc.emau.org/cm2/config" targetNamespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/qc" version="1.0">
+
+  <xs:import namespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config"/>
+
+  <xs:complexType name="QCConfig">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="type" type="tns:QCType"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="problem-type" type="tns:QCProblemType"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="problem-type-action" type="tns:QCProblemTypeAction"/>
+    </xs:sequence>
+    <xs:attribute name="default-type" type="xs:string"/>
+  </xs:complexType>
+
+  <xs:complexType name="QCType">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="label" type="ns1:Label"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID"/>
+    <xs:attribute name="status" type="tns:qcTypeStatus"/>
+  </xs:complexType>
+
+  <xs:complexType name="QCProblemType">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="label" type="ns1:Label"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID"/>
+    <xs:attribute name="error" type="tns:qcProblemTypeError"/>
+    <xs:attribute name="field" type="tns:qcProblemTypeField"/>
+    <xs:attribute name="occurrence" type="tns:qcProblemTypeOccurrence"/>
+    <xs:attribute name="action" type="xs:IDREF"/>
+  </xs:complexType>
+
+  <xs:complexType name="QCProblemTypeAction">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="label" type="ns1:Label"/>
+    </xs:sequence>
+    <xs:attribute name="id" type="xs:ID"/>
+  </xs:complexType>
+
+  <xs:simpleType name="qcTypeStatus">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="VALID"/>
+      <xs:enumeration value="INVALID"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="qcProblemTypeError">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="MISSING"/>
+      <xs:enumeration value="MISSING_PART"/>
+      <xs:enumeration value="ILLEGIBLE"/>
+      <xs:enumeration value="WRONG_PARTICIPANT"/>
+      <xs:enumeration value="INCONSISTENT"/>
+      <xs:enumeration value="IMPLAUSIBLE"/>
+      <xs:enumeration value="AMBIGUOUS"/>
+      <xs:enumeration value="CORRECTION_NOT_GCP_COMPLIANT"/>
+      <xs:enumeration value="OTHER"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="qcProblemTypeField">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="TEMPLATE_NAME"/>
+      <xs:enumeration value="TEMPLATE_VERSION"/>
+      <xs:enumeration value="MODULE_STATUS"/>
+      <xs:enumeration value="SIGNER_ID_VALUE"/>
+      <xs:enumeration value="SIGNATURE_PARTICIPANT_LOCATION"/>
+      <xs:enumeration value="SIGNATURE_PARTICIPANT_DATE"/>
+      <xs:enumeration value="SIGNATURE_PARTICIPANT_DIGITAL"/>
+      <xs:enumeration value="SIGNATURE_PARTICIPANT_PAPER"/>
+      <xs:enumeration value="SIGNATURE_PHYSICIAN_LOCATION"/>
+      <xs:enumeration value="SIGNATURE_PHYSICIAN_DATE"/>
+      <xs:enumeration value="SIGNATURE_PHYSICIAN_DIGITAL"/>
+      <xs:enumeration value="SIGNATURE_PHYSICIAN_PAPER"/>
+      <xs:enumeration value="SIGNATURE_PHYSICIAN_FIRSTNAME"/>
+      <xs:enumeration value="SIGNATURE_PHYSICIAN_LASTNAME"/>
+      <xs:enumeration value="IDAT_FIRSTNAME"/>
+      <xs:enumeration value="IDAT_LASTNAME"/>
+      <xs:enumeration value="IDAT_BIRTHDATE"/>
+      <xs:enumeration value="IDAT_GENDER"/>
+      <xs:enumeration value="IDAT_BIRTHPLACE"/>
+      <xs:enumeration value="IDAT_OTHER"/>
+      <xs:enumeration value="SCAN"/>
+      <xs:enumeration value="OTHER"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="qcProblemTypeOccurrence">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="PAPER"/>
+      <xs:enumeration value="DIGITAL"/>
+      <xs:enumeration value="BOTH"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="qcProblemTypeFieldGroup">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="TEMPLATE"/>
+      <xs:enumeration value="MODULE"/>
+      <xs:enumeration value="SIGNER_ID"/>
+      <xs:enumeration value="IDAT"/>
+      <xs:enumeration value="SIGNATURE_PARTICIPANT"/>
+      <xs:enumeration value="SIGNATURE_PHYSICIAN"/>
+      <xs:enumeration value="SCAN"/>
+      <xs:enumeration value="OTHER"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="http://www.ttp.ganimed.icmvc.emau.org/cm2/config" xmlns:ns3="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/signature" xmlns:ns2="http://cm2.ttp.ganimed.icmvc.emau.org/" xmlns:ns1="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/qc" targetNamespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config" version="1.0">
+
+  <xs:import namespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/qc"/>
+
+  <xs:import namespace="http://cm2.ttp.ganimed.icmvc.emau.org/"/>
+
+  <xs:import namespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/signature"/>
+
+  <xs:element name="domain-config" type="tns:DomainConfig"/>
+
+  <xs:element name="template-config" type="tns:TemplateConfig"/>
+
+  <xs:complexType name="DomainConfig">
+    <xs:complexContent>
+      <xs:extension base="tns:abstractConfig">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="quality-control" type="ns1:QCConfig"/>
+          <xs:element minOccurs="0" name="statistic" type="tns:StatisticConfig"/>
+          <xs:element minOccurs="0" name="policies" type="tns:PoliciesConfig"/>
+          <xs:element minOccurs="0" name="scans" type="tns:ScansConfig"/>
+          <xs:element minOccurs="0" name="notifications" type="tns:NotificationsConfig"/>
+          <xs:element minOccurs="0" name="application" type="tns:ApplicationConfig"/>
+          <xs:element minOccurs="0" name="signatures" type="ns3:SignatureConfig"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType abstract="true" name="abstractConfig">
+    <xs:sequence/>
+  </xs:complexType>
+
+  <xs:complexType name="Label">
+    <xs:sequence/>
+    <xs:attribute name="lang" type="xs:string"/>
+    <xs:attribute name="value" type="xs:string"/>
+  </xs:complexType>
+
+  <xs:complexType name="StatisticConfig">
+    <xs:sequence/>
+    <xs:attribute name="calculate-document-details" type="xs:boolean" use="required"/>
+    <xs:attribute name="calculate-policy-details" type="xs:boolean" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="PoliciesConfig">
+    <xs:sequence/>
+    <xs:attribute name="permanent-revoke" type="xs:boolean" use="required"/>
+    <xs:attribute name="take-highest-version-instead-of-newest" type="xs:boolean" use="required"/>
+    <xs:attribute name="take-most-specific-validity-instead-of-shortest" type="xs:boolean" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="ScansConfig">
+    <xs:sequence/>
+    <xs:attribute name="mandatory" type="xs:boolean" use="required"/>
+    <xs:attribute name="size-limit" type="xs:int" use="required"/>
+    <xs:attribute name="auto-generate" type="xs:boolean" use="required"/>
+    <xs:attribute name="scan-storage-location-is-sufficient" type="xs:boolean" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="NotificationsConfig">
+    <xs:sequence/>
+    <xs:attribute name="send-from-web" type="xs:boolean" use="required"/>
+    <xs:attribute name="send-policy-validity-changed" type="xs:boolean" use="required"/>
+  </xs:complexType>
+
+  <xs:complexType name="ApplicationConfig">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="template-types" type="ns2:consentTemplateType"/>
+    </xs:sequence>
+    <xs:attribute name="enable-chrome-pdf-export" type="xs:boolean" use="required"/>
+    <xs:attribute name="chromedriver-path" type="xs:string"/>
+    <xs:attribute name="chromedriver-language" type="xs:string"/>
+    <xs:attribute name="embedded-css" type="xs:string"/>
+    <xs:attribute name="internal-web-url" type="xs:string"/>
+  </xs:complexType>
+
+  <xs:complexType name="TemplateConfig">
+    <xs:complexContent>
+      <xs:extension base="tns:abstractConfig">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="signatures" type="ns3:SignatureConfig"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+
+  <xs:complexType name="checkConsentConfig">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="idMatchingType" type="tns:idMatchingType"/>
+      <xs:element name="ignoreVersionNumber" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="requestDate" type="xs:dateTime"/>
+      <xs:element name="unknownStateIsConsideredAsDecline" type="xs:boolean"/>
+      <xs:element name="useAliases" type="xs:boolean"/>
+      <xs:element name="useHistoricalData" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="paginationConfig">
+    <xs:sequence>
+      <xs:element name="filter">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element maxOccurs="unbounded" minOccurs="0" name="entry">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element minOccurs="0" name="key" type="tns:consentField"/>
+                  <xs:element minOccurs="0" name="value" type="xs:string"/>
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="filterFieldsAreTreatedAsConjunction" type="xs:boolean"/>
+      <xs:element name="filterIsCaseSensitive" type="xs:boolean"/>
+      <xs:element name="firstEntry" type="xs:int"/>
+      <xs:element name="pageSize" type="xs:int"/>
+      <xs:element minOccurs="0" name="sortField" type="tns:consentField"/>
+      <xs:element name="sortIsAscending" type="xs:boolean"/>
+      <xs:element minOccurs="0" name="templateType" type="ns2:consentTemplateType"/>
+      <xs:element name="useAliases" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:simpleType name="idMatchingType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="AT_LEAST_ONE"/>
+      <xs:enumeration value="AT_LEAST_ALL"/>
+      <xs:enumeration value="EXACT"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="consentField">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="NONE"/>
+      <xs:enumeration value="DATE_CONSENT"/>
+      <xs:enumeration value="DATE_SIGNATURE_PATIENT"/>
+      <xs:enumeration value="DATE_SIGNATURE_PHYSICIAN"/>
+      <xs:enumeration value="DATE_VALID_FROM"/>
+      <xs:enumeration value="DATE_VALID_TO"/>
+      <xs:enumeration value="CT_VERSION"/>
+      <xs:enumeration value="CT_NAME"/>
+      <xs:enumeration value="CT_LABEL"/>
+      <xs:enumeration value="SIGNER_ID"/>
+      <xs:enumeration value="QC_TYPE"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="domainProperties">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="TAKE_HIGHEST_VERSION_INSTEAD_OF_NEWEST"/>
+      <xs:enumeration value="REVOKE_IS_PERMANENT"/>
+      <xs:enumeration value="SCANS_ARE_NOT_MANDATORY_FOR_ACCEPTED_CONSENTS"/>
+      <xs:enumeration value="SCANS_SIZE_LIMIT"/>
+      <xs:enumeration value="TAKE_MOST_SPECIFIC_PERIOD_OF_VALIDITY_INSTEAD_OF_SHORTEST"/>
+      <xs:enumeration value="VALID_QC_TYPES"/>
+      <xs:enumeration value="INVALID_QC_TYPES"/>
+      <xs:enumeration value="DEFAULT_QC_TYPE"/>
+      <xs:enumeration value="SEND_NOTIFICATIONS_WEB"/>
+      <xs:enumeration value="STATISTIC_DOCUMENT_DETAILS"/>
+      <xs:enumeration value="STATISTIC_POLICY_DETAILS"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+</xs:schema>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:tns="http://cm2.ttp.ganimed.icmvc.emau.org/" xmlns:ns3="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/signature" xmlns:ns2="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/qc" xmlns:ns1="http://www.ttp.ganimed.icmvc.emau.org/cm2/config" attributeFormDefault="unqualified" elementFormDefault="unqualified" targetNamespace="http://cm2.ttp.ganimed.icmvc.emau.org/" version="1.0">
+  <xs:import namespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config"/>
+  <xs:import namespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/qc"/>
+  <xs:import namespace="http://www.ttp.ganimed.icmvc.emau.org/cm2/config/signature"/>
+  <xs:element name="addConsentTemplate" type="tns:addConsentTemplate"/>
+  <xs:element name="addConsentTemplateResponse" type="tns:addConsentTemplateResponse"/>
+  <xs:element name="addDomain" type="tns:addDomain"/>
+  <xs:element name="addDomainResponse" type="tns:addDomainResponse"/>
+  <xs:element name="addModule" type="tns:addModule"/>
+  <xs:element name="addModuleResponse" type="tns:addModuleResponse"/>
+  <xs:element name="addPolicy" type="tns:addPolicy"/>
+  <xs:element name="addPolicyResponse" type="tns:addPolicyResponse"/>
+  <xs:element name="addSignerIdType" type="tns:addSignerIdType"/>
+  <xs:element name="addSignerIdTypeResponse" type="tns:addSignerIdTypeResponse"/>
+  <xs:element name="consent" type="tns:consentDTO"/>
+  <xs:element name="deleteConsentTemplate" type="tns:deleteConsentTemplate"/>
+  <xs:element name="deleteConsentTemplateResponse" type="tns:deleteConsentTemplateResponse"/>
+  <xs:element name="deleteDomain" type="tns:deleteDomain"/>
+  <xs:element name="deleteDomainResponse" type="tns:deleteDomainResponse"/>
+  <xs:element name="deleteModule" type="tns:deleteModule"/>
+  <xs:element name="deleteModuleResponse" type="tns:deleteModuleResponse"/>
+  <xs:element name="deletePolicy" type="tns:deletePolicy"/>
+  <xs:element name="deletePolicyResponse" type="tns:deletePolicyResponse"/>
+  <xs:element name="deleteSignerIdType" type="tns:deleteSignerIdType"/>
+  <xs:element name="deleteSignerIdTypeResponse" type="tns:deleteSignerIdTypeResponse"/>
+  <xs:element name="filterConsentTemplatesInUse" type="tns:filterConsentTemplatesInUse"/>
+  <xs:element name="filterConsentTemplatesInUseResponse" type="tns:filterConsentTemplatesInUseResponse"/>
+  <xs:element name="filterModulesInUse" type="tns:filterModulesInUse"/>
+  <xs:element name="filterModulesInUseResponse" type="tns:filterModulesInUseResponse"/>
+  <xs:element name="filterPoliciesInUse" type="tns:filterPoliciesInUse"/>
+  <xs:element name="filterPoliciesInUseResponse" type="tns:filterPoliciesInUseResponse"/>
+  <xs:element name="finaliseAllForDomain" type="tns:finaliseAllForDomain"/>
+  <xs:element name="finaliseAllForDomainResponse" type="tns:finaliseAllForDomainResponse"/>
+  <xs:element name="finaliseDomain" type="tns:finaliseDomain"/>
+  <xs:element name="finaliseDomainResponse" type="tns:finaliseDomainResponse"/>
+  <xs:element name="finaliseModule" type="tns:finaliseModule"/>
+  <xs:element name="finaliseModuleResponse" type="tns:finaliseModuleResponse"/>
+  <xs:element name="finalisePolicy" type="tns:finalisePolicy"/>
+  <xs:element name="finalisePolicyResponse" type="tns:finalisePolicyResponse"/>
+  <xs:element name="finaliseTemplate" type="tns:finaliseTemplate"/>
+  <xs:element name="finaliseTemplateResponse" type="tns:finaliseTemplateResponse"/>
+  <xs:element name="isConsentTemplateInUse" type="tns:isConsentTemplateInUse"/>
+  <xs:element name="isConsentTemplateInUseResponse" type="tns:isConsentTemplateInUseResponse"/>
+  <xs:element name="isDomainInUse" type="tns:isDomainInUse"/>
+  <xs:element name="isDomainInUseResponse" type="tns:isDomainInUseResponse"/>
+  <xs:element name="isModuleInUse" type="tns:isModuleInUse"/>
+  <xs:element name="isModuleInUseResponse" type="tns:isModuleInUseResponse"/>
+  <xs:element name="isPolicyInUse" type="tns:isPolicyInUse"/>
+  <xs:element name="isPolicyInUseResponse" type="tns:isPolicyInUseResponse"/>
+  <xs:element name="processPoliciyValidityChangesForAllDomains" type="tns:processPoliciyValidityChangesForAllDomains"/>
+  <xs:element name="processPoliciyValidityChangesForAllDomainsResponse" type="tns:processPoliciyValidityChangesForAllDomainsResponse"/>
+  <xs:element name="processPolicyValidityChanges" type="tns:processPolicyValidityChanges"/>
+  <xs:element name="processPolicyValidityChangesResponse" type="tns:processPolicyValidityChangesResponse"/>
+  <xs:element name="signature" type="tns:signatureDTO"/>
+  <xs:element name="updateConsentTemplate" type="tns:updateConsentTemplate"/>
+  <xs:element name="updateConsentTemplateInUse" type="tns:updateConsentTemplateInUse"/>
+  <xs:element name="updateConsentTemplateInUseResponse" type="tns:updateConsentTemplateInUseResponse"/>
+  <xs:element name="updateConsentTemplateResponse" type="tns:updateConsentTemplateResponse"/>
+  <xs:element name="updateDomain" type="tns:updateDomain"/>
+  <xs:element name="updateDomainInUse" type="tns:updateDomainInUse"/>
+  <xs:element name="updateDomainInUseResponse" type="tns:updateDomainInUseResponse"/>
+  <xs:element name="updateDomainResponse" type="tns:updateDomainResponse"/>
+  <xs:element name="updateModule" type="tns:updateModule"/>
+  <xs:element name="updateModuleInUse" type="tns:updateModuleInUse"/>
+  <xs:element name="updateModuleInUseResponse" type="tns:updateModuleInUseResponse"/>
+  <xs:element name="updateModuleResponse" type="tns:updateModuleResponse"/>
+  <xs:element name="updatePolicy" type="tns:updatePolicy"/>
+  <xs:element name="updatePolicyInUse" type="tns:updatePolicyInUse"/>
+  <xs:element name="updatePolicyInUseResponse" type="tns:updatePolicyInUseResponse"/>
+  <xs:element name="updatePolicyResponse" type="tns:updatePolicyResponse"/>
+  <xs:element name="updateSignerIdType" type="tns:updateSignerIdType"/>
+  <xs:element name="updateSignerIdTypeResponse" type="tns:updateSignerIdTypeResponse"/>
+  <xs:complexType name="updatePolicyInUse">
+    <xs:sequence>
+      <xs:element name="policyKey" type="tns:policyKeyDTO"/>
+      <xs:element name="label" type="xs:string"/>
+      <xs:element name="externProperties" type="xs:string"/>
+      <xs:element name="comment" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="policyKeyDTO">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="domainName" type="xs:string"/>
+      <xs:element minOccurs="0" name="name" type="xs:string"/>
+      <xs:element minOccurs="0" name="version" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updatePolicyInUseResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="addDomain">
+    <xs:sequence>
+      <xs:element name="domain" type="tns:domainDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="domainDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="config" type="ns1:DomainConfig"/>
+          <xs:element minOccurs="0" name="creationDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="ctVersionConverter" type="xs:string"/>
+          <xs:element minOccurs="0" name="expirationProperties" type="tns:expirationPropertiesDTO"/>
+          <xs:element minOccurs="0" name="externProperties" type="xs:string"/>
+          <xs:element name="finalised" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="label" type="xs:string"/>
+          <xs:element minOccurs="0" name="lastCheckDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="logo" type="xs:string"/>
+          <xs:element minOccurs="0" name="moduleVersionConverter" type="xs:string"/>
+          <xs:element minOccurs="0" name="name" type="xs:string"/>
+          <xs:element minOccurs="0" name="policyVersionConverter" type="xs:string"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="signerIdTypes" nillable="true" type="xs:string"/>
+          <xs:element minOccurs="0" name="updateDate" type="xs:dateTime"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType abstract="true" name="fhirIdDTO">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="fhirID" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="expirationPropertiesDTO">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="fixedExpirationDate" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="validPeriod" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="addDomainResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="addModule">
+    <xs:sequence>
+      <xs:element name="module" type="tns:moduleDTO"/>
+      <xs:element name="finaliseRelatedEntities" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="moduleDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="assignedPolicies" nillable="true" type="tns:assignedPolicyDTO"/>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="creationDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="externProperties" type="xs:string"/>
+          <xs:element name="finalised" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="key" type="tns:moduleKeyDTO"/>
+          <xs:element minOccurs="0" name="label" type="xs:string"/>
+          <xs:element minOccurs="0" name="shortText" type="xs:string"/>
+          <xs:element minOccurs="0" name="text" type="xs:string"/>
+          <xs:element minOccurs="0" name="title" type="xs:string"/>
+          <xs:element minOccurs="0" name="updateDate" type="xs:dateTime"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="assignedPolicyDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="expirationProperties" type="tns:expressionExpirationPropertiesDTO"/>
+          <xs:element minOccurs="0" name="externProperties" type="xs:string"/>
+          <xs:element minOccurs="0" name="policy" type="tns:policyDTO"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="expressionExpirationPropertiesDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:expirationPropertiesDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="expirationExpression" type="xs:string"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="policyDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="creationDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="externProperties" type="xs:string"/>
+          <xs:element name="finalised" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="key" type="tns:policyKeyDTO"/>
+          <xs:element minOccurs="0" name="label" type="xs:string"/>
+          <xs:element minOccurs="0" name="updateDate" type="xs:dateTime"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="moduleKeyDTO">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="domainName" type="xs:string"/>
+      <xs:element minOccurs="0" name="name" type="xs:string"/>
+      <xs:element minOccurs="0" name="version" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="addModuleResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="updateModuleInUse">
+    <xs:sequence>
+      <xs:element name="moduleKey" type="tns:moduleKeyDTO"/>
+      <xs:element name="label" type="xs:string"/>
+      <xs:element name="shortText" type="xs:string"/>
+      <xs:element name="externProperties" type="xs:string"/>
+      <xs:element name="comment" type="xs:string"/>
+      <xs:element maxOccurs="unbounded" name="assignedPolicies" type="tns:assignedPolicyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updateModuleInUseResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="finalisePolicy">
+    <xs:sequence>
+      <xs:element name="policyKey" type="tns:policyKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="finalisePolicyResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="addSignerIdType">
+    <xs:sequence>
+      <xs:element name="domainName" type="xs:string"/>
+      <xs:element name="signerIdTypeName" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="addSignerIdTypeResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="updateDomainInUse">
+    <xs:sequence>
+      <xs:element name="domainName" type="xs:string"/>
+      <xs:element name="label" type="xs:string"/>
+      <xs:element name="logo" type="xs:string"/>
+      <xs:element name="externProperties" type="xs:string"/>
+      <xs:element name="expirationProperties" type="tns:expirationPropertiesDTO"/>
+      <xs:element name="comment" type="xs:string"/>
+      <xs:element minOccurs="0" name="config" type="ns1:DomainConfig"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updateDomainInUseResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="processPoliciyValidityChangesForAllDomains">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="processPoliciyValidityChangesForAllDomainsResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="finaliseTemplate">
+    <xs:sequence>
+      <xs:element name="consentTemplateKey" type="tns:consentTemplateKeyDTO"/>
+      <xs:element name="finaliseRelatedEntities" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="consentTemplateKeyDTO">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="domainName" type="xs:string"/>
+      <xs:element minOccurs="0" name="name" type="xs:string"/>
+      <xs:element minOccurs="0" name="version" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="finaliseTemplateResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="addConsentTemplate">
+    <xs:sequence>
+      <xs:element name="consentTemplate" type="tns:consentTemplateDTO"/>
+      <xs:element name="finaliseRelatedEntities" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="consentTemplateDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="assignedModules" nillable="true" type="tns:assignedModuleDTO"/>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="config" type="ns1:TemplateConfig"/>
+          <xs:element minOccurs="0" name="creationDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="expirationProperties" type="tns:expirationPropertiesDTO"/>
+          <xs:element minOccurs="0" name="externProperties" type="xs:string"/>
+          <xs:element minOccurs="0" name="footer" type="xs:string"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="freeTextDefs" nillable="true" type="tns:freeTextDefDTO"/>
+          <xs:element minOccurs="0" name="header" type="xs:string"/>
+          <xs:element minOccurs="0" name="key" type="tns:consentTemplateKeyDTO"/>
+          <xs:element minOccurs="0" name="label" type="xs:string"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="mappedConsentTemplates" nillable="true" type="tns:consentTemplateKeyDTO"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="mappedObjectionTemplates" nillable="true" type="tns:consentTemplateKeyDTO"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="mappedOptOutConsentTemplates" nillable="true" type="tns:consentTemplateKeyDTO"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="mappedRefusalTemplates" nillable="true" type="tns:consentTemplateKeyDTO"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="mappedRevocationTemplates" nillable="true" type="tns:consentTemplateKeyDTO"/>
+          <xs:element minOccurs="0" name="scanBase64" type="xs:string"/>
+          <xs:element minOccurs="0" name="scanFileType" type="xs:string"/>
+          <xs:element minOccurs="0" name="state" type="tns:structureElementState"/>
+          <xs:element minOccurs="0" name="structure" type="tns:consentTemplateStructureDTO"/>
+          <xs:element minOccurs="0" name="title" type="xs:string"/>
+          <xs:element minOccurs="0" name="type" type="tns:consentTemplateType"/>
+          <xs:element minOccurs="0" name="updateDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="validFromProperties" type="tns:validFromPropertiesDTO"/>
+          <xs:element minOccurs="0" name="versionLabel" type="xs:string"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="assignedModuleDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="defaultConsentStatus" type="tns:consentStatus"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="displayCheckboxes" nillable="true" type="tns:consentStatus"/>
+          <xs:element minOccurs="0" name="expirationProperties" type="tns:expirationPropertiesDTO"/>
+          <xs:element minOccurs="0" name="externProperties" type="xs:string"/>
+          <xs:element name="mandatory" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="module" type="tns:moduleDTO"/>
+          <xs:element name="orderNumber" type="xs:int"/>
+          <xs:element minOccurs="0" name="parent" type="tns:moduleKeyDTO"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="freeTextDefDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="converterString" type="xs:string"/>
+          <xs:element minOccurs="0" name="creationDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="externProperties" type="xs:string"/>
+          <xs:element name="finalised" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="label" type="xs:string"/>
+          <xs:element minOccurs="0" name="name" type="xs:string"/>
+          <xs:element name="orderedRadioButtons">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element maxOccurs="unbounded" minOccurs="0" name="entry">
+                  <xs:complexType>
+                    <xs:sequence>
+                      <xs:element minOccurs="0" name="key" type="xs:string"/>
+                      <xs:element minOccurs="0" name="value" type="xs:string"/>
+                    </xs:sequence>
+                  </xs:complexType>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="pos" type="xs:int"/>
+          <xs:element name="required" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="type" type="tns:freeTextType"/>
+          <xs:element minOccurs="0" name="updateDate" type="xs:dateTime"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="consentTemplateStructureDTO">
+    <xs:sequence>
+      <xs:element name="children">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element maxOccurs="unbounded" minOccurs="0" name="entry">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element minOccurs="0" name="key" type="tns:moduleKeyDTO"/>
+                  <xs:element minOccurs="0" name="value" type="tns:moduleKeyDTOArray"/>
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="firstLevelModules" nillable="true" type="tns:moduleKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="validFromPropertiesDTO">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="fixedValidFromDate" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="invalidPeriod" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="addConsentTemplateResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="finaliseAllForDomain">
+    <xs:sequence>
+      <xs:element name="domainName" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="finaliseAllForDomainResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="updateDomain">
+    <xs:sequence>
+      <xs:element name="domain" type="tns:domainDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updateDomainResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="updateModule">
+    <xs:sequence>
+      <xs:element name="module" type="tns:moduleDTO"/>
+      <xs:element name="finaliseRelatedEntities" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updateModuleResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="processPolicyValidityChanges">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="arg0" type="tns:domainDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="processPolicyValidityChangesResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="updateConsentTemplateInUse">
+    <xs:sequence>
+      <xs:element name="consentTemplate" type="tns:consentTemplateDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updateConsentTemplateInUseResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="deletePolicy">
+    <xs:sequence>
+      <xs:element name="policyKey" type="tns:policyKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="deletePolicyResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="deleteSignerIdType">
+    <xs:sequence>
+      <xs:element name="domainName" type="xs:string"/>
+      <xs:element name="signerIdTypeName" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="deleteSignerIdTypeResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="updateConsentTemplate">
+    <xs:sequence>
+      <xs:element name="consentTemplate" type="tns:consentTemplateDTO"/>
+      <xs:element name="finaliseRelatedEntities" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updateConsentTemplateResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="isModuleInUse">
+    <xs:sequence>
+      <xs:element name="moduleKey" type="tns:moduleKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="isModuleInUseResponse">
+    <xs:sequence>
+      <xs:element name="return" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="finaliseModule">
+    <xs:sequence>
+      <xs:element name="moduleKey" type="tns:moduleKeyDTO"/>
+      <xs:element name="finaliseRelatedEntities" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="finaliseModuleResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="filterModulesInUse">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" name="moduleKeys" type="tns:moduleKeyDTO"/>
+      <xs:element name="inUse" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="filterModulesInUseResponse">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="return" nillable="true">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element maxOccurs="unbounded" minOccurs="0" name="modules" type="tns:moduleKeyDTO"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="isDomainInUse">
+    <xs:sequence>
+      <xs:element name="domainName" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="isDomainInUseResponse">
+    <xs:sequence>
+      <xs:element name="return" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="filterPoliciesInUse">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" name="policyKeys" type="tns:policyKeyDTO"/>
+      <xs:element name="inUse" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="filterPoliciesInUseResponse">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="return" nillable="true">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element maxOccurs="unbounded" minOccurs="0" name="policies" type="tns:policyKeyDTO"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="deleteModule">
+    <xs:sequence>
+      <xs:element name="moduleKey" type="tns:moduleKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="deleteModuleResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="isConsentTemplateInUse">
+    <xs:sequence>
+      <xs:element name="consentTemplateKey" type="tns:consentTemplateKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="isConsentTemplateInUseResponse">
+    <xs:sequence>
+      <xs:element name="return" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="deleteDomain">
+    <xs:sequence>
+      <xs:element name="domainName" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="deleteDomainResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="finaliseDomain">
+    <xs:sequence>
+      <xs:element name="domainName" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="finaliseDomainResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="filterConsentTemplatesInUse">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" name="consentTemplateKeys" type="tns:consentTemplateKeyDTO"/>
+      <xs:element name="inUse" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="filterConsentTemplatesInUseResponse">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="return" nillable="true">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element maxOccurs="unbounded" minOccurs="0" name="templates" type="tns:consentTemplateKeyDTO"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="addPolicy">
+    <xs:sequence>
+      <xs:element name="policy" type="tns:policyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="addPolicyResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="deleteConsentTemplate">
+    <xs:sequence>
+      <xs:element name="consentTemplateKey" type="tns:consentTemplateKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="deleteConsentTemplateResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="isPolicyInUse">
+    <xs:sequence>
+      <xs:element name="policyKey" type="tns:policyKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="isPolicyInUseResponse">
+    <xs:sequence>
+      <xs:element name="return" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updatePolicy">
+    <xs:sequence>
+      <xs:element name="policy" type="tns:policyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updatePolicyResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="updateSignerIdType">
+    <xs:sequence>
+      <xs:element name="domainName" type="xs:string"/>
+      <xs:element name="signerIdTypeName" type="xs:string"/>
+      <xs:element name="label" type="xs:string"/>
+      <xs:element name="comment" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="updateSignerIdTypeResponse">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="consentDateValuesDTO">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="consentExpirationDate" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="gicsConsentDate" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="legalConsentDate" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="maxPolicyExpirationDate" type="xs:dateTime"/>
+      <xs:element name="moduleExpirations">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element maxOccurs="unbounded" minOccurs="0" name="entry">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element minOccurs="0" name="key" type="tns:moduleKeyDTO"/>
+                  <xs:element minOccurs="0" name="value" type="xs:dateTime"/>
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="policyExpirations">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element maxOccurs="unbounded" minOccurs="0" name="entry">
+              <xs:complexType>
+                <xs:sequence>
+                  <xs:element minOccurs="0" name="key" type="tns:moduleKeyDTO"/>
+                  <xs:element minOccurs="0" name="value" type="tns:hashMap"/>
+                </xs:sequence>
+              </xs:complexType>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="hashMap">
+    <xs:complexContent>
+      <xs:extension base="tns:abstractMap">
+        <xs:sequence/>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType abstract="true" name="abstractMap">
+    <xs:sequence/>
+  </xs:complexType>
+  <xs:complexType name="consentDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:consentLightDTO">
+        <xs:sequence>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="freeTextVals" nillable="true" type="tns:freeTextValDTO"/>
+          <xs:element name="metaData">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element maxOccurs="unbounded" minOccurs="0" name="entry">
+                  <xs:complexType>
+                    <xs:sequence>
+                      <xs:element minOccurs="0" name="key" type="xs:string"/>
+                      <xs:element minOccurs="0" name="value" type="xs:string"/>
+                    </xs:sequence>
+                  </xs:complexType>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element minOccurs="0" name="patientSignatureBase64" type="xs:string"/>
+          <xs:element minOccurs="0" name="physicianSignatureBase64" type="xs:string"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="scans" nillable="true" type="tns:consentScanDTO"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="consentLightDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="consentDates" type="tns:consentDateValuesDTO"/>
+          <xs:element minOccurs="0" name="creationDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="expirationProperties" type="tns:expirationPropertiesDTO"/>
+          <xs:element minOccurs="0" name="externProperties" type="xs:string"/>
+          <xs:element minOccurs="0" name="key" type="tns:consentKeyDTO"/>
+          <xs:element name="legacyTypeMapping">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element maxOccurs="unbounded" minOccurs="0" name="entry">
+                  <xs:complexType>
+                    <xs:sequence>
+                      <xs:element minOccurs="0" name="key" type="tns:legacySignatureType"/>
+                      <xs:element minOccurs="0" name="value" type="xs:string"/>
+                    </xs:sequence>
+                  </xs:complexType>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="moduleStates">
+            <xs:complexType>
+              <xs:sequence>
+                <xs:element maxOccurs="unbounded" minOccurs="0" name="entry">
+                  <xs:complexType>
+                    <xs:sequence>
+                      <xs:element minOccurs="0" name="key" type="tns:moduleKeyDTO"/>
+                      <xs:element minOccurs="0" name="value" type="tns:moduleStateDTO"/>
+                    </xs:sequence>
+                  </xs:complexType>
+                </xs:element>
+              </xs:sequence>
+            </xs:complexType>
+          </xs:element>
+          <xs:element name="patientSignatureIsFromGuardian" type="xs:boolean"/>
+          <xs:element minOccurs="0" name="patientSigningDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="patientSigningPlace" type="xs:string"/>
+          <xs:element minOccurs="0" name="physicianId" type="xs:string"/>
+          <xs:element minOccurs="0" name="physicianSigningDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="physicianSigningPlace" type="xs:string"/>
+          <xs:element minOccurs="0" name="qualityControl" type="tns:qcdto"/>
+          <xs:element minOccurs="0" name="scanStorageLocation" type="xs:string"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="signature" type="tns:signatureDTO"/>
+          <xs:element minOccurs="0" name="templateType" type="tns:consentTemplateType"/>
+          <xs:element minOccurs="0" name="updateDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="validFromDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="validFromProperties" type="tns:validFromPropertiesDTO"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="freeTextValDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="freeTextDefName" type="xs:string"/>
+          <xs:element minOccurs="0" name="value" type="xs:string"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="consentScanDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="base64" type="xs:string"/>
+          <xs:element minOccurs="0" name="consentKey" type="tns:consentKeyDTO"/>
+          <xs:element minOccurs="0" name="fileName" type="xs:string"/>
+          <xs:element minOccurs="0" name="fileType" type="xs:string"/>
+          <xs:element minOccurs="0" name="uploadDate" type="xs:dateTime"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="consentKeyDTO">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="consentDate" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="consentTemplateKey" type="tns:consentTemplateKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="signerIds" nillable="true" type="tns:signerIdDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="signerIdDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="creationDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="id" type="xs:string"/>
+          <xs:element minOccurs="0" name="idType" type="xs:string"/>
+          <xs:element name="orderNumber" type="xs:int"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="moduleStateDTO">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="consentState" type="tns:consentStatus"/>
+      <xs:element minOccurs="0" name="key" type="tns:moduleKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="policyKeys" nillable="true" type="tns:policyKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="qcdto">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="date" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="externProperties" type="xs:string"/>
+          <xs:element minOccurs="0" name="inspector" type="xs:string"/>
+          <xs:element maxOccurs="unbounded" minOccurs="0" name="problems" nillable="true" type="tns:qcProblemDTO"/>
+          <xs:element minOccurs="0" name="type" type="xs:string"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="qcProblemDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="commentExtern" type="xs:string"/>
+          <xs:element minOccurs="0" name="commentIntern" type="xs:string"/>
+          <xs:element minOccurs="0" name="createdAt" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="formValue" type="xs:string"/>
+          <xs:element minOccurs="0" name="ref" type="xs:string"/>
+          <xs:element minOccurs="0" name="scanValue" type="xs:string"/>
+          <xs:element minOccurs="0" name="status" type="tns:qcProblemStatus"/>
+          <xs:element minOccurs="0" name="updatedAt" type="xs:dateTime"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="signatureDTO">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="identifier" type="tns:identifier"/>
+      <xs:element minOccurs="0" name="signatureBase64" type="xs:string"/>
+      <xs:element minOccurs="0" name="signingDate" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="signingPlace" type="xs:string"/>
+    </xs:sequence>
+    <xs:attribute name="type" type="xs:string"/>
+  </xs:complexType>
+  <xs:complexType name="identifier">
+    <xs:sequence/>
+    <xs:attribute name="id" type="xs:string"/>
+    <xs:attribute name="value" type="xs:string"/>
+  </xs:complexType>
+  <xs:complexType name="consentParseResultDTO">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="detectedModuleStates" nillable="true" type="tns:detectedModuleDTO"/>
+      <xs:element minOccurs="0" name="detectedPatientSigningDate" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="detectedPatientSigningPlace" type="xs:string"/>
+      <xs:element minOccurs="0" name="detectedPhysicianSigningDate" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="detectedPhysicianSigningPlace" type="xs:string"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="detectedSignerIds" nillable="true" type="tns:signerIdDTO"/>
+      <xs:element minOccurs="0" name="detectedTemplateKey" type="tns:consentTemplateKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="missingModules" nillable="true" type="tns:assignedModuleDTO"/>
+      <xs:element minOccurs="0" name="scalingError" type="xs:boolean"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="detectedModuleDTO">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="consentStatus" nillable="true" type="tns:consentStatus"/>
+      <xs:element minOccurs="0" name="key" type="tns:moduleKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="importResultDTO">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="addedDomains" nillable="true" type="tns:domainDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="addedModules" nillable="true" type="tns:moduleKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="addedPolicies" nillable="true" type="tns:policyKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="addedTemplates" nillable="true" type="tns:consentTemplateKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="ignoredDomains" nillable="true" type="tns:domainDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="ignoredModules" nillable="true" type="tns:moduleKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="ignoredPolicies" nillable="true" type="tns:policyKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="ignoredTemplates" nillable="true" type="tns:consentTemplateKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="updatedDomains" nillable="true" type="tns:domainDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="updatedModules" nillable="true" type="tns:moduleKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="updatedPolicies" nillable="true" type="tns:policyKeyDTO"/>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="updatedTemplates" nillable="true" type="tns:consentTemplateKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="policyValidityChangedDTO">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="changedDates" nillable="true" type="xs:dateTime"/>
+      <xs:element minOccurs="0" name="policy" type="tns:policyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="qcHistoryDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:qcdto">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="endDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="startDate" type="xs:dateTime"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="qcProblemHistoryDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:qcProblemDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="endDate" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="startDate" type="xs:dateTime"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="signedPolicyDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="consentKey" type="tns:consentKeyDTO"/>
+          <xs:element minOccurs="0" name="expirationProperties" type="tns:expirationPropertiesDTO"/>
+          <xs:element minOccurs="0" name="policyKey" type="tns:policyKeyDTO"/>
+          <xs:element minOccurs="0" name="status" type="tns:consentStatus"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="signerIdTypeDTO">
+    <xs:complexContent>
+      <xs:extension base="tns:fhirIdDTO">
+        <xs:sequence>
+          <xs:element minOccurs="0" name="comment" type="xs:string"/>
+          <xs:element minOccurs="0" name="createTimestamp" type="xs:dateTime"/>
+          <xs:element minOccurs="0" name="label" type="xs:string"/>
+          <xs:element minOccurs="0" name="name" type="xs:string"/>
+          <xs:element minOccurs="0" name="updateTimestamp" type="xs:dateTime"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:simpleType name="consentTemplateType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="CONSENT"/>
+      <xs:enumeration value="CONSENT_OPT_OUT"/>
+      <xs:enumeration value="REVOCATION"/>
+      <xs:enumeration value="OBJECTION"/>
+      <xs:enumeration value="REFUSAL"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="legacySignatureType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="PATIENT"/>
+      <xs:enumeration value="PHYSICIAN"/>
+      <xs:enumeration value="GUARDIAN"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="itemType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="POLICY"/>
+      <xs:enumeration value="MODULE"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="consentStatus">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="ACCEPTED"/>
+      <xs:enumeration value="DECLINED"/>
+      <xs:enumeration value="UNKNOWN"/>
+      <xs:enumeration value="NOT_ASKED"/>
+      <xs:enumeration value="NOT_CHOSEN"/>
+      <xs:enumeration value="WITHDRAWN"/>
+      <xs:enumeration value="INVALIDATED"/>
+      <xs:enumeration value="REFUSED"/>
+      <xs:enumeration value="EXPIRED"/>
+      <xs:enumeration value="OBJECTED"/>
+      <xs:enumeration value="ACCEPTED_OPT_OUT"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="freeTextType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="STRING"/>
+      <xs:enumeration value="DATE"/>
+      <xs:enumeration value="INTEGER"/>
+      <xs:enumeration value="DOUBLE"/>
+      <xs:enumeration value="BOOLEAN"/>
+      <xs:enumeration value="OUTPUT_TEXT"/>
+      <xs:enumeration value="RADIO_BUTTONS"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="structureElementState">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="DRAFT"/>
+      <xs:enumeration value="ACTIVE"/>
+      <xs:enumeration value="INACTIVE"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="qcProblemStatus">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="OPEN_EXTERN"/>
+      <xs:enumeration value="OPEN_INTERN"/>
+      <xs:enumeration value="CANCELED_EXTERN"/>
+      <xs:enumeration value="CANCELED_INTERN"/>
+      <xs:enumeration value="CLOSED_EXTERN"/>
+      <xs:enumeration value="CLOSED_INTERN"/>
+      <xs:enumeration value="DELETED_INTERN"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType final="#all" name="moduleKeyDTOArray">
+    <xs:sequence>
+      <xs:element maxOccurs="unbounded" minOccurs="0" name="item" nillable="true" type="tns:moduleKeyDTO"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="UnknownPolicyException" type="tns:UnknownPolicyException"/>
+  <xs:complexType name="UnknownPolicyException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="InvalidParameterException" type="tns:InvalidParameterException"/>
+  <xs:complexType name="InvalidParameterException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="parameterName" type="xs:string"/>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="UnknownDomainException" type="tns:UnknownDomainException"/>
+  <xs:complexType name="UnknownDomainException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="InvalidVersionException" type="tns:InvalidVersionException"/>
+  <xs:complexType name="InvalidVersionException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="DuplicateEntryException" type="tns:DuplicateEntryException"/>
+  <xs:complexType name="DuplicateEntryException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="VersionConverterClassException" type="tns:VersionConverterClassException"/>
+  <xs:complexType name="VersionConverterClassException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="IllegalCompositionException" type="tns:IllegalCompositionException"/>
+  <xs:complexType name="IllegalCompositionException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="illegalItemType" type="tns:itemType"/>
+      <xs:element minOccurs="0" name="illegalItem" type="xs:string"/>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="RequirementsNotFullfilledException" type="tns:RequirementsNotFullfilledException"/>
+  <xs:complexType name="RequirementsNotFullfilledException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="UnknownModuleException" type="tns:UnknownModuleException"/>
+  <xs:complexType name="UnknownModuleException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="UnknownSignerIdException" type="tns:UnknownSignerIdException"/>
+  <xs:complexType name="UnknownSignerIdException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="UnknownSignerIdTypeException" type="tns:UnknownSignerIdTypeException"/>
+  <xs:complexType name="UnknownSignerIdTypeException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="UnknownConsentTemplateException" type="tns:UnknownConsentTemplateException"/>
+  <xs:complexType name="UnknownConsentTemplateException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="FreeTextConverterStringException" type="tns:FreeTextConverterStringException"/>
+  <xs:complexType name="FreeTextConverterStringException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="InvalidPropertiesException" type="tns:InvalidPropertiesException"/>
+  <xs:complexType name="InvalidPropertiesException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="ObjectInUseException" type="tns:ObjectInUseException"/>
+  <xs:complexType name="ObjectInUseException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:element name="InvalidFreeTextException" type="tns:InvalidFreeTextException"/>
+  <xs:complexType name="InvalidFreeTextException">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="message" type="xs:string"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>
+  </wsdl:types>
+  <wsdl:message name="filterConsentTemplatesInUseResponse">
+    <wsdl:part element="tns:filterConsentTemplatesInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addPolicyResponse">
+    <wsdl:part element="tns:addPolicyResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateModuleInUse">
+    <wsdl:part element="tns:updateModuleInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="isPolicyInUseResponse">
+    <wsdl:part element="tns:isPolicyInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finalisePolicyResponse">
+    <wsdl:part element="tns:finalisePolicyResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="IllegalCompositionException">
+    <wsdl:part element="tns:IllegalCompositionException" name="IllegalCompositionException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finalisePolicy">
+    <wsdl:part element="tns:finalisePolicy" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="UnknownModuleException">
+    <wsdl:part element="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updatePolicyInUseResponse">
+    <wsdl:part element="tns:updatePolicyInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateDomainInUse">
+    <wsdl:part element="tns:updateDomainInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="processPoliciyValidityChangesForAllDomains">
+    <wsdl:part element="tns:processPoliciyValidityChangesForAllDomains" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finaliseAllForDomainResponse">
+    <wsdl:part element="tns:finaliseAllForDomainResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateConsentTemplateInUseResponse">
+    <wsdl:part element="tns:updateConsentTemplateInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finaliseTemplate">
+    <wsdl:part element="tns:finaliseTemplate" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finaliseAllForDomain">
+    <wsdl:part element="tns:finaliseAllForDomain" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="processPolicyValidityChanges">
+    <wsdl:part element="tns:processPolicyValidityChanges" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateConsentTemplateInUse">
+    <wsdl:part element="tns:updateConsentTemplateInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="InvalidFreeTextException">
+    <wsdl:part element="tns:InvalidFreeTextException" name="InvalidFreeTextException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="processPoliciyValidityChangesForAllDomainsResponse">
+    <wsdl:part element="tns:processPoliciyValidityChangesForAllDomainsResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deleteSignerIdType">
+    <wsdl:part element="tns:deleteSignerIdType" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateConsentTemplate">
+    <wsdl:part element="tns:updateConsentTemplate" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="VersionConverterClassException">
+    <wsdl:part element="tns:VersionConverterClassException" name="VersionConverterClassException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="isModuleInUse">
+    <wsdl:part element="tns:isModuleInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updatePolicyResponse">
+    <wsdl:part element="tns:updatePolicyResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addDomainResponse">
+    <wsdl:part element="tns:addDomainResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addConsentTemplateResponse">
+    <wsdl:part element="tns:addConsentTemplateResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deleteSignerIdTypeResponse">
+    <wsdl:part element="tns:deleteSignerIdTypeResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="filterModulesInUse">
+    <wsdl:part element="tns:filterModulesInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="UnknownPolicyException">
+    <wsdl:part element="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateDomainInUseResponse">
+    <wsdl:part element="tns:updateDomainInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finaliseModuleResponse">
+    <wsdl:part element="tns:finaliseModuleResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="FreeTextConverterStringException">
+    <wsdl:part element="tns:FreeTextConverterStringException" name="FreeTextConverterStringException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="filterPoliciesInUse">
+    <wsdl:part element="tns:filterPoliciesInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deleteDomain">
+    <wsdl:part element="tns:deleteDomain" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="UnknownSignerIdException">
+    <wsdl:part element="tns:UnknownSignerIdException" name="UnknownSignerIdException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="processPolicyValidityChangesResponse">
+    <wsdl:part element="tns:processPolicyValidityChangesResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="isDomainInUseResponse">
+    <wsdl:part element="tns:isDomainInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finaliseDomain">
+    <wsdl:part element="tns:finaliseDomain" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateSignerIdTypeResponse">
+    <wsdl:part element="tns:updateSignerIdTypeResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="InvalidParameterException">
+    <wsdl:part element="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="filterConsentTemplatesInUse">
+    <wsdl:part element="tns:filterConsentTemplatesInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addPolicy">
+    <wsdl:part element="tns:addPolicy" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deleteConsentTemplate">
+    <wsdl:part element="tns:deleteConsentTemplate" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateSignerIdType">
+    <wsdl:part element="tns:updateSignerIdType" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updatePolicyInUse">
+    <wsdl:part element="tns:updatePolicyInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deleteConsentTemplateResponse">
+    <wsdl:part element="tns:deleteConsentTemplateResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="UnknownDomainException">
+    <wsdl:part element="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateDomainResponse">
+    <wsdl:part element="tns:updateDomainResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addDomain">
+    <wsdl:part element="tns:addDomain" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addModule">
+    <wsdl:part element="tns:addModule" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="UnknownSignerIdTypeException">
+    <wsdl:part element="tns:UnknownSignerIdTypeException" name="UnknownSignerIdTypeException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="RequirementsNotFullfilledException">
+    <wsdl:part element="tns:RequirementsNotFullfilledException" name="RequirementsNotFullfilledException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addSignerIdType">
+    <wsdl:part element="tns:addSignerIdType" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="ObjectInUseException">
+    <wsdl:part element="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="isConsentTemplateInUseResponse">
+    <wsdl:part element="tns:isConsentTemplateInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="DuplicateEntryException">
+    <wsdl:part element="tns:DuplicateEntryException" name="DuplicateEntryException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finaliseTemplateResponse">
+    <wsdl:part element="tns:finaliseTemplateResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addConsentTemplate">
+    <wsdl:part element="tns:addConsentTemplate" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateDomain">
+    <wsdl:part element="tns:updateDomain" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateModule">
+    <wsdl:part element="tns:updateModule" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deleteModuleResponse">
+    <wsdl:part element="tns:deleteModuleResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addSignerIdTypeResponse">
+    <wsdl:part element="tns:addSignerIdTypeResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateModuleResponse">
+    <wsdl:part element="tns:updateModuleResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deletePolicy">
+    <wsdl:part element="tns:deletePolicy" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deleteDomainResponse">
+    <wsdl:part element="tns:deleteDomainResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finaliseModule">
+    <wsdl:part element="tns:finaliseModule" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="filterPoliciesInUseResponse">
+    <wsdl:part element="tns:filterPoliciesInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="finaliseDomainResponse">
+    <wsdl:part element="tns:finaliseDomainResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="isDomainInUse">
+    <wsdl:part element="tns:isDomainInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="InvalidVersionException">
+    <wsdl:part element="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deletePolicyResponse">
+    <wsdl:part element="tns:deletePolicyResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="addModuleResponse">
+    <wsdl:part element="tns:addModuleResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="isModuleInUseResponse">
+    <wsdl:part element="tns:isModuleInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="deleteModule">
+    <wsdl:part element="tns:deleteModule" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="isConsentTemplateInUse">
+    <wsdl:part element="tns:isConsentTemplateInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateModuleInUseResponse">
+    <wsdl:part element="tns:updateModuleInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updateConsentTemplateResponse">
+    <wsdl:part element="tns:updateConsentTemplateResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="InvalidPropertiesException">
+    <wsdl:part element="tns:InvalidPropertiesException" name="InvalidPropertiesException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="isPolicyInUse">
+    <wsdl:part element="tns:isPolicyInUse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="updatePolicy">
+    <wsdl:part element="tns:updatePolicy" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="UnknownConsentTemplateException">
+    <wsdl:part element="tns:UnknownConsentTemplateException" name="UnknownConsentTemplateException">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:message name="filterModulesInUseResponse">
+    <wsdl:part element="tns:filterModulesInUseResponse" name="parameters">
+    </wsdl:part>
+  </wsdl:message>
+  <wsdl:portType name="GICSManagementService">
+    <wsdl:operation name="updatePolicyInUse">
+      <wsdl:input message="tns:updatePolicyInUse" name="updatePolicyInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:updatePolicyInUseResponse" name="updatePolicyInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addDomain">
+      <wsdl:input message="tns:addDomain" name="addDomain">
+    </wsdl:input>
+      <wsdl:output message="tns:addDomainResponse" name="addDomainResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:VersionConverterClassException" name="VersionConverterClassException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:DuplicateEntryException" name="DuplicateEntryException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addModule">
+      <wsdl:input message="tns:addModule" name="addModule">
+    </wsdl:input>
+      <wsdl:output message="tns:addModuleResponse" name="addModuleResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:IllegalCompositionException" name="IllegalCompositionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:RequirementsNotFullfilledException" name="RequirementsNotFullfilledException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:DuplicateEntryException" name="DuplicateEntryException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateModuleInUse">
+      <wsdl:input message="tns:updateModuleInUse" name="updateModuleInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:updateModuleInUseResponse" name="updateModuleInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finalisePolicy">
+      <wsdl:input message="tns:finalisePolicy" name="finalisePolicy">
+    </wsdl:input>
+      <wsdl:output message="tns:finalisePolicyResponse" name="finalisePolicyResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addSignerIdType">
+      <wsdl:input message="tns:addSignerIdType" name="addSignerIdType">
+    </wsdl:input>
+      <wsdl:output message="tns:addSignerIdTypeResponse" name="addSignerIdTypeResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:DuplicateEntryException" name="DuplicateEntryException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateDomainInUse">
+      <wsdl:input message="tns:updateDomainInUse" name="updateDomainInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:updateDomainInUseResponse" name="updateDomainInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:VersionConverterClassException" name="VersionConverterClassException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="processPoliciyValidityChangesForAllDomains">
+      <wsdl:input message="tns:processPoliciyValidityChangesForAllDomains" name="processPoliciyValidityChangesForAllDomains">
+    </wsdl:input>
+      <wsdl:output message="tns:processPoliciyValidityChangesForAllDomainsResponse" name="processPoliciyValidityChangesForAllDomainsResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:UnknownSignerIdTypeException" name="UnknownSignerIdTypeException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownSignerIdException" name="UnknownSignerIdException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:VersionConverterClassException" name="VersionConverterClassException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finaliseTemplate">
+      <wsdl:input message="tns:finaliseTemplate" name="finaliseTemplate">
+    </wsdl:input>
+      <wsdl:output message="tns:finaliseTemplateResponse" name="finaliseTemplateResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownConsentTemplateException" name="UnknownConsentTemplateException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:RequirementsNotFullfilledException" name="RequirementsNotFullfilledException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addConsentTemplate">
+      <wsdl:input message="tns:addConsentTemplate" name="addConsentTemplate">
+    </wsdl:input>
+      <wsdl:output message="tns:addConsentTemplateResponse" name="addConsentTemplateResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidPropertiesException" name="InvalidPropertiesException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:IllegalCompositionException" name="IllegalCompositionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownConsentTemplateException" name="UnknownConsentTemplateException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:RequirementsNotFullfilledException" name="RequirementsNotFullfilledException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:FreeTextConverterStringException" name="FreeTextConverterStringException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:DuplicateEntryException" name="DuplicateEntryException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finaliseAllForDomain">
+      <wsdl:input message="tns:finaliseAllForDomain" name="finaliseAllForDomain">
+    </wsdl:input>
+      <wsdl:output message="tns:finaliseAllForDomainResponse" name="finaliseAllForDomainResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownConsentTemplateException" name="UnknownConsentTemplateException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:RequirementsNotFullfilledException" name="RequirementsNotFullfilledException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:VersionConverterClassException" name="VersionConverterClassException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateDomain">
+      <wsdl:input message="tns:updateDomain" name="updateDomain">
+    </wsdl:input>
+      <wsdl:output message="tns:updateDomainResponse" name="updateDomainResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:VersionConverterClassException" name="VersionConverterClassException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateModule">
+      <wsdl:input message="tns:updateModule" name="updateModule">
+    </wsdl:input>
+      <wsdl:output message="tns:updateModuleResponse" name="updateModuleResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:IllegalCompositionException" name="IllegalCompositionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:RequirementsNotFullfilledException" name="RequirementsNotFullfilledException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:DuplicateEntryException" name="DuplicateEntryException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="processPolicyValidityChanges">
+      <wsdl:input message="tns:processPolicyValidityChanges" name="processPolicyValidityChanges">
+    </wsdl:input>
+      <wsdl:output message="tns:processPolicyValidityChangesResponse" name="processPolicyValidityChangesResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:UnknownSignerIdTypeException" name="UnknownSignerIdTypeException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownSignerIdException" name="UnknownSignerIdException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:VersionConverterClassException" name="VersionConverterClassException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateConsentTemplateInUse">
+      <wsdl:input message="tns:updateConsentTemplateInUse" name="updateConsentTemplateInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:updateConsentTemplateInUseResponse" name="updateConsentTemplateInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownConsentTemplateException" name="UnknownConsentTemplateException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidFreeTextException" name="InvalidFreeTextException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deletePolicy">
+      <wsdl:input message="tns:deletePolicy" name="deletePolicy">
+    </wsdl:input>
+      <wsdl:output message="tns:deletePolicyResponse" name="deletePolicyResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deleteSignerIdType">
+      <wsdl:input message="tns:deleteSignerIdType" name="deleteSignerIdType">
+    </wsdl:input>
+      <wsdl:output message="tns:deleteSignerIdTypeResponse" name="deleteSignerIdTypeResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:UnknownSignerIdTypeException" name="UnknownSignerIdTypeException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateConsentTemplate">
+      <wsdl:input message="tns:updateConsentTemplate" name="updateConsentTemplate">
+    </wsdl:input>
+      <wsdl:output message="tns:updateConsentTemplateResponse" name="updateConsentTemplateResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidPropertiesException" name="InvalidPropertiesException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:IllegalCompositionException" name="IllegalCompositionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownConsentTemplateException" name="UnknownConsentTemplateException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:RequirementsNotFullfilledException" name="RequirementsNotFullfilledException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidFreeTextException" name="InvalidFreeTextException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:FreeTextConverterStringException" name="FreeTextConverterStringException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:DuplicateEntryException" name="DuplicateEntryException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="isModuleInUse">
+      <wsdl:input message="tns:isModuleInUse" name="isModuleInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:isModuleInUseResponse" name="isModuleInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finaliseModule">
+      <wsdl:input message="tns:finaliseModule" name="finaliseModule">
+    </wsdl:input>
+      <wsdl:output message="tns:finaliseModuleResponse" name="finaliseModuleResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:RequirementsNotFullfilledException" name="RequirementsNotFullfilledException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="filterModulesInUse">
+      <wsdl:input message="tns:filterModulesInUse" name="filterModulesInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:filterModulesInUseResponse" name="filterModulesInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="isDomainInUse">
+      <wsdl:input message="tns:isDomainInUse" name="isDomainInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:isDomainInUseResponse" name="isDomainInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="filterPoliciesInUse">
+      <wsdl:input message="tns:filterPoliciesInUse" name="filterPoliciesInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:filterPoliciesInUseResponse" name="filterPoliciesInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deleteModule">
+      <wsdl:input message="tns:deleteModule" name="deleteModule">
+    </wsdl:input>
+      <wsdl:output message="tns:deleteModuleResponse" name="deleteModuleResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownModuleException" name="UnknownModuleException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="isConsentTemplateInUse">
+      <wsdl:input message="tns:isConsentTemplateInUse" name="isConsentTemplateInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:isConsentTemplateInUseResponse" name="isConsentTemplateInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownConsentTemplateException" name="UnknownConsentTemplateException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deleteDomain">
+      <wsdl:input message="tns:deleteDomain" name="deleteDomain">
+    </wsdl:input>
+      <wsdl:output message="tns:deleteDomainResponse" name="deleteDomainResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finaliseDomain">
+      <wsdl:input message="tns:finaliseDomain" name="finaliseDomain">
+    </wsdl:input>
+      <wsdl:output message="tns:finaliseDomainResponse" name="finaliseDomainResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:VersionConverterClassException" name="VersionConverterClassException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="filterConsentTemplatesInUse">
+      <wsdl:input message="tns:filterConsentTemplatesInUse" name="filterConsentTemplatesInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:filterConsentTemplatesInUseResponse" name="filterConsentTemplatesInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownConsentTemplateException" name="UnknownConsentTemplateException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addPolicy">
+      <wsdl:input message="tns:addPolicy" name="addPolicy">
+    </wsdl:input>
+      <wsdl:output message="tns:addPolicyResponse" name="addPolicyResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:RequirementsNotFullfilledException" name="RequirementsNotFullfilledException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:DuplicateEntryException" name="DuplicateEntryException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deleteConsentTemplate">
+      <wsdl:input message="tns:deleteConsentTemplate" name="deleteConsentTemplate">
+    </wsdl:input>
+      <wsdl:output message="tns:deleteConsentTemplateResponse" name="deleteConsentTemplateResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownConsentTemplateException" name="UnknownConsentTemplateException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="isPolicyInUse">
+      <wsdl:input message="tns:isPolicyInUse" name="isPolicyInUse">
+    </wsdl:input>
+      <wsdl:output message="tns:isPolicyInUseResponse" name="isPolicyInUseResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updatePolicy">
+      <wsdl:input message="tns:updatePolicy" name="updatePolicy">
+    </wsdl:input>
+      <wsdl:output message="tns:updatePolicyResponse" name="updatePolicyResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidVersionException" name="InvalidVersionException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:ObjectInUseException" name="ObjectInUseException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownPolicyException" name="UnknownPolicyException">
+    </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateSignerIdType">
+      <wsdl:input message="tns:updateSignerIdType" name="updateSignerIdType">
+    </wsdl:input>
+      <wsdl:output message="tns:updateSignerIdTypeResponse" name="updateSignerIdTypeResponse">
+    </wsdl:output>
+      <wsdl:fault message="tns:UnknownSignerIdTypeException" name="UnknownSignerIdTypeException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:InvalidParameterException" name="InvalidParameterException">
+    </wsdl:fault>
+      <wsdl:fault message="tns:UnknownDomainException" name="UnknownDomainException">
+    </wsdl:fault>
+    </wsdl:operation>
+  </wsdl:portType>
+  <wsdl:binding name="GICSManagementServiceImplServiceSoapBinding" type="tns:GICSManagementService">
+    <soap:binding style="document" transport="http://schemas.xmlsoap.org/soap/http"/>
+    <wsdl:operation name="updatePolicyInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="updatePolicyInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="updatePolicyInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownPolicyException">
+        <soap:fault name="UnknownPolicyException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addDomain">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="addDomain">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="addDomainResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="VersionConverterClassException">
+        <soap:fault name="VersionConverterClassException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="DuplicateEntryException">
+        <soap:fault name="DuplicateEntryException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addModule">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="addModule">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="addModuleResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="IllegalCompositionException">
+        <soap:fault name="IllegalCompositionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="RequirementsNotFullfilledException">
+        <soap:fault name="RequirementsNotFullfilledException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownPolicyException">
+        <soap:fault name="UnknownPolicyException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="DuplicateEntryException">
+        <soap:fault name="DuplicateEntryException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateModuleInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="updateModuleInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="updateModuleInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finalisePolicy">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="finalisePolicy">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="finalisePolicyResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownPolicyException">
+        <soap:fault name="UnknownPolicyException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addSignerIdType">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="addSignerIdType">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="addSignerIdTypeResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="DuplicateEntryException">
+        <soap:fault name="DuplicateEntryException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateDomainInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="updateDomainInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="updateDomainInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="VersionConverterClassException">
+        <soap:fault name="VersionConverterClassException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="processPoliciyValidityChangesForAllDomains">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="processPoliciyValidityChangesForAllDomains">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="processPoliciyValidityChangesForAllDomainsResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="UnknownSignerIdTypeException">
+        <soap:fault name="UnknownSignerIdTypeException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownSignerIdException">
+        <soap:fault name="UnknownSignerIdException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="VersionConverterClassException">
+        <soap:fault name="VersionConverterClassException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finaliseTemplate">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="finaliseTemplate">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="finaliseTemplateResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownConsentTemplateException">
+        <soap:fault name="UnknownConsentTemplateException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="RequirementsNotFullfilledException">
+        <soap:fault name="RequirementsNotFullfilledException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addConsentTemplate">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="addConsentTemplate">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="addConsentTemplateResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidPropertiesException">
+        <soap:fault name="InvalidPropertiesException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="IllegalCompositionException">
+        <soap:fault name="IllegalCompositionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownConsentTemplateException">
+        <soap:fault name="UnknownConsentTemplateException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="RequirementsNotFullfilledException">
+        <soap:fault name="RequirementsNotFullfilledException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="FreeTextConverterStringException">
+        <soap:fault name="FreeTextConverterStringException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="DuplicateEntryException">
+        <soap:fault name="DuplicateEntryException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finaliseAllForDomain">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="finaliseAllForDomain">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="finaliseAllForDomainResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownConsentTemplateException">
+        <soap:fault name="UnknownConsentTemplateException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="RequirementsNotFullfilledException">
+        <soap:fault name="RequirementsNotFullfilledException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="VersionConverterClassException">
+        <soap:fault name="VersionConverterClassException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownPolicyException">
+        <soap:fault name="UnknownPolicyException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateDomain">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="updateDomain">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="updateDomainResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="ObjectInUseException">
+        <soap:fault name="ObjectInUseException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="VersionConverterClassException">
+        <soap:fault name="VersionConverterClassException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateModule">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="updateModule">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="updateModuleResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="IllegalCompositionException">
+        <soap:fault name="IllegalCompositionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="ObjectInUseException">
+        <soap:fault name="ObjectInUseException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="RequirementsNotFullfilledException">
+        <soap:fault name="RequirementsNotFullfilledException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="DuplicateEntryException">
+        <soap:fault name="DuplicateEntryException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownPolicyException">
+        <soap:fault name="UnknownPolicyException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="processPolicyValidityChanges">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="processPolicyValidityChanges">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="processPolicyValidityChangesResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="UnknownSignerIdTypeException">
+        <soap:fault name="UnknownSignerIdTypeException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownSignerIdException">
+        <soap:fault name="UnknownSignerIdException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="VersionConverterClassException">
+        <soap:fault name="VersionConverterClassException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateConsentTemplateInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="updateConsentTemplateInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="updateConsentTemplateInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownConsentTemplateException">
+        <soap:fault name="UnknownConsentTemplateException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidFreeTextException">
+        <soap:fault name="InvalidFreeTextException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deletePolicy">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="deletePolicy">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="deletePolicyResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="ObjectInUseException">
+        <soap:fault name="ObjectInUseException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownPolicyException">
+        <soap:fault name="UnknownPolicyException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deleteSignerIdType">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="deleteSignerIdType">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="deleteSignerIdTypeResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="UnknownSignerIdTypeException">
+        <soap:fault name="UnknownSignerIdTypeException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="ObjectInUseException">
+        <soap:fault name="ObjectInUseException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateConsentTemplate">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="updateConsentTemplate">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="updateConsentTemplateResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidPropertiesException">
+        <soap:fault name="InvalidPropertiesException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="IllegalCompositionException">
+        <soap:fault name="IllegalCompositionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownConsentTemplateException">
+        <soap:fault name="UnknownConsentTemplateException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="ObjectInUseException">
+        <soap:fault name="ObjectInUseException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="RequirementsNotFullfilledException">
+        <soap:fault name="RequirementsNotFullfilledException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidFreeTextException">
+        <soap:fault name="InvalidFreeTextException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="FreeTextConverterStringException">
+        <soap:fault name="FreeTextConverterStringException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="DuplicateEntryException">
+        <soap:fault name="DuplicateEntryException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="isModuleInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="isModuleInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="isModuleInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finaliseModule">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="finaliseModule">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="finaliseModuleResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="RequirementsNotFullfilledException">
+        <soap:fault name="RequirementsNotFullfilledException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="filterModulesInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="filterModulesInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="filterModulesInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="isDomainInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="isDomainInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="isDomainInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="filterPoliciesInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="filterPoliciesInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="filterPoliciesInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownPolicyException">
+        <soap:fault name="UnknownPolicyException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deleteModule">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="deleteModule">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="deleteModuleResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownModuleException">
+        <soap:fault name="UnknownModuleException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="ObjectInUseException">
+        <soap:fault name="ObjectInUseException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="isConsentTemplateInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="isConsentTemplateInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="isConsentTemplateInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownConsentTemplateException">
+        <soap:fault name="UnknownConsentTemplateException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deleteDomain">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="deleteDomain">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="deleteDomainResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="ObjectInUseException">
+        <soap:fault name="ObjectInUseException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="finaliseDomain">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="finaliseDomain">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="finaliseDomainResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="VersionConverterClassException">
+        <soap:fault name="VersionConverterClassException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="filterConsentTemplatesInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="filterConsentTemplatesInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="filterConsentTemplatesInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownConsentTemplateException">
+        <soap:fault name="UnknownConsentTemplateException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="addPolicy">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="addPolicy">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="addPolicyResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="RequirementsNotFullfilledException">
+        <soap:fault name="RequirementsNotFullfilledException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="DuplicateEntryException">
+        <soap:fault name="DuplicateEntryException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="deleteConsentTemplate">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="deleteConsentTemplate">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="deleteConsentTemplateResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownConsentTemplateException">
+        <soap:fault name="UnknownConsentTemplateException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="ObjectInUseException">
+        <soap:fault name="ObjectInUseException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="isPolicyInUse">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="isPolicyInUse">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="isPolicyInUseResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownPolicyException">
+        <soap:fault name="UnknownPolicyException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updatePolicy">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="updatePolicy">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="updatePolicyResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidVersionException">
+        <soap:fault name="InvalidVersionException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="ObjectInUseException">
+        <soap:fault name="ObjectInUseException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownPolicyException">
+        <soap:fault name="UnknownPolicyException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+    <wsdl:operation name="updateSignerIdType">
+      <soap:operation soapAction="" style="document"/>
+      <wsdl:input name="updateSignerIdType">
+        <soap:body use="literal"/>
+      </wsdl:input>
+      <wsdl:output name="updateSignerIdTypeResponse">
+        <soap:body use="literal"/>
+      </wsdl:output>
+      <wsdl:fault name="UnknownSignerIdTypeException">
+        <soap:fault name="UnknownSignerIdTypeException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="InvalidParameterException">
+        <soap:fault name="InvalidParameterException" use="literal"/>
+      </wsdl:fault>
+      <wsdl:fault name="UnknownDomainException">
+        <soap:fault name="UnknownDomainException" use="literal"/>
+      </wsdl:fault>
+    </wsdl:operation>
+  </wsdl:binding>
+  <wsdl:service name="GICSManagementServiceImplService">
+    <wsdl:port binding="tns:GICSManagementServiceImplServiceSoapBinding" name="gicsManagementServicePort">
+      <soap:address location="http://localhost:8082/gics/gicsManagementService"/>
+    </wsdl:port>
+  </wsdl:service>
+</wsdl:definitions>

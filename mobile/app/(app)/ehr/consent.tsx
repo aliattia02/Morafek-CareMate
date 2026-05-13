@@ -2,12 +2,22 @@
  * Consent Screen
  * Location: mobile/app/(app)/ehr/consent.tsx
  *
- * Changes:
- *  • When consent is "granted", shows a "Export Pseudonymised FHIR Bundle"
- *    button that calls GET /api/patient/fhir-export/pseudonymised (dedicated
- *    research-safe endpoint — all PII stripped, only pseudonym in identifier).
- *    The backend builds the Patient resource from an allowlist so no PII can
- *    leak via future additions to build_fhir_patient().
+ * Implements the full consent + pseudonymisation flow:
+ *
+ *  ACCEPT
+ *   • Calls POST /api/consent/accept (gICS → gPAS)
+ *   • Receives pseudonymSuffix (last 4 chars); stored in auth store
+ *   • Displays "Your data identifier: ****XXXX"
+ *
+ *  REVOKE
+ *   • Shows confirmation dialog before proceeding
+ *   • Calls POST /api/consent/revoke (revokes gICS, deletes gPAS, removes MongoDB entry)
+ *   • Clears pseudonymSuffix from store → export button auto-disabled
+ *
+ *  STATUS CHECK (on mount)
+ *   • GET /api/consent/status → ACCEPTED | REJECTED | UNKNOWN
+ *   • ACCEPTED  → shows pseudonym display + Revoke button
+ *   • Otherwise → shows consent form + Accept button
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
@@ -27,11 +37,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   getConsentStatus,
-  grantConsent,
+  acceptConsent,
   revokeConsent,
+  // Legacy — used by the inline pseudonymised export card only
+  getLegacyConsentStatus,
   type ConsentStatus,
 } from '@/services/api/consent';
 import { apiClient } from '@/services/api/client';
+import { useAuthStore } from '@/store/auth.store';
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -45,6 +58,22 @@ function formatDate(iso?: string | null): string {
   }
 }
 
+/** Cross-platform confirmation dialog. */
+const showConfirm = (
+  title: string,
+  message: string,
+  onConfirm: () => void,
+) => {
+  if (Platform.OS === 'web') {
+    if (window.confirm(`${title}\n\n${message}`)) onConfirm();
+  } else {
+    Alert.alert(title, message, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Confirm', style: 'destructive', onPress: onConfirm },
+    ]);
+  }
+};
+
 interface FhirBundle {
   resourceType: string;
   type: string;
@@ -55,23 +84,43 @@ interface FhirBundle {
 // ─── screen ───────────────────────────────────────────────────────────────────
 
 export default function ConsentScreen() {
-  const [status,       setStatus]       = useState<ConsentStatus | null>(null);
-  const [loading,      setLoading]      = useState(true);
-  const [working,      setWorking]      = useState(false);
-  const [message,      setMessage]      = useState<string | null>(null);
-  const [error,        setError]        = useState<string | null>(null);
+  // ── store ──────────────────────────────────────────────────────────────────
+  const { pseudonymSuffix, setPseudonymSuffix } = useAuthStore();
 
-  // pseudonymised export state
+  // ── consent status (from new gICS endpoint) ────────────────────────────────
+  const [consentAccepted, setConsentAccepted] = useState(false);
+  const [loading,         setLoading]         = useState(true);
+  const [working,         setWorking]         = useState(false);
+  const [message,         setMessage]         = useState<string | null>(null);
+  const [error,           setError]           = useState<string | null>(null);
+
+  // ── legacy status (for pseudonym_masked / granted_at display) ──────────────
+  const [legacyStatus, setLegacyStatus] = useState<ConsentStatus | null>(null);
+
+  // ── pseudonymised export (inline card) ────────────────────────────────────
   const [exporting,    setExporting]    = useState(false);
   const [exportBundle, setExportBundle] = useState<FhirBundle | null>(null);
   const [exportError,  setExportError]  = useState<string | null>(null);
 
-  // ── load consent status ──────────────────────────────────────────────────────
+  // ── load consent status on mount ──────────────────────────────────────────
   const loadStatus = useCallback(async () => {
     try {
       setError(null);
-      const data = await getConsentStatus();
-      setStatus(data);
+
+      // New endpoint: ACCEPTED | REJECTED | UNKNOWN
+      const { status } = await getConsentStatus();
+      const accepted = status === 'ACCEPTED';
+      setConsentAccepted(accepted);
+
+      // Also load legacy status for pseudonym_masked / granted_at details
+      if (accepted) {
+        try {
+          const legacy = await getLegacyConsentStatus();
+          setLegacyStatus(legacy);
+        } catch {
+          // Non-fatal — just won't show pseudonym_masked / date
+        }
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to load consent status');
     } finally {
@@ -81,39 +130,48 @@ export default function ConsentScreen() {
 
   useEffect(() => { loadStatus(); }, [loadStatus]);
 
-  // ── grant ────────────────────────────────────────────────────────────────────
-  const handleGrant = async () => {
+  // ── accept ────────────────────────────────────────────────────────────────
+  const handleAccept = async () => {
     try {
       setWorking(true);
       setError(null);
       setMessage(null);
       setExportBundle(null);
-      const result = await grantConsent();
-      setMessage(
-        result.pseudonym_assigned
-          ? 'A pseudonym has been assigned to your data.'
-          : 'Consent recorded — pseudonym will be assigned shortly.',
-      );
-      const refreshed = await getConsentStatus();
-      setStatus(refreshed);
+
+      const result = await acceptConsent();
+
+      // Persist only the safe suffix in the store — never the full pseudonym
+      setPseudonymSuffix(result.pseudonymSuffix);
+      setConsentAccepted(true);
+      setMessage(`✓ Consent accepted.\nYour data identifier: ****${result.pseudonymSuffix}`);
+
+      // Refresh legacy status for the details row
+      try {
+        const legacy = await getLegacyConsentStatus();
+        setLegacyStatus(legacy);
+      } catch { /* non-fatal */ }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to grant consent');
+      setError(err instanceof Error ? err.message : 'Failed to accept consent');
     } finally {
       setWorking(false);
     }
   };
 
-  // ── revoke ───────────────────────────────────────────────────────────────────
-  const handleRevoke = async () => {
+  // ── revoke ────────────────────────────────────────────────────────────────
+  const handleRevokeConfirmed = async () => {
     try {
       setWorking(true);
       setError(null);
       setMessage(null);
       setExportBundle(null);
+
       await revokeConsent();
-      setMessage('Consent revoked.');
-      const refreshed = await getConsentStatus();
-      setStatus(refreshed);
+
+      // Clear suffix from store — export button auto-disables
+      setPseudonymSuffix(null);
+      setConsentAccepted(false);
+      setLegacyStatus(null);
+      setMessage('Consent revoked. Your pseudonym has been deleted.');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to revoke consent');
     } finally {
@@ -121,14 +179,20 @@ export default function ConsentScreen() {
     }
   };
 
-  // ── pseudonymised export ─────────────────────────────────────────────────────
+  const handleRevoke = () => {
+    showConfirm(
+      'Revoke Consent',
+      'This will remove your pseudonym and disable pseudonymized data export. Continue?',
+      handleRevokeConfirmed,
+    );
+  };
+
+  // ── pseudonymised export ──────────────────────────────────────────────────
   const handleExport = useCallback(async () => {
     try {
       setExporting(true);
       setExportError(null);
       setExportBundle(null);
-      // /api/patient/fhir-export already rewrites Patient/<mongo_id> →
-      // Patient/<pseudonym> when a gPAS pseudonym is stored for this patient.
       const res = await apiClient.get<FhirBundle>('/api/patient/fhir-export/pseudonymised');
       setExportBundle(res.data);
     } catch (err: unknown) {
@@ -150,11 +214,7 @@ export default function ConsentScreen() {
     }
   }, [exportBundle]);
 
-  // ── derived state ────────────────────────────────────────────────────────────
-  const currentStatus = status?.status ?? 'none';
-  const isGranted     = currentStatus === 'granted';
-
-  // Count resources in exported bundle for the summary line
+  // ── derived ───────────────────────────────────────────────────────────────
   const exportEntries  = exportBundle?.entry ?? [];
   const resourceCounts = exportEntries.reduce<Record<string, number>>((acc, e) => {
     const rt = e.resource?.resourceType ?? 'Unknown';
@@ -162,7 +222,7 @@ export default function ConsentScreen() {
     return acc;
   }, {});
 
-  // ─────────────────────────────────────────────────────────────────────────────
+  // ── render ────────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
@@ -187,26 +247,40 @@ export default function ConsentScreen() {
 
           {/* ── consent status card ── */}
           <View style={styles.card}>
-            <View style={[styles.badge, isGranted ? styles.badgeSuccess : styles.badgeInactive]}>
-              <Text style={[styles.badgeText, isGranted ? styles.badgeTextSuccess : styles.badgeTextInactive]}>
-                {isGranted ? 'Data sharing active' : 'Data sharing inactive'}
+            <View style={[styles.badge, consentAccepted ? styles.badgeSuccess : styles.badgeInactive]}>
+              <Text style={[styles.badgeText, consentAccepted ? styles.badgeTextSuccess : styles.badgeTextInactive]}>
+                {consentAccepted ? 'Data sharing active' : 'Data sharing inactive'}
               </Text>
             </View>
 
-            {isGranted && (
+            {consentAccepted && (
               <View style={styles.details}>
-                <View style={styles.row}>
-                  <Text style={styles.rowLabel}>Pseudonym</Text>
-                  <Text style={styles.rowValue}>{status?.pseudonym_masked ?? '—'}</Text>
-                </View>
-                <View style={styles.row}>
-                  <Text style={styles.rowLabel}>Granted on</Text>
-                  <Text style={styles.rowValue}>{formatDate(status?.granted_at)}</Text>
-                </View>
+                {/* Show masked pseudonym from legacy endpoint if available */}
+                {legacyStatus?.pseudonym_masked && (
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>Pseudonym</Text>
+                    <Text style={styles.rowValue}>{legacyStatus.pseudonym_masked}</Text>
+                  </View>
+                )}
+                {/* Show suffix from store as fallback / confirmation */}
+                {pseudonymSuffix && (
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>Identifier</Text>
+                    <Text style={[styles.rowValue, styles.identifierText]}>
+                      ****{pseudonymSuffix}
+                    </Text>
+                  </View>
+                )}
+                {legacyStatus?.granted_at && (
+                  <View style={styles.row}>
+                    <Text style={styles.rowLabel}>Granted on</Text>
+                    <Text style={styles.rowValue}>{formatDate(legacyStatus.granted_at)}</Text>
+                  </View>
+                )}
               </View>
             )}
 
-            {isGranted ? (
+            {consentAccepted ? (
               <TouchableOpacity
                 style={[styles.button, styles.revokeButton, working && styles.buttonDisabled]}
                 onPress={handleRevoke}
@@ -219,7 +293,7 @@ export default function ConsentScreen() {
             ) : (
               <TouchableOpacity
                 style={[styles.button, styles.grantButton, working && styles.buttonDisabled]}
-                onPress={handleGrant}
+                onPress={handleAccept}
                 disabled={working}
               >
                 {working
@@ -229,8 +303,8 @@ export default function ConsentScreen() {
             )}
           </View>
 
-          {/* ── pseudonymised FHIR export (only when consent granted) ── */}
-          {isGranted && (
+          {/* ── pseudonymised FHIR export (only when consent accepted) ── */}
+          {consentAccepted && (
             <View style={styles.exportCard}>
               <View style={styles.exportHeader}>
                 <Text style={styles.exportIcon}>🔐</Text>
@@ -240,6 +314,11 @@ export default function ConsentScreen() {
                     Your full health record with all identifiers replaced by your
                     research pseudonym. Safe to share with research partners.
                   </Text>
+                  {pseudonymSuffix && (
+                    <Text style={styles.exportIdentifierHint}>
+                      Export will use identifier: ****{pseudonymSuffix}
+                    </Text>
+                  )}
                 </View>
               </View>
 
@@ -250,7 +329,7 @@ export default function ConsentScreen() {
                 </View>
               )}
 
-              {/* bundle summary after export */}
+              {/* bundle summary */}
               {exportBundle && (
                 <View style={styles.summaryBox}>
                   <Text style={styles.summaryTitle}>
@@ -381,6 +460,11 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     flex: 1,
   },
+  identifierText: {
+    fontFamily: 'Courier New',
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
 
   // ── shared button base ──
   button: {
@@ -423,6 +507,13 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.text.secondary,
     lineHeight: 18,
+  },
+  exportIdentifierHint: {
+    ...typography.caption,
+    color: colors.primary,
+    fontWeight: '600',
+    marginTop: 6,
+    fontFamily: 'Courier New',
   },
 
   exportButton: { backgroundColor: colors.primary },

@@ -11,6 +11,7 @@
  * - Authentication state checking
  * - Error handling and clearing
  * - Platform-agnostic storage (web/native)
+ * - Pseudonym suffix persistence for consent/export gating
  */
 
 import { create } from 'zustand';
@@ -67,11 +68,26 @@ interface AuthState {
   isLoading: boolean;
   error: string | null;
   sharedConstants: Record<string, any> | null;
+
+  /**
+   * Last 4 characters of the patient's gPAS pseudonym.
+   * null  → consent not yet accepted (or revoked)
+   * string → consent accepted; safe to display in UI as "****XXXX"
+   * SECURITY: The full pseudonym is NEVER stored here — only the suffix.
+   */
+  pseudonymSuffix: string | null;
+
   login: (credentials: LoginCredentials) => Promise<void>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
   clearError: () => void;
   updateProfilePicture: (url: string) => void;
+  /**
+   * Persist or clear the pseudonym suffix.
+   * Call with the suffix returned by POST /api/consent/accept on grant,
+   * or with null on revoke.
+   */
+  setPseudonymSuffix: (suffix: string | null) => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
@@ -81,6 +97,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
   error: null,
   sharedConstants: null,
+  pseudonymSuffix: null,
 
   login: async (credentials: LoginCredentials) => {
     set({ isLoading: true, error: null });
@@ -116,12 +133,13 @@ export const useAuthStore = create<AuthState>((set) => ({
     } catch (error) {
       console.error('Logout error:', error);
     }
-    // Set all state at once, keeping isLoading: false
+    // Clear all state at once, including pseudonym suffix
     set({
       user: null,
       token: null,
       isAuthenticated: false,
       isLoading: false,
+      pseudonymSuffix: null,
     });
   },
 
@@ -158,6 +176,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           token: null,
           isAuthenticated: false,
           isLoading: false,
+          pseudonymSuffix: null,
         });
       }
     } catch (error) {
@@ -175,6 +194,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     set((state) => ({
       user: state.user ? { ...state.user, profile_picture_url: url } : state.user,
     })),
+
+  setPseudonymSuffix: (suffix: string | null) => set({ pseudonymSuffix: suffix }),
 }));
 
 export default useAuthStore;

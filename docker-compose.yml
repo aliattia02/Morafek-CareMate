@@ -101,14 +101,22 @@ services:
       retries: 10
       start_period: 90s
 
+  # FIX 2: Reordered ALTER steps so PRIMARY KEY is dropped BEFORE the column
+  # is widened. Previously the MODIFY ran while the PK still referenced the
+  # column, causing ERROR 1071 (key too long) and ERROR 1089 (bad prefix key).
+  #
+  # Changes vs original:
+  #   • DROP PRIMARY KEY is now the FIRST mpsn operation, not the second.
+  #   • MODIFY COLUMN and ROW_FORMAT=DYNAMIC are combined in one ALTER so the
+  #     table is converted to the dynamic row format atomically with the widen.
+  #   • PK prefix on PSEUDONYM reduced from (500) to (191):
+  #       domain(191) × 4 bytes  = 764 bytes
+  #       PSEUDONYM(191) × 4 bytes = 764 bytes
+  #       total = 1528 bytes — safely under the 3072-byte MariaDB limit.
   gpas-schema-fix:
     image: mariadb:10.11
     container_name: gpas-schema-fix
-    # restart: on-failure retries if polling times out before gPAS creates its
-    # tables (e.g. slow first boot).  There is no max_attempts here because
-    # deploy.restart_policy is Swarm-only and is silently ignored in Compose;
-    # the plain restart: on-failure is what actually governs retries.
-    restart: on-failure
+    restart: "no"
     depends_on:
       mysql:
         condition: service_healthy
@@ -120,14 +128,28 @@ services:
         done &&
         echo 'Table found — waiting 10s for gPAS DDL phase to finish before ALTER...' &&
         sleep 10 &&
-        echo 'Widening gPAS columns...' &&
+        echo 'Widening gPAS columns (domain, psn tables)...' &&
         mariadb -h mysql -uroot -pgpas_root gpas -e \"
           ALTER TABLE domain MODIFY COLUMN properties             MEDIUMTEXT;
           ALTER TABLE domain MODIFY COLUMN COMMENT               MEDIUMTEXT;
           ALTER TABLE domain MODIFY COLUMN expiration_properties MEDIUMTEXT;
           ALTER TABLE domain MODIFY COLUMN LABEL                 VARCHAR(768);
           ALTER TABLE psn    MODIFY COLUMN PSEUDONYM             VARCHAR(500);
-          ALTER TABLE mpsn   MODIFY COLUMN PSEUDONYM             VARCHAR(500);
+        \" &&
+        echo 'Dropping mpsn PRIMARY KEY before widening column...' &&
+        mariadb -h mysql -uroot -pgpas_root gpas -e \"
+          ALTER TABLE mpsn DROP PRIMARY KEY;
+        \" 2>/dev/null || true &&
+        echo 'Widening mpsn PSEUDONYM column and setting ROW_FORMAT=DYNAMIC...' &&
+        mariadb -h mysql -uroot -pgpas_root gpas -e \"
+          ALTER TABLE mpsn
+            MODIFY COLUMN PSEUDONYM VARCHAR(500)
+              CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci,
+            ROW_FORMAT=DYNAMIC;
+        \" &&
+        echo 'Recreating mpsn PRIMARY KEY with safe prefix lengths...' &&
+        mariadb -h mysql -uroot -pgpas_root gpas -e \"
+          ALTER TABLE mpsn ADD PRIMARY KEY (domain(191), PSEUDONYM(191));
         \" &&
         echo 'Schema widened. gPAS will use correct column widths on next write.'
       "
@@ -155,10 +177,30 @@ services:
       retries: 10
       start_period: 90s
 
+  # FIX 3: Pre-create the `alias` table with ROW_FORMAT=DYNAMIC and shorter
+  # column types before gICS boots. EclipseLink's auto-generated DDL declares
+  # all seven PK columns as VARCHAR(255) / VARCHAR(100), which pushes the
+  # composite primary key well past MariaDB's 3072-byte limit (ERROR 1071).
+  # By pre-creating the table here, EclipseLink finds it already exists and
+  # skips its own CREATE TABLE, avoiding the broken DDL entirely.
+  #
+  # Column widths chosen so the composite PK stays under 3072 bytes:
+  #   2× VARCHAR(50)  × 4 = 400 bytes  (SIT_NAME fields)
+  #   2× VARCHAR(50)  × 4 = 400 bytes  (DOMAIN_NAME fields)
+  #   2× VARCHAR(100) × 4 = 800 bytes  (SI_VALUE fields, prefixed to 100)
+  #   DATETIME             = 8 bytes
+  #   total ≈ 1608 bytes — safely under 3072.
+  #
+  # FIX 5 (session 2): gICS 2025.2.2 added new columns (COMMENT_EXTERN,
+  # COMMENT_INTERN, UPDATE_TIMESTAMP, and several qc_problem fields) that
+  # EclipseLink's auto-DDL never created because the tables already existed
+  # from FIX 3's pre-creation. All missing columns are added explicitly below.
+  # Affected tables: consent, signed_policy, consent_template, module, policy,
+  # qc_problem, qc_problem_hist.
   gics-schema-fix:
     image: mariadb:10.11
     container_name: gics-schema-fix
-    restart: on-failure
+    restart: "no"
     depends_on:
       mysql:
         condition: service_healthy
@@ -168,14 +210,139 @@ services:
         until mariadb -h mysql -uroot -pgpas_root gics -e 'DESCRIBE consent' 2>/dev/null; do
           echo '  not yet, retrying in 5s...' && sleep 5;
         done &&
-        echo 'Table found — waiting 10s for gICS DDL phase to finish before ALTER...' &&
         sleep 10 &&
+        echo 'Pre-creating alias table with ROW_FORMAT=DYNAMIC to prevent EclipseLink ERROR 1071...' &&
+        mariadb -h mysql -uroot -pgpas_root gics -e \"
+          CREATE TABLE IF NOT EXISTS alias (
+            DEACTIVATE_TIMESTAMP  DATETIME,
+            ALIAS_SIT_NAME        VARCHAR(50)  NOT NULL,
+            ORIG_SIT_DOMAIN_NAME  VARCHAR(50)  NOT NULL,
+            ORIG_SI_VALUE         VARCHAR(100) NOT NULL,
+            ALIAS_SI_VALUE        VARCHAR(100) NOT NULL,
+            ORIG_SIT_NAME         VARCHAR(50)  NOT NULL,
+            ALIAS_SIT_DOMAIN_NAME VARCHAR(50)  NOT NULL,
+            CREATE_TIMESTAMP      DATETIME     NOT NULL,
+            PRIMARY KEY (
+              ALIAS_SIT_NAME,
+              ORIG_SIT_DOMAIN_NAME,
+              ORIG_SI_VALUE,
+              ALIAS_SI_VALUE,
+              ORIG_SIT_NAME,
+              ALIAS_SIT_DOMAIN_NAME,
+              CREATE_TIMESTAMP
+            )
+          ) ROW_FORMAT=DYNAMIC;
+        \" &&
+        echo 'Pre-creating qc_problem tables with full gICS 2025.2.2 column set (FIX 5)...' &&
+        mariadb -h mysql -uroot -pgpas_root gics -e \"
+          CREATE TABLE IF NOT EXISTS qc_problem (
+            id                 BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            consent_key        VARCHAR(191) NOT NULL,
+            type               VARCHAR(191),
+            comment            MEDIUMTEXT,
+            solution           MEDIUMTEXT,
+            status             VARCHAR(50),
+            create_date        DATETIME,
+            update_date        DATETIME,
+            COMMENT_EXTERN     MEDIUMTEXT,
+            COMMENT_INTERN     MEDIUMTEXT,
+            FHIR_ID            VARCHAR(41),
+            FORM_VALUE         MEDIUMTEXT,
+            SCAN_VALUE         MEDIUMTEXT,
+            CREATE_TIMESTAMP   DATETIME,
+            UPDATE_TIMESTAMP   DATETIME,
+            REF                VARCHAR(255),
+            CONSENT_DATE       DATETIME,
+            VIRTUAL_PERSON_ID  BIGINT,
+            CT_VERSION         INT,
+            CT_NAME            VARCHAR(100),
+            CT_DOMAIN_NAME     VARCHAR(50)
+          ) ROW_FORMAT=DYNAMIC;
+          CREATE TABLE IF NOT EXISTS qc_problem_hist (
+            id                 BIGINT       NOT NULL AUTO_INCREMENT PRIMARY KEY,
+            qc_problem_id      BIGINT,
+            consent_key        VARCHAR(191),
+            type               VARCHAR(191),
+            comment            MEDIUMTEXT,
+            solution           MEDIUMTEXT,
+            status             VARCHAR(50),
+            hist_date          DATETIME,
+            create_date        DATETIME,
+            COMMENT_EXTERN     MEDIUMTEXT,
+            COMMENT_INTERN     MEDIUMTEXT,
+            FHIR_ID            VARCHAR(41),
+            FORM_VALUE         MEDIUMTEXT,
+            SCAN_VALUE         MEDIUMTEXT,
+            CREATE_TIMESTAMP   DATETIME,
+            UPDATE_TIMESTAMP   DATETIME,
+            REF                VARCHAR(255),
+            CONSENT_DATE       DATETIME,
+            VIRTUAL_PERSON_ID  BIGINT,
+            CT_VERSION         INT,
+            CT_NAME            VARCHAR(100),
+            CT_DOMAIN_NAME     VARCHAR(50)
+          ) ROW_FORMAT=DYNAMIC;
+        \" &&
+        echo 'Waiting for gICS to finish creating all tables (FIX 4)...' &&
+        until mariadb -h mysql -uroot -pgpas_root gics -e 'DESCRIBE signed_policy' 2>/dev/null; do
+          echo '  signed_policy not yet, retrying in 5s...' && sleep 5;
+        done &&
+        sleep 5 &&
         echo 'Widening gICS columns...' &&
         mariadb -h mysql -uroot -pgpas_root gics -e \"
-          ALTER TABLE consent     MODIFY COLUMN comment   MEDIUMTEXT;
-          ALTER TABLE policy      MODIFY COLUMN comment   MEDIUMTEXT;
-          ALTER TABLE qc_problem  MODIFY COLUMN comment   MEDIUMTEXT;
-          ALTER TABLE qc_problem  MODIFY COLUMN solution  MEDIUMTEXT;
+          ALTER TABLE consent     MODIFY COLUMN comment  MEDIUMTEXT;
+          ALTER TABLE policy      MODIFY COLUMN comment  MEDIUMTEXT;
+          ALTER TABLE qc_problem  MODIFY COLUMN comment  MEDIUMTEXT;
+          ALTER TABLE qc_problem  MODIFY COLUMN solution MEDIUMTEXT;
+        \" 2>/dev/null || true &&
+        echo 'Adding CREATE_TIMESTAMP to all gICS 2025.2.2 tables (FIX 4)...' &&
+        mariadb -h mysql -uroot -pgpas_root gics -e \"
+          ALTER TABLE consent          ADD COLUMN IF NOT EXISTS CREATE_TIMESTAMP DATETIME DEFAULT NULL;
+          ALTER TABLE signed_policy    ADD COLUMN IF NOT EXISTS CREATE_TIMESTAMP DATETIME DEFAULT NULL;
+          ALTER TABLE free_text_val    ADD COLUMN IF NOT EXISTS CREATE_TIMESTAMP DATETIME DEFAULT NULL;
+          ALTER TABLE consent_scan     ADD COLUMN IF NOT EXISTS CREATE_TIMESTAMP DATETIME DEFAULT NULL;
+          ALTER TABLE signer_id        ADD COLUMN IF NOT EXISTS CREATE_TIMESTAMP DATETIME DEFAULT NULL;
+          ALTER TABLE module           ADD COLUMN IF NOT EXISTS CREATE_TIMESTAMP DATETIME DEFAULT NULL;
+          ALTER TABLE consent_template ADD COLUMN IF NOT EXISTS CREATE_TIMESTAMP DATETIME DEFAULT NULL;
+        \" 2>/dev/null || true &&
+        echo 'Adding COMMENT_EXTERN/INTERN and UPDATE_TIMESTAMP columns (FIX 5)...' &&
+        mariadb -h mysql -uroot -pgpas_root gics -e \"
+          ALTER TABLE consent          ADD COLUMN IF NOT EXISTS COMMENT_EXTERN   MEDIUMTEXT DEFAULT NULL;
+          ALTER TABLE consent          ADD COLUMN IF NOT EXISTS COMMENT_INTERN   MEDIUMTEXT DEFAULT NULL;
+          ALTER TABLE consent          ADD COLUMN IF NOT EXISTS UPDATE_TIMESTAMP DATETIME   DEFAULT NULL;
+          ALTER TABLE signed_policy    ADD COLUMN IF NOT EXISTS COMMENT_EXTERN   MEDIUMTEXT DEFAULT NULL;
+          ALTER TABLE consent_template ADD COLUMN IF NOT EXISTS COMMENT_EXTERN   MEDIUMTEXT DEFAULT NULL;
+          ALTER TABLE module           ADD COLUMN IF NOT EXISTS COMMENT_EXTERN   MEDIUMTEXT DEFAULT NULL;
+          ALTER TABLE policy           ADD COLUMN IF NOT EXISTS COMMENT_EXTERN   MEDIUMTEXT DEFAULT NULL;
+        \" 2>/dev/null || true &&
+        echo 'Adding missing qc_problem columns for existing installs (FIX 5)...' &&
+        mariadb -h mysql -uroot -pgpas_root gics -e \"
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS COMMENT_EXTERN    MEDIUMTEXT   DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS COMMENT_INTERN    MEDIUMTEXT   DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS FHIR_ID           VARCHAR(41)  DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS FORM_VALUE        MEDIUMTEXT   DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS SCAN_VALUE        MEDIUMTEXT   DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS CREATE_TIMESTAMP  DATETIME     DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS UPDATE_TIMESTAMP  DATETIME     DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS REF               VARCHAR(255) DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS CONSENT_DATE      DATETIME     DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS VIRTUAL_PERSON_ID BIGINT       DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS CT_VERSION        INT          DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS CT_NAME           VARCHAR(100) DEFAULT NULL;
+          ALTER TABLE qc_problem      ADD COLUMN IF NOT EXISTS CT_DOMAIN_NAME    VARCHAR(50)  DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS COMMENT_EXTERN    MEDIUMTEXT   DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS COMMENT_INTERN    MEDIUMTEXT   DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS FHIR_ID           VARCHAR(41)  DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS FORM_VALUE        MEDIUMTEXT   DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS SCAN_VALUE        MEDIUMTEXT   DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS CREATE_TIMESTAMP  DATETIME     DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS UPDATE_TIMESTAMP  DATETIME     DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS REF               VARCHAR(255) DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS CONSENT_DATE      DATETIME     DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS VIRTUAL_PERSON_ID BIGINT       DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS CT_VERSION        INT          DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS CT_NAME           VARCHAR(100) DEFAULT NULL;
+          ALTER TABLE qc_problem_hist ADD COLUMN IF NOT EXISTS CT_DOMAIN_NAME    VARCHAR(50)  DEFAULT NULL;
         \" 2>/dev/null || true &&
         echo 'gICS schema fix done.'
       "
