@@ -17,6 +17,7 @@
  *  STATUS CHECK (on mount)
  *   • GET /api/consent/status → ACCEPTED | REJECTED | UNKNOWN
  *   • ACCEPTED  → shows pseudonym display + Revoke button
+ *   • UNKNOWN   → falls back to GET /api/patient/consent (MongoDB) before deciding
  *   • Otherwise → shows consent form + Accept button
  */
 
@@ -107,13 +108,33 @@ export default function ConsentScreen() {
     try {
       setError(null);
 
-      // New endpoint: ACCEPTED | REJECTED | UNKNOWN
+      // Primary: query gICS live → ACCEPTED | REJECTED | UNKNOWN
       const { status } = await getConsentStatus();
-      const accepted = status === 'ACCEPTED';
+      let accepted = status === 'ACCEPTED';
+
+      // ── MongoDB fallback ─────────────────────────────────────────────────
+      // When gICS returns UNKNOWN (unreachable, or template mismatch in local
+      // dev), fall back to GET /api/patient/consent which reads MongoDB
+      // directly. MongoDB is the source of truth for the grant flow.
+      // We deliberately skip the fallback for REJECTED so an explicit
+      // revocation is always respected even when gICS is unreachable.
+      if (!accepted && status !== 'REJECTED') {
+        try {
+          const legacy = await getLegacyConsentStatus();
+          if (legacy.status === 'granted') {
+            accepted = true;
+            setLegacyStatus(legacy); // already fetched — store for display
+          }
+        } catch {
+          // Non-fatal: gICS already told us UNKNOWN; keep accepted = false
+        }
+      }
+
       setConsentAccepted(accepted);
 
-      // Also load legacy status for pseudonym_masked / granted_at details
-      if (accepted) {
+      // Load display details (pseudonym_masked / granted_at) when accepted
+      // but only if the fallback path above hasn't already populated them.
+      if (accepted && !legacyStatus) {
         try {
           const legacy = await getLegacyConsentStatus();
           setLegacyStatus(legacy);
@@ -126,7 +147,7 @@ export default function ConsentScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, []); // legacyStatus intentionally excluded — snapshot at mount only
 
   useEffect(() => { loadStatus(); }, [loadStatus]);
 

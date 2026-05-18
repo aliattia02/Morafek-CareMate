@@ -60,6 +60,9 @@ export type SettingsStackParamList = {
   constants: undefined;
   medications: undefined;
   export: undefined;
+  doctors: undefined;
+  clinics: undefined;
+  'health-connect': undefined;  // Android Health Connect wearable sync
 };
 
 /**

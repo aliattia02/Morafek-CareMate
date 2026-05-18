@@ -13,6 +13,7 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  TextInput,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -209,18 +210,20 @@ export default function LoginScreen() {
             <View style={styles.fieldWrapper}>
               <Text style={styles.fieldLabel}>UserName</Text>
               <View style={[styles.inputBox, validationErrors.username ? styles.inputBoxError : null]}>
-                <input
-                  style={webInputStyle}
+                <TextInput
+                  style={styles.textInput}
                   value={username}
-                  onChange={(e) => {
-                    setUsername(e.target.value);
+                  onChangeText={(v) => {
+                    setUsername(v);
                     setValidationErrors((p) => ({ ...p, username: '' }));
                   }}
                   placeholder="Enter your username"
+                  placeholderTextColor="#999"
                   autoCapitalize="none"
-                  autoCorrect="off"
-                  disabled={busy}
-                  onKeyDown={(e) => e.key === 'Enter' && passwordRef.current?.focus()}
+                  autoCorrect={false}
+                  editable={!busy}
+                  returnKeyType="next"
+                  onSubmitEditing={() => passwordRef.current?.focus()}
                 />
               </View>
               {validationErrors.username ? (
@@ -232,18 +235,20 @@ export default function LoginScreen() {
             <View style={styles.fieldWrapper}>
               <Text style={styles.fieldLabel}>Password</Text>
               <View style={[styles.inputBox, validationErrors.password ? styles.inputBoxError : null, styles.inputBoxRow]}>
-                <input
+                <TextInput
                   ref={passwordRef}
-                  style={{ ...webInputStyle, flex: 1 }}
+                  style={[styles.textInput, { flex: 1 }]}
                   value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
+                  onChangeText={(v) => {
+                    setPassword(v);
                     setValidationErrors((p) => ({ ...p, password: '' }));
                   }}
                   placeholder="Enter your password"
-                  type={showPassword ? 'text' : 'password'}
-                  disabled={busy}
-                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                  placeholderTextColor="#999"
+                  secureTextEntry={!showPassword}
+                  editable={!busy}
+                  returnKeyType="done"
+                  onSubmitEditing={handleLogin}
                 />
                 <TouchableOpacity onPress={() => setShowPassword(!showPassword)} style={styles.showBtn}>
                   <Text style={styles.showPasswordText}>{showPassword ? 'Hide' : 'Show'}</Text>
@@ -391,21 +396,7 @@ const testCredStyles = StyleSheet.create({
   },
 });
 
-// ─── Web-native input style (plain JS object, not StyleSheet) ─────────────────
-// Using a raw <input> guarantees full-width on web regardless of how the
-// custom Input wrapper component handles its internal layout.
-const webInputStyle: React.CSSProperties = {
-  width: '100%',
-  height: 52,
-  border: 'none',
-  outline: 'none',
-  background: 'transparent',
-  fontSize: 16,
-  color: '#1a1a1a',
-  fontFamily: 'inherit',
-  padding: '0 12px',
-  boxSizing: 'border-box',
-};
+
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
@@ -560,6 +551,13 @@ const styles = StyleSheet.create({
   inputBoxRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  textInput: {
+    flex: 1,
+    height: 52,
+    fontSize: 16,
+    color: '#1a1a1a',
+    paddingHorizontal: 12,
   },
   showBtn: {
     paddingHorizontal: 12,

@@ -43,3 +43,23 @@ export type {
   RootStackParamList,
   ScreenProps
 } from './navigation';
+
+// Health Connect types
+export type {
+  HCSdkStatus,
+  HCPermissionRequest,
+  HCRecordType,
+  HCDataTypeConfig,
+  HCHeartRateSample,
+  HCHeartRateRecord,
+  HCStepsRecord,
+  HCRecordMetadata,
+  HCFHIRObservation,
+  HCSyncRequest,
+  HCSyncResponse,
+  HCStatusResponse,
+  HCRecordCounts,
+  UseHealthConnectReturn,
+} from './health-connect.types';
+
+export { timeAgo, formatDate } from './health-connect.types';

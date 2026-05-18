@@ -1,3 +1,5 @@
+import 'react-native-get-random-values'; // must be first import — required for UUID in health-connect-mapper
+
 /**
  * Root App Layout
  * Location: mobile/app/_layout.tsx

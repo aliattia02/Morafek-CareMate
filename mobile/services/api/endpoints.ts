@@ -11,7 +11,7 @@
  * - Helper function for optional /api/v1/ prefix
  * - All endpoint groups: AUTH, PATIENT, CALCULATIONS, ACTIVITIES,
  *   MEALS, BLOOD_SUGAR, INSULIN, MOB, MEDICATION, FOOD, DOCTORS, DOCTOR, EXPORT,
- *   LIBRE (LibreLinkUp CGM integration)
+ *   LIBRE (LibreLinkUp CGM integration), HEALTH_CONNECT (Android wearable sync)
  *
  * ⚠️  CRITICAL: Auth routes are at ROOT level (/login, /register) — NO /api prefix.
  *     All other routes use the /api prefix (/api/meals, /api/blood-sugar, etc.)
@@ -28,6 +28,7 @@
  *   CALCULATIONS.CUMULATIVE_EFFECTS  → cumulative_effects_routes.py /api/cumulative-effects
  *   LIBRE.*             → libre_routes.py
  *   EHR.ICD10_SUGGEST   → ehr_routes.py  /api/ehr/icd10-suggest  (POST, doctors only)
+ *   HEALTH_CONNECT.*    → health_connect_routes.py  /api/healthconnect/*
  *
  * MEDICATIONS route notes (blueprint registered under /api/medications):
  *   DOCTOR_CREATE       → POST   /api/medications/patient/           patient_id in body
@@ -144,6 +145,18 @@ const API = {
     ADHERENCE: v('/api/medications/adherence'),
     HISTORY:   v('/api/medications/history'),
   },
+
+  // ── Health Connect (Android wearable FHIR sync) ───────────────────────────
+  // No OAuth — permissions are granted at the Android OS level.
+  // Backend: backend/routes/health_connect_routes.py
+  HEALTH_CONNECT: {
+    /** POST  { observations: HCFHIRObservation[] } → HCSyncResponse */
+    SYNC:   '/api/healthconnect/sync',
+    /** GET   → HCStatusResponse (last_sync, counts, has_data) */
+    STATUS: '/api/healthconnect/status',
+    /** DELETE → { message, deleted_count }  GDPR/DSGVO selective erasure */
+    DATA:   '/api/healthconnect/data',
+  },
 } as const;
 
 // Named export for direct usage
@@ -167,4 +180,7 @@ export const logEndpoints = () => {
   console.log('MEDICATIONS.DOCTOR_CREATE:', API.MEDICATIONS.DOCTOR_CREATE);
   console.log('MEDICATIONS.DOCTOR_PATIENT(id):', API.MEDICATIONS.DOCTOR_PATIENT('example-id'));
   console.log('MEDICATIONS.INTAKE:', API.MEDICATIONS.INTAKE);
+  console.log('HEALTH_CONNECT.SYNC:', API.HEALTH_CONNECT.SYNC);
+  console.log('HEALTH_CONNECT.STATUS:', API.HEALTH_CONNECT.STATUS);
+  console.log('HEALTH_CONNECT.DATA:', API.HEALTH_CONNECT.DATA);
 };

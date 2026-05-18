@@ -68,6 +68,11 @@ def create_app():
         from routes.clinic_routes     import clinic_routes
         from routes.consent_routes    import consent_routes
 
+        # ── Health Connect wearable integration ───────────────────────────
+        # Receives FHIR Observations from Android Health Connect on-device SDK.
+        # No OAuth — permissions are OS-level. Stores into ehr_vitals.
+        from routes.health_connect_routes import health_connect_bp
+
         # ── German FHIR additions ─────────────────────────────────────────
         # metadata_bp → GET /metadata  (FHIR CapabilityStatement, no auth)
         # FHIR Patient endpoints (read + search + fhir-identifiers) are now
@@ -75,16 +80,17 @@ def create_app():
         from routes.metadata_route import metadata_bp
 
         blueprints = [
-            (auth_routes,       ''),
-            (doctor_routes,     ''),
-            (patient_routes,    ''),   # includes /fhir/Patient/* and /api/patient/fhir-identifiers
-            (ehr_routes,        ''),
-            (medication_routes, '/api/medications'),
-            (upload_routes,     ''),
-            (monitoring_routes, ''),
-            (clinic_routes,     ''),
-            (consent_routes,    ''),
-            (metadata_bp,       ''),   # /metadata — must be unauthenticated
+            (auth_routes,        ''),
+            (doctor_routes,      ''),
+            (patient_routes,     ''),   # includes /fhir/Patient/* and /api/patient/fhir-identifiers
+            (ehr_routes,         ''),
+            (medication_routes,  '/api/medications'),
+            (upload_routes,      ''),
+            (monitoring_routes,  ''),
+            (clinic_routes,      ''),
+            (consent_routes,     ''),
+            (health_connect_bp,  ''),   # /api/healthconnect/* — wearable FHIR sync
+            (metadata_bp,        ''),   # /metadata — must be unauthenticated
         ]
 
         for blueprint, url_prefix in blueprints:
@@ -107,11 +113,12 @@ def create_app():
 
 def _ensure_mongo_indexes(logger):
     """
-    Create MongoDB indexes required by the German FHIR layer.
+    Create MongoDB indexes required by the German FHIR layer and
+    Health Connect integration.
     All calls are idempotent — safe to run on every restart.
     """
     try:
-        from pymongo import ASCENDING
+        from pymongo import ASCENDING, DESCENDING
 
         mongo.db.patient_fhir_identifiers.create_index(
             [("patient_id", ASCENDING)],
@@ -141,11 +148,31 @@ def _ensure_mongo_indexes(logger):
                 name=f"idx_{coll_name}_patient_id",
             )
 
+        # ── Health Connect: compound index for fast status queries ────────────
+        # Supports GET /api/healthconnect/status aggregation and
+        # DELETE /api/healthconnect/data without a full collection scan.
+        # Also used in the FHIR export bundle query (no filter change needed
+        # there — ehr_vitals already queries by patient_id only).
+        mongo.db.ehr_vitals.create_index(
+            [("patient_id", ASCENDING), ("source", ASCENDING), ("synced_at", DESCENDING)],
+            name="idx_ehr_vitals_hc_patient_source_synced",
+            background=True,
+        )
+        # Secondary index for upsert deduplication in POST /api/healthconnect/sync
+        # The upsert is keyed on `id` (client-generated UUID). This index turns
+        # the bulk_write $setOnInsert upsert lookup from O(n_docs) to O(log n).
+        mongo.db.ehr_vitals.create_index(
+            [("id", ASCENDING)],
+            name="idx_ehr_vitals_fhir_id",
+            sparse=True,
+            background=True,
+        )
+
         # Medication module indexes
         from routes.medication_routes import ensure_medication_indexes
         ensure_medication_indexes()
 
-        logger.info("MongoDB indexes ensured for German FHIR layer")
+        logger.info("MongoDB indexes ensured for German FHIR layer + Health Connect")
 
     except Exception as exc:
         logger.warning(f"Could not ensure MongoDB indexes: {exc}")

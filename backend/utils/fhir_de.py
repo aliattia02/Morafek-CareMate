@@ -1189,3 +1189,57 @@ def validate_medication_bundle_entries(entries: list) -> dict:
                 add_error(resource, "effectiveDateTime", "must be valid ISO 8601 datetime string")
 
     return {"valid": len(errors) == 0, "errors": errors, "counts": counts}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Health Connect additions — append to the end of backend/utils/fhir_de.py
+# ══════════════════════════════════════════════════════════════════════════════
+#
+# These constants and helpers extend fhir_de.py for the Health Connect
+# wearable integration. They do NOT modify any existing functions.
+#
+# Keep LOINC codes below in sync with:
+#   utils/fhir_health_connect.py  →  ALLOWED_HC_LOINC_CODES
+#   utils/fhir/health-connect-mapper.ts  →  HC_DATA_TYPES (mobile)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# ── Health Connect LOINC codes ────────────────────────────────────────────────
+# The existing codebase already defines:
+#   LOINC_BP     = "55284-4"   (Blood pressure panel)
+#   LOINC_HR     = "8867-4"    (Heart rate)
+#   LOINC_WEIGHT = "29463-7"   (Body weight)
+#
+# New codes added for Health Connect sync:
+LOINC_STEPS         = "41950-7"  # Number of steps in unspecified time Pedometer
+LOINC_SPO2          = "59408-5"  # Oxygen saturation in Arterial blood Pulse oximetry  (reserved)
+LOINC_BLOOD_GLUCOSE = "15074-8"  # Glucose [Moles/volume] in Blood                    (reserved)
+LOINC_SLEEP         = "93832-4"  # Sleep duration                                      (reserved)
+
+# ── Data-source identifiers ───────────────────────────────────────────────────
+# Written to the `source` field of every ehr_vitals document.
+# These are non-FHIR bookkeeping fields used by backend queries and the
+# Health Connect status endpoint.
+SOURCE_MANUAL         = "manual"          # Doctor / patient manual entry
+SOURCE_HEALTH_CONNECT = "health_connect"  # Android Health Connect on-device sync
+SOURCE_DOCTOR         = "doctor"          # Explicitly flagged doctor-recorded reading
+
+# ── Human-readable LOINC display labels ──────────────────────────────────────
+# Used by the FHIR export bundle and the HC status aggregation to produce
+# readable type keys from LOINC codes (e.g. in API responses and UI labels).
+HC_LOINC_DISPLAY: dict[str, str] = {
+    "55284-4": "Blood pressure systolic and diastolic",
+    "8480-6":  "Systolic blood pressure",
+    "8462-4":  "Diastolic blood pressure",
+    "8867-4":  "Heart rate",
+    "29463-7": "Body weight",
+    "41950-7": "Number of steps in unspecified time Pedometer",
+    "59408-5": "Oxygen saturation in Arterial blood Pulse oximetry",
+    "15074-8": "Glucose [Moles/volume] in Blood",
+    "93832-4": "Sleep duration",
+}
+
+# ── HC Observation meta.profile stamp ────────────────────────────────────────
+# Applied to Health Connect observations on the mobile side via the mapper.
+# Listed here so the CapabilityStatement in metadata_route.py can reference it.
+HC_OBSERVATION_PROFILE = (
+    "https://morafek.app/fhir/StructureDefinition/HealthConnectObservation"
+)

@@ -219,8 +219,29 @@ export default function ProfileScreen() {
                 </View>
                 <Text style={styles.arrow}>›</Text>
               </TouchableOpacity>
-
             </View>
+
+            {/* ── Wearables — Android only (Health Connect is not available on iOS) ── */}
+            {Platform.OS === 'android' && (
+              <>
+                <Text style={styles.groupLabel}>WEARABLES</Text>
+                <View style={styles.groupCard}>
+                  <TouchableOpacity
+                    style={styles.link}
+                    onPress={() => router.push('/(app)/settings/health-connect')}
+                  >
+                    <View style={styles.linkIconWrap}>
+                      <Text style={styles.linkIcon}>⌚</Text>
+                    </View>
+                    <View style={styles.linkBody}>
+                      <Text style={styles.linkTitle}>Health Connect</Text>
+                      <Text style={styles.linkSub}>Sync heart rate &amp; steps from your device</Text>
+                    </View>
+                    <Text style={styles.arrow}>›</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </>
         )}
 
@@ -341,7 +362,8 @@ export default function ProfileScreen() {
                 {'  '}• All visit records{'\n'}
                 {'  '}• All uploaded documents{'\n'}
                 {'  '}• Your medical profile{'\n'}
-                {'  '}• All exercise plans
+                {'  '}• All exercise plans{'\n'}
+                {'  '}• All Health Connect wearable data
               </Text>
             </View>
 
