@@ -11,7 +11,7 @@
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
-      "backgroundColor": "#8031A7"
+      "backgroundColor": "#0E7C8B"
     },
     "assetBundlePatterns": [
       "**/*"
@@ -26,7 +26,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#8031A7"
+        "backgroundColor": "#0E7C8B"
       },
       "package": "com.morafek.mobile",
       "runtimeVersion": "1.0.1",

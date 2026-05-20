@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   TextInput,
+  Image,
 } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -167,9 +168,11 @@ export default function LoginScreen() {
 
             {/* Logo */}
             <View style={styles.logoRow}>
-              <View style={styles.logoIcon}>
-                <Text style={styles.logoIconText}>+</Text>
-              </View>
+              <Image
+                source={require('@/assets/images/logo.png')}
+                style={styles.logoImage}
+                resizeMode="contain"
+              />
               <Text style={styles.logoText}>Morafek</Text>
             </View>
             <Text style={styles.heroSub}>Your personal health companion</Text>
@@ -452,24 +455,21 @@ const styles = StyleSheet.create({
     color: E.colors.primaryLight,
     fontWeight: '500',
   },
-  logoRow:    { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
-  logoIcon: {
-    width: 36,
-    height: 36,
+
+  // ── Logo (replaces logoIcon + logoIconText)
+  logoRow:  { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4 },
+  logoImage: {
+    width: 40,
+    height: 40,
     borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  logoIconText: { fontSize: 22, color: '#fff', fontWeight: '700', lineHeight: 26 },
   logoText: {
     fontSize: 28,
     fontWeight: '700',
     color: '#fff',
     letterSpacing: 0.5,
   },
+
   heroSub: {
     fontSize: 14,
     color: '#B3D9DF',
@@ -516,14 +516,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingHorizontal: 24,
     paddingTop: 4,
-    // Ensure the form always fills the full width of the scroll container
     alignSelf: 'stretch',
     width: '100%',
   },
   welcomeLine: { ...ET.h2, marginBottom: 2 },
   welcomeSub:  { ...ET.body, color: E.colors.textSecondary, marginBottom: E.pad },
 
-  // ── Full-width field wrappers (replace the custom Input component on web)
   fieldWrapper: {
     width: '100%',
     marginBottom: E.padSm,
