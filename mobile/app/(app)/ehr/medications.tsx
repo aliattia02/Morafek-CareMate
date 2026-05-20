@@ -13,7 +13,11 @@ import {
 } from 'react-native';
 import { Stack, useFocusEffect } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as Notifications from 'expo-notifications';
+// expo-notifications is lazy-loaded inside scheduleMedicationNotifications to prevent
+// the DevicePushTokenAutoRegistration side effect from firing at route-scan time,
+// which crashes Expo Go SDK 53+. Swap back to a top-level import once you move to
+// a development build (npx expo run:android).
+// import * as Notifications from 'expo-notifications';
 import { E, ET } from '@/constants/elderlyTheme';
 import AdherenceHeatmap from '@/components/ehr/AdherenceHeatmap';
 import DailySlotCard from '@/components/ehr/DailySlotCard';
@@ -169,6 +173,14 @@ export default function MedicationsScreen() {
 
   const scheduleMedicationNotifications = useCallback(async (today: TodayMedicationResponse) => {
     try {
+      // Lazy import: prevents DevicePushTokenAutoRegistration (a module-level side
+      // effect inside expo-notifications) from running at Expo Router's route-scan
+      // time. That side effect calls addPushTokenListener, which is banned in
+      // Expo Go SDK 53+ and crashes the app before the login screen even loads.
+      // Local scheduled notifications (used here) are fully supported in Expo Go —
+      // only the remote-push-token registration is not.
+      const Notifications = await import('expo-notifications');
+
       const settings = await Notifications.getPermissionsAsync();
       let granted = settings.granted;
 

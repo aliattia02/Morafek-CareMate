@@ -30,9 +30,7 @@
       },
       "package": "com.morafek.mobile",
       "runtimeVersion": "1.0.1",
-      "minSdkVersion": 26,
-      "compileSdkVersion": 35,
-      "targetSdkVersion": 34
+      "minSdkVersion": 26
     },
     "web": {
       "bundler": "metro",
@@ -48,7 +46,12 @@
       "expo-sqlite",
       [
         "react-native-health-connect",
-        {}
+        {
+          "permissions": [
+            "HeartRate",
+            "Steps"
+          ]
+        }
       ]
     ],
     "experiments": {

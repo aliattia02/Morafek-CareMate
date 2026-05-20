@@ -94,11 +94,13 @@ export default function ConsentScreen() {
   const { pseudonymSuffix, setPseudonymSuffix } = useAuthStore();
 
   // ── consent state ──────────────────────────────────────────────────────────
-  const [consentAccepted,  setConsentAccepted]  = useState(false);
-  const [loading,          setLoading]          = useState(true);
-  const [working,          setWorking]          = useState(false);
-  const [message,          setMessage]          = useState<string | null>(null);
-  const [error,            setError]            = useState<string | null>(null);
+  const [consentAccepted,    setConsentAccepted]    = useState(false);
+  const [loading,            setLoading]            = useState(true);
+  const [working,            setWorking]            = useState(false);
+  const [message,            setMessage]            = useState<string | null>(null);
+  const [error,              setError]              = useState<string | null>(null);
+  // Set when /api/consent/accept returns 502 (gICS/gPAS unreachable from cloud backend)
+  const [needsHospitalVisit, setNeedsHospitalVisit] = useState(false);
 
   // ── legacy details (pseudonym_masked, granted_at) ─────────────────────────
   const [legacyStatus, setLegacyStatus] = useState<ConsentStatus | null>(null);
@@ -181,6 +183,7 @@ export default function ConsentScreen() {
       setWorking(true);
       setError(null);
       setMessage(null);
+      setNeedsHospitalVisit(false);
       setExportBundle(null);
 
       // acceptConsent() calls POST /api/consent/accept AND saves the suffix
@@ -202,7 +205,14 @@ export default function ConsentScreen() {
         setLegacyStatus(legacy);
       } catch { /* non-fatal */ }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to accept consent');
+      // consent.ts translates cloud 5xx → Error('TTP_UNAVAILABLE').
+      // Any other error is surfaced as-is.
+      const msg = err instanceof Error ? err.message : 'Failed to accept consent';
+      if (msg === 'TTP_UNAVAILABLE') {
+        setNeedsHospitalVisit(true);
+      } else {
+        setError(msg || 'Failed to accept consent');
+      }
     } finally {
       setWorking(false);
     }
@@ -214,6 +224,7 @@ export default function ConsentScreen() {
       setWorking(true);
       setError(null);
       setMessage(null);
+      setNeedsHospitalVisit(false);
       setExportBundle(null);
 
       // revokeConsent() calls POST /api/consent/revoke AND clears AsyncStorage.
@@ -312,6 +323,18 @@ export default function ConsentScreen() {
               <Text style={styles.errorText}>⚠️ {error}</Text>
             </View>
           )}
+          {needsHospitalVisit && (
+            <View style={styles.hospitalCard}>
+              <Text style={styles.hospitalIcon}>🏥</Text>
+              <Text style={styles.hospitalTitle}>Please visit your hospital</Text>
+              <Text style={styles.hospitalBody}>
+                Consent cannot be accepted remotely right now — our secure
+                registration systems are only available on-site.{'\n\n'}
+                Please speak to a member of staff at your hospital or clinic to
+                complete your consent registration in person.
+              </Text>
+            </View>
+          )}
           {message && (
             <View style={styles.messageCard}>
               <Text style={styles.messageText}>{message}</Text>
@@ -364,9 +387,11 @@ export default function ConsentScreen() {
             {/* ── info text ── */}
             {!consentAccepted && (
               <Text style={styles.infoText}>
-                By accepting, you allow your health data to be pseudonymised and
-                shared with approved researchers under German data-protection law
-                (DSGVO Art. 9). You can revoke at any time.
+                By accepting, you grant broad consent for your health data to be
+                pseudonymised and shared with approved researchers under German
+                data-protection law (DSGVO Art. 9). This includes use across
+                multiple research projects within the approved scope.
+                You can revoke at any time.
               </Text>
             )}
 
@@ -739,6 +764,32 @@ const styles = StyleSheet.create({
     ...typography.caption,
     color: colors.text.secondary,
     lineHeight: 18,
+    textAlign: 'center',
+  },
+
+  // ── hospital-visit info card ──
+  hospitalCard: {
+    backgroundColor: '#FFF8E1',
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: '#FFD54F',
+    borderLeftWidth: 4,
+    borderLeftColor: '#F9A825',
+    padding: spacing.md,
+    gap: spacing.sm,
+    alignItems: 'center',
+  },
+  hospitalIcon: { fontSize: 36 },
+  hospitalTitle: {
+    ...typography.body,
+    fontWeight: '700',
+    color: '#E65100',
+    textAlign: 'center',
+  },
+  hospitalBody: {
+    ...typography.body,
+    color: '#5D4037',
+    lineHeight: 22,
     textAlign: 'center',
   },
 });

@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python3
 """
 Directory Tree Generator
@@ -16,7 +15,9 @@ class TreeGenerator:
         'exclude_dirs': [
             'node_modules', '__pycache__', '.git', '.vscode', '.idea',
             'venv', 'env', 'dist', 'build', '.next', 'coverage',
-            '.pytest_cache', '.mypy_cache'
+            '.pytest_cache', '.mypy_cache',
+            # Android build artifacts
+            '.cxx', '.gradle', '.kotlin',
         ],
         'exclude_files': [
             '.DS_Store', 'Thumbs.db', '.gitignore', 'package-lock.json',

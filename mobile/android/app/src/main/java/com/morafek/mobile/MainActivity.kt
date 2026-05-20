@@ -11,16 +11,29 @@ import com.facebook.react.defaults.DefaultReactActivityDelegate
 
 import expo.modules.ReactActivityDelegateWrapper
 
+// Required for Health Connect permission dialog to work.
+// HealthConnectPermissionDelegate is a Kotlin object (singleton) — no constructor call needed.
+import dev.matinzd.healthconnect.permissions.HealthConnectPermissionDelegate
+
 class MainActivity : ReactActivity() {
+
   override fun onCreate(savedInstanceState: Bundle?) {
     // Set the theme to AppTheme BEFORE onCreate to support
     // coloring the background, status bar, and navigation bar.
     // This is required for expo-splash-screen.
-    // setTheme(R.style.AppTheme);
     // @generated begin expo-splashscreen - expo prebuild (DO NOT MODIFY) sync-f3ff59a738c56c9a6119210cb55f0b613eb8b6af
     SplashScreenManager.registerOnActivity(this)
     // @generated end expo-splashscreen
     super.onCreate(null)
+
+    // Register Health Connect permission launcher.
+    // MUST be called in onCreate — registerForActivityResult requires the Activity
+    // to not yet be started. Without this the permission dialog opens and immediately
+    // closes when the user taps "Berechtigung erteilen".
+    //
+    // Note: HealthConnectPermissionDelegate is a Kotlin object (singleton),
+    // NOT a class — call it directly without ().
+    HealthConnectPermissionDelegate.setPermissionDelegate(this)
   }
 
   /**

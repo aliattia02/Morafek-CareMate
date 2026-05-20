@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  health_permissions.xml
+  Location: android/app/src/main/res/values/health_permissions.xml
+
+  This file is referenced by the <meta-data android:name="health_permissions">
+  entry in AndroidManifest.xml. Health Connect v3.x scans for this resource
+  array to register the app in its "App permissions" list.
+
+  Without this file the app never appears in HC's list and requestPermission()
+  silently returns [] with no dialog shown — even if <uses-permission> entries
+  for android.permission.health.* are present in the manifest.
+
+  Only include READ permissions here. WRITE_HEART_RATE is excluded because
+  consumer-facing apps are not permitted to write heart rate data via HC on
+  most devices; including it causes HC to reject the registration silently
+  on some Android versions. Add it back only if your use-case requires it
+  and you have been granted write access by Google.
+-->
+<resources>
+    <array name="health_permissions">
+        <item>android.permission.health.READ_HEART_RATE</item>
+        <item>android.permission.health.READ_STEPS</item>
+    </array>
+</resources>

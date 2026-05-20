@@ -36,7 +36,7 @@
  */
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import apiClient from './client';
+import apiClient, { IS_LOCAL_BACKEND } from './client';
 
 // ─── Storage key ──────────────────────────────────────────────────────────────
 
@@ -164,13 +164,34 @@ export async function revokeLegacyConsent(): Promise<RevokeResult> {
  * so it can be restored immediately on next launch without a server round-trip.
  */
 export async function acceptConsent(): Promise<AcceptResult> {
-  const response = await apiClient.post<AcceptResult>('/api/consent/accept');
-  const result   = response.data;
-
-  // Persist locally immediately after a successful grant
-  await savePseudonymLocally(result.pseudonymSuffix);
-
-  return result;
+  try {
+    const response = await apiClient.post<AcceptResult>(
+      '/api/consent/accept',
+      {},
+      // On the cloud/Render backend gICS and gPAS are unreachable (Docker-only).
+      // A 502 there is permanent — skip the 4-retry back-off so the user
+      // sees the hospital-visit message in ~1 s instead of ~30 s.
+      IS_LOCAL_BACKEND ? {} : ({ __noRetryOn5xx: true } as object),
+    );
+    const result = response.data;
+    // Persist locally immediately after a successful grant
+    await savePseudonymLocally(result.pseudonymSuffix);
+    return result;
+  } catch (err: unknown) {
+    // When on the cloud backend, translate any 5xx into a typed sentinel
+    // so the UI can show a calm "visit hospital" message instead of a
+    // raw error banner.  Local stacks surface the real error unchanged.
+    if (!IS_LOCAL_BACKEND) {
+      const axErr  = err as Record<string, unknown>;
+      const resp   = axErr?.response as Record<string, unknown> | undefined;
+      const status = typeof resp?.status === 'number' ? resp.status : 0;
+      const code   = typeof axErr?.code  === 'string' ? axErr.code  : '';
+      if (status >= 500 || code === 'ERR_BAD_RESPONSE') {
+        throw new Error('TTP_UNAVAILABLE');
+      }
+    }
+    throw err;
+  }
 }
 
 /**

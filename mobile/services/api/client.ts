@@ -42,6 +42,16 @@ const getApiBaseUrl = (): string => {
 };
 
 const API_BASE_URL = getApiBaseUrl();
+
+/**
+ * True when running against a local Docker stack (localhost / 127.0.0.1).
+ * Used by acceptConsent() to skip 5xx retries — gICS/gPAS are Docker-only
+ * and a 502 from the cloud backend is permanent, not a transient cold-start.
+ */
+export const IS_LOCAL_BACKEND =
+  API_BASE_URL.includes('localhost') ||
+  API_BASE_URL.includes('127.0.0.1');
+
 console.log('[API Client] Initialized with base URL:', API_BASE_URL);
 console.log('[API Client] Platform:', Platform.OS);
 
@@ -94,11 +104,14 @@ apiClient.interceptors.response.use(
     const isNetwork    = error.code === 'ERR_NETWORK' || error.message.includes('Network Error');
     const isNoResponse = !error.response;
     const status       = error.response?.status ?? 0;
-    const isServerErr  = status === 502 || status === 503 || status === 504;
+    const isServerErr      = status === 502 || status === 503 || status === 504;
+    // Callers can set __noRetryOn5xx: true to skip server-error retries.
+    // Used by acceptConsent() — a 502 there is permanent (gICS/gPAS Docker-only).
+    const skipServerRetry  = !!(config as any).__noRetryOn5xx;
 
     // Retry on network errors AND server errors (covers Render cold-start)
     const shouldRetry =
-      (isTimeout || isNetwork || isNoResponse || isServerErr) &&
+      (isTimeout || isNetwork || isNoResponse || (isServerErr && !skipServerRetry)) &&
       config.__retryCount < MAX_RETRIES;
 
     if (shouldRetry) {
