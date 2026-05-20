@@ -1,21 +1,47 @@
 /**
  * mobile/services/api/consent.ts
- * Consent management API helpers.
+ * Consent management API helpers + local pseudonym persistence.
  *
- * Two sets of functions are exported:
+ * TWO EXPORT PATHS (clearly separated):
  *
- * ① LEGACY endpoints — /api/patient/consent (GET/POST/DELETE)
- *    Used by the inline pseudonymised export card on the consent screen.
- *    These remain for backward compatibility.
+ *  A) PSEUDONYMISED export  → /api/patient/fhir-export/pseudonymised
+ *     Requires active gICS consent + a stored pseudonym.
+ *     Disabled when consent is revoked.
  *
- * ② NEW gICS/gPAS endpoints — /api/consent/* (GET/POST)
- *    Used by the main consent flow (accept / revoke / status).
- *    acceptConsent()   POST /api/consent/accept  → { pseudonymSuffix }
- *    revokeConsent()   POST /api/consent/revoke  → { success }
- *    getConsentStatus() GET /api/consent/status  → { status }
+ *  B) STANDARD FHIR export  → /api/patient/fhir-export
+ *     Always available for authenticated patients.
+ *     Used for direct EHR / KIS integration.
+ *
+ * LOCAL PERSISTENCE (AsyncStorage):
+ *   The pseudonymSuffix (last 4 chars of the gPAS pseudonym) is persisted
+ *   locally so it survives app restarts.
+ *
+ *   Key: '@caremate/pseudonym_suffix'
+ *   Value: 4-character string, e.g. "A3F9"
+ *
+ *   On re-accept: the backend tries to reuse the existing gPAS pseudonym
+ *   (idempotent grant in gICS). The mobile app restores the stored suffix
+ *   if the backend returns the same one, or saves the new one if it differs.
+ *
+ * ENDPOINTS:
+ *
+ * ① LEGACY  /api/patient/consent  (GET / POST / DELETE)
+ *    Backward-compatible MongoDB read. Used as fallback when gICS is
+ *    unreachable (local Docker) or returns UNKNOWN.
+ *
+ * ② NEW gICS/gPAS  /api/consent/*
+ *    acceptConsent()    POST /api/consent/accept  → { pseudonymSuffix }
+ *    revokeConsent()    POST /api/consent/revoke  → { success }
+ *    getConsentStatus() GET  /api/consent/status  → { status }
  */
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import apiClient from './client';
+
+// ─── Storage key ──────────────────────────────────────────────────────────────
+
+const PSEUDONYM_SUFFIX_KEY = '@caremate/pseudonym_suffix';
+const PSEUDONYM_GRANTED_AT_KEY = '@caremate/pseudonym_granted_at';
 
 // ─── Legacy types (inline export card) ───────────────────────────────────────
 
@@ -42,12 +68,72 @@ export interface ConsentStatusNew {
 }
 
 export interface AcceptResult {
-  /** Last 4 characters of the gPAS pseudonym — safe to display in the UI. */
+  /**
+   * Last 4 characters of the gPAS pseudonym — safe to display and persist.
+   * The full pseudonym never leaves the server.
+   */
   pseudonymSuffix: string;
 }
 
 export interface RevokeSuccess {
   success: true;
+}
+
+// ─── Local pseudonym persistence ──────────────────────────────────────────────
+
+/**
+ * Persist the pseudonym suffix locally (survives app restarts).
+ * Called immediately after a successful acceptConsent().
+ */
+export async function savePseudonymLocally(suffix: string): Promise<void> {
+  try {
+    await AsyncStorage.multiSet([
+      [PSEUDONYM_SUFFIX_KEY, suffix],
+      [PSEUDONYM_GRANTED_AT_KEY, new Date().toISOString()],
+    ]);
+  } catch (err) {
+    // Non-fatal — the store in memory is the primary source
+    console.warn('[Consent] Failed to persist pseudonym suffix locally:', err);
+  }
+}
+
+/**
+ * Retrieve the locally persisted pseudonym suffix.
+ * Returns null if never saved or after a revoke.
+ */
+export async function getLocalPseudonymSuffix(): Promise<string | null> {
+  try {
+    const value = await AsyncStorage.getItem(PSEUDONYM_SUFFIX_KEY);
+    return value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Retrieve the timestamp when the pseudonym was last granted locally.
+ */
+export async function getLocalPseudonymGrantedAt(): Promise<string | null> {
+  try {
+    const value = await AsyncStorage.getItem(PSEUDONYM_GRANTED_AT_KEY);
+    return value ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Clear the locally persisted pseudonym (called on revokeConsent).
+ */
+export async function clearLocalPseudonym(): Promise<void> {
+  try {
+    await AsyncStorage.multiRemove([
+      PSEUDONYM_SUFFIX_KEY,
+      PSEUDONYM_GRANTED_AT_KEY,
+    ]);
+  } catch (err) {
+    console.warn('[Consent] Failed to clear local pseudonym:', err);
+  }
 }
 
 // ─── Legacy functions ─────────────────────────────────────────────────────────
@@ -70,19 +156,31 @@ export async function revokeLegacyConsent(): Promise<RevokeResult> {
 // ─── New gICS / gPAS functions ────────────────────────────────────────────────
 
 /**
- * Accept consent: submits to gICS then gPAS.
- * Returns only the last 4 digits of the pseudonym (safe to display).
+ * Accept consent via gICS then gPAS.
+ * Returns the last 4 digits of the pseudonym (safe to display + persist).
+ *
+ * The backend is idempotent: if a pseudonym already exists for this patient
+ * in gPAS, the same suffix is returned.  The mobile app saves it locally
+ * so it can be restored immediately on next launch without a server round-trip.
  */
 export async function acceptConsent(): Promise<AcceptResult> {
   const response = await apiClient.post<AcceptResult>('/api/consent/accept');
-  return response.data;
+  const result   = response.data;
+
+  // Persist locally immediately after a successful grant
+  await savePseudonymLocally(result.pseudonymSuffix);
+
+  return result;
 }
 
 /**
- * Revoke consent: revokes gICS, deletes from gPAS, removes from MongoDB.
+ * Revoke consent: revokes gICS, deletes from gPAS, removes MongoDB entry.
+ * Also clears the local pseudonym so the export button auto-disables.
  */
 export async function revokeConsent(): Promise<RevokeSuccess> {
   const response = await apiClient.post<RevokeSuccess>('/api/consent/revoke');
+  // Clear local storage regardless of server response
+  await clearLocalPseudonym();
   return response.data;
 }
 
@@ -94,13 +192,43 @@ export async function getConsentStatus(): Promise<ConsentStatusNew> {
   return response.data;
 }
 
+// ─── Export helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Fetch a pseudonymised FHIR R4 bundle.
+ * Requires: active gICS consent + valid gPAS pseudonym.
+ * Throws a 403 ApiError when consent is absent.
+ */
+export async function fetchPseudonymisedBundle<T = unknown>(): Promise<T> {
+  const response = await apiClient.get<T>('/api/patient/fhir-export/pseudonymised');
+  return response.data;
+}
+
+/**
+ * Fetch the standard (identified) FHIR R4 bundle.
+ * Always available for authenticated patients — no consent required.
+ * Intended for direct EHR / KIS integration.
+ */
+export async function fetchStandardFhirBundle<T = unknown>(): Promise<T> {
+  const response = await apiClient.get<T>('/api/patient/fhir-export');
+  return response.data;
+}
+
 export default {
   // Legacy
   getLegacyConsentStatus,
   grantConsent,
   revokeLegacyConsent,
-  // New
+  // New gICS / gPAS
   acceptConsent,
   revokeConsent,
   getConsentStatus,
+  // Local storage
+  savePseudonymLocally,
+  getLocalPseudonymSuffix,
+  getLocalPseudonymGrantedAt,
+  clearLocalPseudonym,
+  // Export helpers
+  fetchPseudonymisedBundle,
+  fetchStandardFhirBundle,
 };

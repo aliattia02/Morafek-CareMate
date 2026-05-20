@@ -12,3 +12,15 @@
 .git
 .gitignore
 *.md
+
+node_modules
+.expo
+dist
+.next
+*.log
+npm-debug.log*
+yarn-error.log*
+.env
+.env.local
+android
+ios

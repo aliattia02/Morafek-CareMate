@@ -2,18 +2,22 @@
  * health-connect.tsx — Health Connect Settings & Status Screen
  * Location: mobile/app/(app)/settings/health-connect.tsx
  *
- * Adapted from DiaTwin's watch.tsx. Key differences:
- *   • No OAuth WebView — "Connect" triggers the Android system permission dialog
- *   • No auto-sync toggle or interval picker (sync is manual/on-focus only)
- *   • Shows per-data-type record counts from the backend status endpoint
- *   • iOS renders a graceful "not supported" screen without crashing
- *   • German UI text (Morafek targets the German healthcare market)
+ * FIXES vs previous version:
+ *   • All useCallback hooks are declared BEFORE the early iOS return to comply
+ *     with the React Rules of Hooks (no conditional hook calls).
  *
- * Register this route in mobile/app/(app)/settings/_layout.tsx:
- *   <Stack.Screen name="health-connect" options={{ title: 'Health Connect' }} />
+ *   • handleOpenSettings is wired to the new openSettings() action exposed
+ *     by useHealthConnect. An explicit "HC-Einstellungen öffnen" button now
+ *     appears in the error banner when isPermanentlyDenied is true. The
+ *     previous version had no such button; the hook silently navigated the
+ *     user away automatically, which was both surprising and unhelpful (the
+ *     app was not yet listed in HC settings on first install).
+ *
+ *   • isPermanentlyDenied is consumed from the hook to conditionally render
+ *     the settings button only when it is actually actionable.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -30,18 +34,13 @@ import { useHealthConnect } from '@/hooks/useHealthConnect';
 import { deleteHealthConnectData } from '@/services/api/health-connect';
 import { timeAgo, formatDate } from '@/types/health-connect.types';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-/** Health Connect brand green */
-const HC_GREEN  = '#3ddc84';
-const HC_BLUE   = '#1a73e8';
-const DANGER    = '#ef4444';
+const HC_GREEN = '#3ddc84';
+const HC_BLUE  = '#1a73e8';
+const DANGER   = '#ef4444';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Small shared components
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Small shared components ──────────────────────────────────────────────────
 
 function SectionLabel({ children }: { children: string }) {
   return <Text style={styles.sectionLabel}>{children}</Text>;
@@ -63,9 +62,7 @@ function InfoRow({ label, value, sub }: { label: string; value: string; sub?: st
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// iOS fallback screen
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── iOS fallback ─────────────────────────────────────────────────────────────
 
 function IOSUnsupportedScreen() {
   return (
@@ -87,12 +84,13 @@ function IOSUnsupportedScreen() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function HealthConnectScreen() {
-  const [isRefreshing,  setIsRefreshing]  = useState(false);
+  const [isRefreshing,   setIsRefreshing]   = useState(false);
   const [lastSyncResult, setLastSyncResult] = useState<{ inserted: number; skipped: number } | null>(null);
 
   const {
     isSupported,
     isPermissionGranted,
+    isPermanentlyDenied,
     lastSync,
     syncCount,
     counts,
@@ -100,29 +98,34 @@ export default function HealthConnectScreen() {
     isSyncing,
     isLoading,
     requestPermission,
+    openSettings,
     sync,
     refreshStatus,
   } = useHealthConnect();
 
-  // iOS: render before SDK check to avoid native module calls on iOS
-  if (Platform.OS === 'ios') {
-    return <IOSUnsupportedScreen />;
-  }
-
-  // ── Pull-to-refresh ──────────────────────────────────────────────────────────
+  // ── All hooks MUST be declared before any conditional return ─────────────
+  // Rules of Hooks: hooks must be called in the same order on every render.
+  // Platform.OS is a constant, but the linter (and StrictMode) still flag
+  // hooks placed after conditional branches.
 
   const onRefresh = useCallback(() => {
     setIsRefreshing(true);
     refreshStatus().finally(() => setIsRefreshing(false));
   }, [refreshStatus]);
 
-  // ── Request permissions ───────────────────────────────────────────────────
-
   const handleRequestPermission = useCallback(async () => {
     await requestPermission();
   }, [requestPermission]);
 
-  // ── Manual sync ───────────────────────────────────────────────────────────
+  /**
+   * Navigates the user to the Health Connect system settings screen.
+   * Only shown when isPermanentlyDenied is true — i.e. when the user has
+   * previously tapped "Don't ask again" and the HC dialog will no longer
+   * appear automatically.
+   */
+  const handleOpenSettings = useCallback(async () => {
+    await openSettings();
+  }, [openSettings]);
 
   const handleSync = useCallback(async () => {
     const result = await sync(24);
@@ -131,7 +134,8 @@ export default function HealthConnectScreen() {
       if (result.inserted > 0) {
         Alert.alert(
           'Synchronisation abgeschlossen',
-          `${result.inserted} neue Messung${result.inserted !== 1 ? 'en' : ''} übertragen.${result.skipped > 0 ? `\n${result.skipped} übersprungen (Duplikate).` : ''}`,
+          `${result.inserted} neue Messung${result.inserted !== 1 ? 'en' : ''} übertragen.` +
+          (result.skipped > 0 ? `\n${result.skipped} übersprungen (Duplikate).` : ''),
         );
       } else {
         Alert.alert(
@@ -144,9 +148,7 @@ export default function HealthConnectScreen() {
     }
   }, [sync, error]);
 
-  // ── GDPR delete ───────────────────────────────────────────────────────────
-
-  const handleDeleteData = () => {
+  const handleDeleteData = useCallback(() => {
     Alert.alert(
       'Health-Connect-Daten löschen',
       'Alle aus Health Connect übertragenen Messungen werden aus Ihrer Akte gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.',
@@ -170,11 +172,13 @@ export default function HealthConnectScreen() {
         },
       ],
     );
-  };
+  }, [refreshStatus]);
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Render — loading
-  // ─────────────────────────────────────────────────────────────────────────
+  // ── Conditional returns (after all hooks) ────────────────────────────────
+
+  if (Platform.OS === 'ios') {
+    return <IOSUnsupportedScreen />;
+  }
 
   if (isLoading) {
     return (
@@ -183,10 +187,6 @@ export default function HealthConnectScreen() {
       </View>
     );
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Render — device does not support Health Connect
-  // ─────────────────────────────────────────────────────────────────────────
 
   if (!isSupported) {
     return (
@@ -206,7 +206,7 @@ export default function HealthConnectScreen() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Render — supported, permissions NOT granted
+  // Permissions NOT granted
   // ─────────────────────────────────────────────────────────────────────────
 
   if (!isPermissionGranted) {
@@ -217,18 +217,16 @@ export default function HealthConnectScreen() {
           <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={HC_GREEN} />
         }
       >
-        {/* Hero card */}
         <View style={[styles.heroCard, { borderColor: HC_GREEN + '40', backgroundColor: HC_GREEN + '12' }]}>
           <Text style={styles.heroIcon}>❤️</Text>
           <Text style={styles.heroTitle}>Health Connect verbinden</Text>
           <Text style={styles.heroSubtitle}>
-            Übertragen Sie Herzfrequenz und Schritt­zähler-Daten von Ihrer
+            Übertragen Sie Herzfrequenz und Schrittzähler-Daten von Ihrer
             Smartwatch automatisch in Ihre elektronische Patientenakte —
             FHIR R4-konform, DSGVO-konform, ohne Cloud-Umweg.
           </Text>
         </View>
 
-        {/* Compatible devices */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Kompatible Geräte</Text>
           {[
@@ -245,7 +243,6 @@ export default function HealthConnectScreen() {
           ))}
         </View>
 
-        {/* How it works */}
         <SectionLabel>SO FUNKTIONIERT ES</SectionLabel>
         <View style={styles.card}>
           {[
@@ -263,14 +260,34 @@ export default function HealthConnectScreen() {
           ))}
         </View>
 
-        {/* Error message if permission was partially denied */}
+        {/* ── Error banner with optional "Open HC Settings" button ─────── */}
         {error ? (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
+            {isPermanentlyDenied ? (
+              /**
+               * Only shown when isPermanentlyDenied is true — i.e. the user
+               * tapped "Berechtigung erteilen" at least twice and the HC dialog
+               * still did not appear. At this point the OS will not show the
+               * dialog again; the user must navigate to HC settings manually.
+               *
+               * We render a button here rather than calling openSettings()
+               * automatically so the user knows exactly what is happening
+               * before they are navigated away from the screen.
+               */
+              <TouchableOpacity
+                style={styles.openSettingsBtn}
+                onPress={handleOpenSettings}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.openSettingsBtnText}>
+                  ⚙️  HC-Einstellungen öffnen
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         ) : null}
 
-        {/* Grant permission button */}
         <TouchableOpacity
           style={styles.connectBtn}
           onPress={handleRequestPermission}
@@ -288,10 +305,8 @@ export default function HealthConnectScreen() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Render — connected (permissions granted)
+  // Connected
   // ─────────────────────────────────────────────────────────────────────────
-
-  const totalRecords = Object.values(counts).reduce((a, b) => a + b, 0);
 
   return (
     <ScrollView
@@ -300,7 +315,6 @@ export default function HealthConnectScreen() {
         <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor={HC_GREEN} />
       }
     >
-      {/* ── Status card ──────────────────────────────────────────────────── */}
       <View style={styles.card}>
         <View style={styles.statusRow}>
           <View style={styles.connectedDot} />
@@ -344,7 +358,6 @@ export default function HealthConnectScreen() {
         )}
       </View>
 
-      {/* ── Sync now ───────────────────────────────────────────────────────── */}
       <TouchableOpacity
         style={[styles.syncBtn, isSyncing && styles.syncBtnDisabled]}
         onPress={handleSync}
@@ -357,14 +370,12 @@ export default function HealthConnectScreen() {
         }
       </TouchableOpacity>
 
-      {/* Error banner */}
       {error ? (
         <View style={styles.errorBanner}>
           <Text style={styles.errorText}>{error}</Text>
         </View>
       ) : null}
 
-      {/* ── Data types ─────────────────────────────────────────────────────── */}
       <SectionLabel>ÜBERTRAGENE DATENTYPEN</SectionLabel>
       <View style={styles.card}>
         {[
@@ -389,7 +400,6 @@ export default function HealthConnectScreen() {
         ))}
       </View>
 
-      {/* ── FHIR info ──────────────────────────────────────────────────────── */}
       <SectionLabel>INTEROPERABILITÄT</SectionLabel>
       <View style={styles.card}>
         {[
@@ -407,7 +417,6 @@ export default function HealthConnectScreen() {
         ))}
       </View>
 
-      {/* ── DSGVO / danger zone ───────────────────────────────────────────── */}
       <SectionLabel>DATENSCHUTZ (DSGVO)</SectionLabel>
       <View style={styles.card}>
         <TouchableOpacity
@@ -432,9 +441,7 @@ export default function HealthConnectScreen() {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Styles
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   center: {
@@ -459,7 +466,6 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
 
-  // ── Generic card ─────────────────────────────────────────────────────────
   card: {
     backgroundColor: colors.card ?? '#1a1d27',
     borderRadius: 14,
@@ -480,7 +486,6 @@ const styles = StyleSheet.create({
     marginVertical: 12,
   },
 
-  // ── Status row ────────────────────────────────────────────────────────────
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -505,16 +510,9 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     gap: 5,
   },
-  hcBadgeText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  hcBadgeName: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
+  hcBadgeText: { fontSize: 11, fontWeight: '800' },
+  hcBadgeName: { fontSize: 12, fontWeight: '600' },
 
-  // ── Info rows ─────────────────────────────────────────────────────────────
   infoRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -527,10 +525,7 @@ const styles = StyleSheet.create({
     paddingTop: 1,
     minWidth: 90,
   },
-  infoValueCol: {
-    flex: 1,
-    alignItems: 'flex-end',
-  },
+  infoValueCol: { flex: 1, alignItems: 'flex-end' },
   infoValue: {
     fontSize: 13,
     fontWeight: '600',
@@ -544,7 +539,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 
-  // ── Sync result banner ────────────────────────────────────────────────────
   syncResultBanner: {
     backgroundColor: HC_GREEN + '18',
     borderRadius: 8,
@@ -552,26 +546,33 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     marginTop: 10,
   },
-  syncResultText: {
-    fontSize: 12,
-    color: HC_GREEN,
-    fontWeight: '600',
-  },
+  syncResultText: { fontSize: 12, color: HC_GREEN, fontWeight: '600' },
 
-  // ── Error banner ──────────────────────────────────────────────────────────
   errorBanner: {
     backgroundColor: DANGER + '18',
     borderRadius: 8,
     padding: 12,
     marginBottom: 12,
   },
-  errorText: {
-    fontSize: 12,
+  errorText: { fontSize: 12, color: DANGER, lineHeight: 18 },
+
+  // Button rendered inside the error banner when isPermanentlyDenied is true.
+  openSettingsBtn: {
+    marginTop: 10,
+    backgroundColor: DANGER + '28',
+    borderWidth: 1,
+    borderColor: DANGER + '60',
+    borderRadius: 8,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+  },
+  openSettingsBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
     color: DANGER,
-    lineHeight: 18,
   },
 
-  // ── Sync now button ───────────────────────────────────────────────────────
   syncBtn: {
     backgroundColor: HC_GREEN,
     borderRadius: 12,
@@ -580,18 +581,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   syncBtnDisabled: { opacity: 0.5 },
-  syncBtnText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0a0a0a',
-  },
+  syncBtnText: { fontSize: 15, fontWeight: '700', color: '#0a0a0a' },
 
-  // ── Data type rows ────────────────────────────────────────────────────────
-  dataTypeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
+  dataTypeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   dataTypeIcon: { fontSize: 20 },
   dataTypeLabel: {
     fontSize: 14,
@@ -612,25 +604,11 @@ const styles = StyleSheet.create({
     minWidth: 36,
     alignItems: 'center',
   },
-  countBadgeActive: {
-    backgroundColor: HC_GREEN + '20',
-  },
-  countText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: colors.text?.secondary ?? '#94a3b8',
-  },
-  countTextActive: {
-    color: HC_GREEN,
-  },
+  countBadgeActive: { backgroundColor: HC_GREEN + '20' },
+  countText: { fontSize: 13, fontWeight: '700', color: colors.text?.secondary ?? '#94a3b8' },
+  countTextActive: { color: HC_GREEN },
 
-  // ── How it works ──────────────────────────────────────────────────────────
-  howRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    marginBottom: 10,
-  },
+  howRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, marginBottom: 10 },
   howBadge: {
     width: 22,
     height: 22,
@@ -640,10 +618,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginTop: 1,
   },
-  howNum: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  howNum: { fontSize: 11, fontWeight: '700' },
   howText: {
     flex: 1,
     fontSize: 13,
@@ -651,25 +626,11 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ── Devices / hero ────────────────────────────────────────────────────────
-  deviceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 8,
-  },
+  deviceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
   deviceIcon: { fontSize: 16 },
-  deviceLabel: {
-    fontSize: 13,
-    color: colors.text?.secondary ?? '#94a3b8',
-  },
-  heroCard: {
-    borderRadius: 16,
-    borderWidth: 1,
-    padding: 20,
-    alignItems: 'center',
-    marginBottom: 16,
-  },
+  deviceLabel: { fontSize: 13, color: colors.text?.secondary ?? '#94a3b8' },
+
+  heroCard: { borderRadius: 16, borderWidth: 1, padding: 20, alignItems: 'center', marginBottom: 16 },
   heroIcon: { fontSize: 36, marginBottom: 10 },
   heroTitle: {
     fontSize: 17,
@@ -685,7 +646,6 @@ const styles = StyleSheet.create({
     lineHeight: 19,
   },
 
-  // ── Connect button ────────────────────────────────────────────────────────
   connectBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -696,26 +656,12 @@ const styles = StyleSheet.create({
     gap: 10,
     marginBottom: 4,
   },
-  connectBtnText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0a0a0a',
-  },
+  connectBtnText: { fontSize: 16, fontWeight: '700', color: '#0a0a0a' },
 
-  // ── Danger zone ───────────────────────────────────────────────────────────
   dangerRow: { paddingVertical: 2, marginBottom: 6 },
-  dangerText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: DANGER,
-  },
-  dangerDesc: {
-    fontSize: 12,
-    color: colors.text?.secondary ?? '#94a3b8',
-    lineHeight: 17,
-  },
+  dangerText: { fontSize: 14, fontWeight: '600', color: DANGER },
+  dangerDesc: { fontSize: 12, color: colors.text?.secondary ?? '#94a3b8', lineHeight: 17 },
 
-  // ── Footer ────────────────────────────────────────────────────────────────
   footer: {
     fontSize: 11,
     color: colors.text?.secondary ?? '#64748b',

@@ -2,24 +2,47 @@
  * useHealthConnect.ts — React hook for Health Connect lifecycle management
  * Location: mobile/hooks/useHealthConnect.ts
  *
- * Manages the full Health Connect lifecycle on Android:
- *   1. Check if HC SDK is available on this device
- *   2. Check / request Android system permissions
- *   3. Read records from Health Connect (HR, steps, …)
- *   4. Convert to FHIR Observations via health-connect-mapper.ts
- *   5. POST to Morafek backend via health-connect.ts
- *   6. Return status for the settings UI
+ * ── What changed vs previous version ────────────────────────────────────────
  *
- * iOS behaviour:
- *   isSupported = false, all other fields are safe defaults.
- *   iOS HealthKit integration is stubbed here — mark for future implementation.
- *   The hook compiles and runs on iOS without crashing.
+ * REMOVED: AppState-based permission re-check fallback
  *
- * Usage:
- *   const { isSupported, isPermissionGranted, sync, isSyncing, ... } = useHealthConnect();
+ *   The Old Architecture bug was: ReactActivityDelegateWrapper delivered the
+ *   ActivityResultCallback before the HC PermissionsActivity rendered its UI,
+ *   so sdkRequestPermission() resolved with [] immediately and the dialog
+ *   appeared AFTER the promise had already settled.
+ *
+ *   The AppState listener was added to work around this: subscribe to the
+ *   'active' event so we check permissions after the user returns from the
+ *   HC screen.
+ *
+ *   With New Architecture enabled (newArchEnabled=true), the
+ *   ActivityResultRegistry handles the HC result correctly — the promise
+ *   properly AWAITS the user's choice before resolving. The AppState
+ *   workaround is not only unnecessary but actively harmful:
+ *
+ *     HC's PermissionsActivity uses isTopActivityTransparent=true, meaning
+ *     it renders as a transparent overlay, not a full-screen activity. The
+ *     host app (Morafek) never fully goes to 'background', so AppState fires
+ *     'change' → 'active' WHILE THE DIALOG IS STILL ON SCREEN. This caused:
+ *
+ *       1. The checkPermissions() call fires with [] (user hasn't tapped yet)
+ *       2. Error state is set to "try again"
+ *       3. User taps "try again", launching a second HC dialog on top of the
+ *          first one → both dialogs cancel each other → user sees nothing
+ *
+ * SIMPLIFIED: Denial detection
+ *
+ *   - [] on attempt 1  → "Dialog may have been dismissed. Try again."
+ *   - [] on attempt 2+ → isPermanentlyDenied = true → surface openSettings()
+ *
+ *   "Permanently denied" in HC terms means Android's
+ *   'Don't ask again' was checked, or the system is suppressing the dialog.
+ *   In both cases openHealthConnectSettings() is the correct next step.
+ *
+ * ADDED: Explicit initialize() failure logging to catch silent HC errors
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Platform } from 'react-native';
 
 import {
@@ -29,8 +52,8 @@ import {
 import {
   mapAllRecordsToObservations,
   HC_DATA_TYPES,
+  getPermissionRequests,
 } from '@/utils/fhir/health-connect-mapper';
-import { getPermissionRequests } from '@/utils/fhir/health-connect-mapper';
 import type {
   HCRecordCounts,
   HCSyncResponse,
@@ -38,35 +61,67 @@ import type {
 } from '@/types/health-connect.types';
 
 // ─── Conditional SDK import ───────────────────────────────────────────────────
-//
-// react-native-health-connect is an Android-only native module.
-// Importing it on iOS will throw a native module not found error.
-// We import lazily and only call SDK functions when isAndroid is true.
 
 const isAndroid = Platform.OS === 'android';
 
-// Lazy-loaded references to HC SDK functions (undefined on iOS)
-let sdkInitialize: (() => Promise<boolean>) | undefined;
-let sdkRequestPermission: ((perms: unknown[]) => Promise<unknown[]>) | undefined;
-let sdkReadRecords: ((type: string, opts: unknown) => Promise<{ records: unknown[] }>) | undefined;
-let sdkGetSdkStatus: (() => Promise<number>) | undefined;
-let SDK_AVAILABLE: number | undefined;
+let sdkInitialize:         (() => Promise<boolean>)                                           | undefined;
+let sdkRequestPermission:  ((perms: unknown[]) => Promise<unknown[]>)                         | undefined;
+let sdkCheckPermissions:   ((perms: unknown[]) => Promise<unknown[]>)                         | undefined;
+let sdkReadRecords:        ((type: string, opts: unknown) => Promise<{ records: unknown[] }>)  | undefined;
+let sdkGetSdkStatus:       (() => Promise<number>)                                            | undefined;
+let sdkOpenHCSettings:     (() => Promise<void>)                                              | undefined;
+let SDK_AVAILABLE:         number | undefined;
 
 if (isAndroid) {
-  // Dynamic require so Metro bundler doesn't try to evaluate on iOS
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const hc = require('react-native-health-connect');
   sdkInitialize        = hc.initialize;
   sdkRequestPermission = hc.requestPermission;
+  sdkCheckPermissions  = hc.checkPermissions;
   sdkReadRecords       = hc.readRecords;
   sdkGetSdkStatus      = hc.getSdkStatus;
+  // Fallback removed: openHealthConnectDataManagement opens Samsung Health's own data panel,
+  // not the HC permissions screen. openHealthConnectSettings is correct in react-native-health-connect 3.5.3+.
+  sdkOpenHCSettings    = hc.openHealthConnectSettings;
   SDK_AVAILABLE        = hc.SdkAvailabilityStatus?.SDK_AVAILABLE ?? 3;
 }
 
-// ─── Default empty counts ─────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function defaultCounts(): HCRecordCounts {
   return { heart_rate: 0, steps: 0 };
+}
+
+/**
+ * Returns true if every requested permission is present in the granted set.
+ * Composite key: "HeartRate:read", "Steps:read", etc.
+ */
+function resolveGrantedSet(
+  granted: unknown[],
+  permissionsToRequest: Array<{ recordType: string; accessType: string }>,
+): boolean {
+  const grantedKeys = new Set(
+    (granted as Array<{ recordType: string; accessType: string }>).map(
+      p => `${p.recordType}:${p.accessType}`,
+    ),
+  );
+  return permissionsToRequest.every(
+    p => grantedKeys.has(`${p.recordType}:${p.accessType}`),
+  );
+}
+
+function getMissingPermissions(
+  granted: unknown[],
+  permissionsToRequest: Array<{ recordType: string; accessType: string }>,
+): string[] {
+  const grantedKeys = new Set(
+    (granted as Array<{ recordType: string; accessType: string }>).map(
+      p => `${p.recordType}:${p.accessType}`,
+    ),
+  );
+  return permissionsToRequest
+    .filter(p => !grantedKeys.has(`${p.recordType}:${p.accessType}`))
+    .map(p => `${p.recordType} (${p.accessType})`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,8 +129,9 @@ function defaultCounts(): HCRecordCounts {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function useHealthConnect(): UseHealthConnectReturn {
-  const [isSupported,        setIsSupported]        = useState(false);
+  const [isSupported,         setIsSupported]         = useState(false);
   const [isPermissionGranted, setIsPermissionGranted] = useState(false);
+  const [isPermanentlyDenied, setIsPermanentlyDenied] = useState(false);
   const [lastSync,            setLastSync]            = useState<string | null>(null);
   const [syncCount,           setSyncCount]           = useState(0);
   const [counts,              setCounts]              = useState<HCRecordCounts>(defaultCounts());
@@ -83,23 +139,63 @@ export function useHealthConnect(): UseHealthConnectReturn {
   const [isSyncing,           setIsSyncing]           = useState(false);
   const [isLoading,           setIsLoading]           = useState(true);
 
-  // ── Initialise SDK and check support ────────────────────────────────────────
+  /**
+   * How many times the user has tapped "Berechtigung erteilen" and received a
+   * genuine user-interaction result (elapsed > 300 ms).
+   * Used to decide when to surface openSettings() instead of "try again".
+   * A ref so it doesn't trigger re-renders.
+   */
+  const permissionAttemptCount = useRef(0);
+
+  /**
+   * Counts consecutive OS-suppressed (silent) rejections — calls that resolve
+   * in < 300 ms with [].  After 2 consecutive silent rejections we surface the
+   * HC-settings button, because the dialog is being blocked at the OS level
+   * (e.g. Samsung "Needs updating" state) and manual settings navigation is the
+   * only path forward.  Reset to 0 on any genuine user interaction.
+   */
+  const silentRejectionCount = useRef(0);
+
+  // ── Init ─────────────────────────────────────────────────────────────────
 
   const initSDK = useCallback(async (): Promise<boolean> => {
     if (!isAndroid || !sdkGetSdkStatus || !sdkInitialize) {
-      // iOS stub — HealthKit integration is not yet implemented
       setIsSupported(false);
       return false;
     }
 
     try {
-      const status = await sdkGetSdkStatus();
+      const status    = await sdkGetSdkStatus();
       const available = status === SDK_AVAILABLE;
       setIsSupported(available);
-      if (!available) return false;
+      if (!available) {
+        console.warn('[HC] SDK not available, status code:', status);
+        return false;
+      }
 
       const initialised = await sdkInitialize();
-      return initialised;
+      if (!initialised) {
+        console.warn('[HC] initialize() returned false — HC provider not ready');
+        return false;
+      }
+
+      // Check whether permissions were already granted in a previous session.
+      if (sdkCheckPermissions) {
+        try {
+          const permissionsToRequest = getPermissionRequests();
+          const alreadyGranted       = await sdkCheckPermissions(permissionsToRequest);
+          const allGranted           = resolveGrantedSet(alreadyGranted as unknown[], permissionsToRequest);
+          setIsPermissionGranted(allGranted);
+          if (allGranted) {
+            console.log('[HC] permissions already granted from previous session');
+          }
+        } catch (e) {
+          console.warn('[HC] checkPermissions failed on mount:', e);
+          setIsPermissionGranted(false);
+        }
+      }
+
+      return true;
     } catch (e) {
       console.warn('[HC] SDK init failed:', e);
       setIsSupported(false);
@@ -107,7 +203,7 @@ export function useHealthConnect(): UseHealthConnectReturn {
     }
   }, []);
 
-  // ── Load backend status ──────────────────────────────────────────────────────
+  // ── Backend status ────────────────────────────────────────────────────────
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -115,15 +211,14 @@ export function useHealthConnect(): UseHealthConnectReturn {
       setLastSync(status.last_sync);
       setCounts(status.counts ?? defaultCounts());
     } catch {
-      // Non-fatal — backend may not have any records yet
+      // Non-fatal — backend may not have any HC records yet
     }
   }, []);
 
-  // ── Mount: init SDK + fetch backend status ───────────────────────────────────
+  // ── Mount ─────────────────────────────────────────────────────────────────
 
   useEffect(() => {
     let mounted = true;
-
     (async () => {
       setIsLoading(true);
       try {
@@ -133,48 +228,143 @@ export function useHealthConnect(): UseHealthConnectReturn {
         if (mounted) setIsLoading(false);
       }
     })();
-
     return () => { mounted = false; };
   }, [initSDK, refreshStatus]);
 
-  // ── Request permissions ──────────────────────────────────────────────────────
+  // ── Open HC Settings ──────────────────────────────────────────────────────
+
+  const openSettings = useCallback(async () => {
+    if (!sdkOpenHCSettings) {
+      console.warn('[HC] openHealthConnectSettings is not available on this SDK version.');
+      return;
+    }
+    try {
+      await sdkOpenHCSettings();
+    } catch (e) {
+      console.warn('[HC] openHealthConnectSettings failed:', e);
+    }
+  }, []);
+
+  // ── Request permissions ───────────────────────────────────────────────────
 
   const requestPermission = useCallback(async () => {
     setError(null);
+    setIsPermanentlyDenied(false);
 
     if (!isAndroid || !sdkRequestPermission) {
-      // iOS: HealthKit stub — not implemented yet
-      setError('Health Connect is only available on Android. iOS HealthKit support is planned for a future release.');
+      setError(
+        'Health Connect ist nur auf Android verfügbar. ' +
+        'iOS HealthKit-Unterstützung ist für eine zukünftige Version geplant.',
+      );
       return;
     }
 
     try {
+      // Re-initialise before each permission request.
+      // The HC provider connection can become stale after backgrounding;
+      // a stale connection may cause sdkRequestPermission() to fail silently.
+      if (sdkInitialize) {
+        const ok = await sdkInitialize();
+        if (!ok) {
+          console.warn('[HC] re-initialize() returned false before requestPermission');
+          setError(
+            'Health Connect konnte nicht initialisiert werden. ' +
+            'Bitte stellen Sie sicher, dass die Health-Connect-App installiert und aktuell ist.',
+          );
+          return;
+        }
+        console.log('[HC] re-initialized successfully');
+      }
+
       const permissionsToRequest = getPermissionRequests();
+      const attempt = permissionAttemptCount.current + 1;
+      console.log('[HC] requesting permissions (attempt', attempt, '):', JSON.stringify(permissionsToRequest));
+
+      // With New Architecture: this call AWAITS the HC dialog result.
+      // The promise resolves only after the user taps Allow/Deny or dismisses.
+      //
+      // With Old Architecture (newArchEnabled=false):
+      // this would have resolved immediately with [] before the dialog renders.
+      // That bug is gone; remove this comment once Old Arch support is dropped.
+      const requestedAt = Date.now();
       const granted = await sdkRequestPermission(permissionsToRequest);
+      const elapsed = Date.now() - requestedAt;
+      console.log('[HC] sdkRequestPermission resolved in', elapsed, 'ms');
 
-      // The SDK returns the granted permissions array.
-      // We consider all required permissions granted if the returned list
-      // is non-empty and covers all record types we need.
-      const grantedTypes = new Set(
-        (granted as Array<{ recordType: string }>).map(p => p.recordType)
-      );
-      const requiredTypes = permissionsToRequest.map(p => p.recordType);
-      const allGranted = requiredTypes.every(t => grantedTypes.has(t));
+      // Only count this as a genuine user interaction if the dialog had enough
+      // time to be shown. Silent OS rejections (no Google account, corrupted
+      // HC grant-times DB, emulator quirks) resolve in < 300 ms. A real user
+      // decision — even a quick tap — takes at least a second.
+      if (elapsed > 300) {
+        permissionAttemptCount.current = attempt;
+        silentRejectionCount.current   = 0; // genuine user interaction — reset silent counter
+      } else {
+        silentRejectionCount.current += 1;
+        console.log('[HC] silent rejection #', silentRejectionCount.current, '(elapsed:', elapsed, 'ms)');
+      }
 
+      console.log('[HC] granted result:', JSON.stringify(granted));
+
+      const allGranted = resolveGrantedSet(granted as unknown[], permissionsToRequest);
       setIsPermissionGranted(allGranted);
 
-      if (!allGranted) {
-        const missing = requiredTypes.filter(t => !grantedTypes.has(t));
-        setError(`Some permissions were not granted: ${missing.join(', ')}. You can grant them in Android Settings → Apps → Health Connect.`);
+      if (allGranted) {
+        // Happy path.
+        setError(null);
+        setIsPermanentlyDenied(false);
+        return;
+      }
+
+      const emptyResult = (granted as unknown[]).length === 0;
+
+      if (emptyResult) {
+        // The user dismissed the HC dialog, pressed Back, or the dialog was
+        // silently suppressed by Android (permanent denial or Samsung's
+        // "Needs updating" state blocking the dialog at the OS level).
+        //
+        // isSuppressed: 2+ consecutive silent rejections (< 300 ms each) with
+        //   no genuine user interaction. This means the dialog is being blocked
+        //   before it can render — skip straight to openSettings().
+        //
+        // Attempt 1 (not suppressed): encourage the user to try again.
+        // Attempt 2+  OR  isSuppressed: surface the HC settings link.
+        const isSuppressed = silentRejectionCount.current >= 2;
+
+        if (attempt <= 1 && !isSuppressed) {
+          setIsPermanentlyDenied(false);
+          setError(
+            'Der Health-Connect-Dialog wurde geschlossen oder abgebrochen. ' +
+            'Tippen Sie erneut auf „Berechtigung erteilen\" und wählen Sie „Alle zulassen\".',
+          );
+        } else {
+          setIsPermanentlyDenied(true);
+          setError(
+            'Health-Connect-Berechtigungen wurden nicht erteilt. ' +
+            'Tippen Sie auf „HC-Einstellungen öffnen\", wählen Sie „Morafek\" ' +
+            'und erteilen Sie Herzfrequenz- und Schritte-Berechtigungen manuell.',
+          );
+        }
+      } else {
+        // Dialog appeared, but only some permissions were granted.
+        const missing = getMissingPermissions(
+          granted as unknown[],
+          permissionsToRequest,
+        );
+        setIsPermanentlyDenied(false);
+        setError(
+          `Einige Berechtigungen wurden nicht erteilt: ${missing.join(', ')}. ` +
+          'Sie können diese in Einstellungen → Apps → Health Connect gewähren.',
+        );
       }
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Permission request failed';
+      const msg = e instanceof Error ? e.message : 'Berechtigungsanfrage fehlgeschlagen';
+      console.error('[HC] requestPermission error:', e);
       setError(msg);
       setIsPermissionGranted(false);
     }
   }, []);
 
-  // ── Read records from Health Connect ────────────────────────────────────────
+  // ── Read records ──────────────────────────────────────────────────────────
 
   const readAllRecords = useCallback(async (
     startTime: string,
@@ -182,12 +372,7 @@ export function useHealthConnect(): UseHealthConnectReturn {
   ): Promise<Partial<Record<keyof typeof HC_DATA_TYPES, unknown[]>>> => {
     if (!isAndroid || !sdkReadRecords) return {};
 
-    const timeRangeFilter = {
-      operator: 'between',
-      startTime,
-      endTime,
-    };
-
+    const timeRangeFilter = { operator: 'between', startTime, endTime };
     const results: Partial<Record<keyof typeof HC_DATA_TYPES, unknown[]>> = {};
 
     for (const [dataTypeKey, config] of Object.entries(HC_DATA_TYPES) as [
@@ -198,8 +383,6 @@ export function useHealthConnect(): UseHealthConnectReturn {
         const { records } = await sdkReadRecords(config.hcRecord, { timeRangeFilter });
         results[dataTypeKey] = records;
       } catch (e) {
-        // If a single type fails (e.g. permission for that type not granted),
-        // log and continue rather than aborting the entire sync.
         console.warn(`[HC] Failed to read ${config.hcRecord} records:`, e);
         results[dataTypeKey] = [];
       }
@@ -208,15 +391,8 @@ export function useHealthConnect(): UseHealthConnectReturn {
     return results;
   }, []);
 
-  // ── Main sync ────────────────────────────────────────────────────────────────
+  // ── Sync ──────────────────────────────────────────────────────────────────
 
-  /**
-   * Read Health Connect records for the past `hoursBack` hours,
-   * map to FHIR Observations, and POST to the backend.
-   *
-   * @param hoursBack - How many hours of history to read (default: 24)
-   * @returns Sync response from backend, or null on error
-   */
   const sync = useCallback(async (
     hoursBack = 24,
   ): Promise<HCSyncResponse | null> => {
@@ -225,70 +401,63 @@ export function useHealthConnect(): UseHealthConnectReturn {
 
     try {
       if (!isAndroid) {
-        throw new Error('Health Connect is only available on Android.');
+        throw new Error('Health Connect ist nur auf Android verfügbar.');
       }
-
       if (!isSupported) {
-        throw new Error('Health Connect is not available on this device. Please install the Health Connect app from the Play Store.');
+        throw new Error(
+          'Health Connect ist auf diesem Gerät nicht verfügbar. ' +
+          'Bitte installieren Sie die Health-Connect-App aus dem Play Store.',
+        );
       }
-
       if (!isPermissionGranted) {
-        throw new Error('Health Connect permissions have not been granted. Please tap "Berechtigung erteilen" first.');
+        throw new Error(
+          'Health-Connect-Berechtigungen wurden noch nicht erteilt. ' +
+          'Bitte tippen Sie zuerst auf „Berechtigung erteilen\".',
+        );
       }
 
-      // ── Build time range ─────────────────────────────────────────────────
       const endTime   = new Date().toISOString();
       const startTime = new Date(Date.now() - hoursBack * 60 * 60 * 1000).toISOString();
 
-      // ── Read all supported record types from HC ──────────────────────────
       const allRecords = await readAllRecords(startTime, endTime);
 
-      // ── Get patient ID from the JWT stored in the API client ─────────────
-      // The mapper needs the patient ID to build subject.reference.
-      // We extract it from the stored token using the auth store.
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { useAuthStore } = require('@/store/auth.store');
       const patientId: string = useAuthStore.getState()?.user?._id ?? '';
-
       if (!patientId) {
-        throw new Error('Patient ID not available. Please log out and log in again.');
+        throw new Error('Patienten-ID nicht verfügbar. Bitte melden Sie sich ab und erneut an.');
       }
 
-      // ── Map to FHIR Observations ──────────────────────────────────────────
       const observations = mapAllRecordsToObservations(allRecords, patientId);
 
       if (observations.length === 0) {
-        // No records in the time window — still a successful sync
         const emptyResult: HCSyncResponse = {
-          message: 'Sync complete — no new records in the selected time range.',
+          message: 'Synchronisation abgeschlossen — keine neuen Messungen im gewählten Zeitraum.',
           received: 0,
           inserted: 0,
           skipped: 0,
         };
-        // Update last_sync timestamp even for empty syncs
         await refreshStatus();
         return emptyResult;
       }
 
-      // ── POST to backend ───────────────────────────────────────────────────
       const response = await syncHealthConnectData(observations);
-
       setSyncCount(response.inserted);
       await refreshStatus();
-
       return response;
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Sync failed — unknown error';
+      const msg = e instanceof Error ? e.message : 'Synchronisation fehlgeschlagen — unbekannter Fehler';
       setError(msg);
       return null;
     } finally {
       setIsSyncing(false);
     }
-  }, [isAndroid, isSupported, isPermissionGranted, readAllRecords, refreshStatus]);
+  }, [isSupported, isPermissionGranted, readAllRecords, refreshStatus]);
 
   return {
     isSupported,
     isPermissionGranted,
+    isPermanentlyDenied,
     lastSync,
     syncCount,
     counts,
@@ -296,6 +465,7 @@ export function useHealthConnect(): UseHealthConnectReturn {
     isSyncing,
     isLoading,
     requestPermission,
+    openSettings,
     sync,
     refreshStatus,
   };

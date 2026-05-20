@@ -2,22 +2,30 @@
  * FHIR Export Screen
  * Location: mobile/app/(app)/ehr/fhir-export.tsx
  *
- * Dedicated page for the patient's full FHIR R4 document Bundle export.
- * Explains the document structure, the German compliance profiles used,
- * and lets the patient trigger GET /api/patient/fhir-export.
+ * Standard (identified) FHIR R4 document Bundle export.
+ * Intended for direct EHR / KIS integration — always available to
+ * authenticated patients regardless of research consent status.
  *
- * After a successful export the screen shows a per-resource summary and
- * offers a Share sheet so the patient can send the JSON to their GP / KIS.
+ * Endpoint: GET /api/patient/fhir-export
  *
- * PSEUDONYM GATE:
- *   Export is disabled (opacity 0.4, not pressable) when pseudonymSuffix
- *   is absent from the auth store — i.e. before consent is accepted.
- *   The gate is automatic: revoking consent clears the suffix and
- *   the button locks without any extra wiring.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * EXPORT TYPES — summary of the two separate paths in this app:
  *
- * TYPESCRIPT FIXES applied in this version:
- *   • FileSystem.cacheDirectory  → FileSystem.documentDirectory
- *   • FileSystem.EncodingType.UTF8 → string literal 'utf8'
+ *   A) STANDARD FHIR export  (this screen)
+ *      • Route:   GET /api/patient/fhir-export
+ *      • Who:     Any authenticated patient
+ *      • Purpose: Sending full identified record to your GP / KIS / hospital
+ *      • Consent: NOT required
+ *
+ *   B) PSEUDONYMISED export   (consent.tsx)
+ *      • Route:   GET /api/patient/fhir-export/pseudonymised
+ *      • Who:     Patients with active gICS research consent
+ *      • Purpose: Research data sharing — identity replaced by gPAS pseudonym
+ *      • Consent: REQUIRED — managed on the Data Sharing screen
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * German compliance profiles included in the export:
+ *   FHIR R4 · ISiK Stage 1 · de.basisprofil.r4 · KBV ERP
  */
 
 import React, { useState, useCallback } from 'react';
@@ -35,12 +43,11 @@ import * as Sharing from 'expo-sharing';
 import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { apiClient } from '@/services/api/client';
-import { useAuthStore } from '@/store/auth.store';
+import { fetchStandardFhirBundle } from '@/services/api/consent';
 import { E, ET } from '@/constants/elderlyTheme';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Static document-structure data (mirrors ehr_routes.py export logic)
+// Static resource manifest (mirrors ehr_routes.py export logic)
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ResourceInfo {
@@ -105,7 +112,7 @@ const RESOURCE_MANIFEST: ResourceInfo[] = [
     icon:        '📋',
     type:        'MedicationRequest',
     label:       'Prescriptions',
-    description: 'Structured e-prescription (E-Rezept) resource for each active medication. Encounter reference is included only when the linked visit is also in the bundle.',
+    description: 'Structured e-prescription (E-Rezept) for each active medication. Encounter reference included when the linked visit is in the bundle.',
     profiles:    ['KBV_PR_ERP_Prescription'],
     accentColor: '#D48B2F',
   },
@@ -113,21 +120,17 @@ const RESOURCE_MANIFEST: ResourceInfo[] = [
     icon:        '📆',
     type:        'MedicationStatement',
     label:       'Intake history',
-    description: `Actual intake records from the last 90 days, one MedicationStatement per recorded dose. Supports adherence tracking.`,
+    description: 'Actual intake records from the last 90 days, one MedicationStatement per dose. Supports adherence tracking.',
     profiles:    ['HL7 FHIR R4 MedicationStatement'],
     accentColor: '#8F6BBE',
   },
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Compliance badges
-// ─────────────────────────────────────────────────────────────────────────────
-
 const COMPLIANCE_BADGES = [
-  { label: 'FHIR R4',            color: '#1565C0', bg: '#E3F2FD' },
-  { label: 'ISiK Stage 1',       color: '#1B5E20', bg: '#E8F5E9' },
-  { label: 'de.basisprofil.r4',  color: '#4A148C', bg: '#F3E5F5' },
-  { label: 'KBV ERP',            color: '#BF360C', bg: '#FBE9E7' },
+  { label: 'FHIR R4',           color: '#1565C0', bg: '#E3F2FD' },
+  { label: 'ISiK Stage 1',      color: '#1B5E20', bg: '#E8F5E9' },
+  { label: 'de.basisprofil.r4', color: '#4A148C', bg: '#F3E5F5' },
+  { label: 'KBV ERP',           color: '#BF360C', bg: '#FBE9E7' },
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -213,32 +216,25 @@ interface FhirBundle {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function FhirExportScreen() {
-  // ── pseudonym gate ─────────────────────────────────────────────────────────
-  // Export is only enabled when the patient has an accepted pseudonymSuffix in
-  // the store. The gate clears automatically when consent is revoked.
-  const pseudonymSuffix = useAuthStore((s) => s.pseudonymSuffix);
-  const exportEnabled   = Boolean(pseudonymSuffix);
-
-  const [exporting,  setExporting]  = useState(false);
-  const [bundle,     setBundle]     = useState<FhirBundle | null>(null);
-  const [error,      setError]      = useState<string | null>(null);
+  // Standard FHIR export has NO pseudonym gate — always available.
+  const [exporting, setExporting] = useState(false);
+  const [bundle,    setBundle]    = useState<FhirBundle | null>(null);
+  const [error,     setError]     = useState<string | null>(null);
 
   // ── Trigger export ──────────────────────────────────────────────────────────
   const handleExport = useCallback(async () => {
-    if (!exportEnabled) return; // belt-and-suspenders guard
     try {
       setExporting(true);
       setError(null);
       setBundle(null);
-
-      const res = await apiClient.get<FhirBundle>('/api/patient/fhir-export');
-      setBundle(res.data);
+      const data = await fetchStandardFhirBundle<FhirBundle>();
+      setBundle(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Export failed. Please try again.');
     } finally {
       setExporting(false);
     }
-  }, [exportEnabled]);
+  }, []);
 
   // ── Download / share bundle JSON ────────────────────────────────────────────
   const handleShare = useCallback(async () => {
@@ -259,15 +255,13 @@ export default function FhirExportScreen() {
       return;
     }
 
-    // FIX: documentDirectory (was cacheDirectory — not valid on all platforms)
     const path = `${FileSystem.documentDirectory}${filename}`;
-    // FIX: 'utf8' string literal (was FileSystem.EncodingType.UTF8 — enum not exported by expo-file-system types)
     await FileSystem.writeAsStringAsync(path, json, { encoding: 'utf8' });
     const canShare = await Sharing.isAvailableAsync();
     if (canShare) {
       await Sharing.shareAsync(path, {
         mimeType:    'application/json',
-        dialogTitle: 'Save or share your FHIR export',
+        dialogTitle: 'Share FHIR R4 Bundle',
         UTI:         'public.json',
       });
     }
@@ -275,23 +269,36 @@ export default function FhirExportScreen() {
 
   const entries = bundle?.entry ?? [];
 
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safeArea} edges={['bottom']}>
-      <Stack.Screen options={{ title: 'FHIR Data Export' }} />
+      <Stack.Screen options={{ title: 'FHIR Export' }} />
 
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
       >
-
-        {/* ── Header banner ── */}
-        <View style={styles.heroBanner}>
-          <Text style={styles.heroEmoji}>🗂️</Text>
+        {/* ── Hero ── */}
+        <View style={styles.hero}>
+          <Text style={styles.heroEmoji}>📦</Text>
           <View style={styles.heroText}>
-            <Text style={styles.heroTitle}>Your health data as FHIR R4</Text>
+            <Text style={styles.heroTitle}>Standard FHIR R4 Export</Text>
             <Text style={styles.heroSub}>
-              Export a complete, interoperable snapshot of your medical record
-              in the format used by German hospitals and insurers.
+              Your full identified health record · for GP, hospital, or KIS
+            </Text>
+          </View>
+        </View>
+
+        {/* ── "Always available" notice ── */}
+        <View style={styles.availabilityBanner}>
+          <Text style={styles.availabilityIcon}>✅</Text>
+          <View style={styles.availabilityText}>
+            <Text style={styles.availabilityTitle}>Always available</Text>
+            <Text style={styles.availabilityBody}>
+              This export is available at any time and does not require research
+              consent. For the anonymised research export, visit the{' '}
+              <Text style={styles.availabilityLink}>Data Sharing</Text> screen.
             </Text>
           </View>
         </View>
@@ -303,102 +310,71 @@ export default function FhirExportScreen() {
           ))}
         </View>
 
-        {/* ── What's in the bundle ── */}
-        <Text style={styles.sectionHeading}>What's included in the bundle</Text>
+        {/* ── Resource manifest ── */}
+        <Text style={styles.sectionHeading}>What's included</Text>
         <Text style={styles.sectionCaption}>
-          The exported file is a FHIR <Text style={styles.mono}>document</Text> Bundle.
-          Each section below becomes one or more resources inside that bundle.
+          All data is encoded in FHIR R4 with German ISiK / MIO profiles.
         </Text>
-
         {RESOURCE_MANIFEST.map((info) => (
           <ResourceCard key={info.type} info={info} />
         ))}
 
-        {/* ── Data-quality notes ── */}
+        {/* ── Data quality note ── */}
         <View style={styles.noteBox}>
-          <Text style={styles.noteTitle}>📌 What gets filtered out</Text>
-          <Text style={styles.noteItem}>
-            · Conditions without an ICD-10-GM code are omitted (ISiKDiagnose requires at least one valid coding).
-          </Text>
-          <Text style={styles.noteItem}>
-            · MedicationRequest encounter references are dropped if the linked visit is not present in the bundle.
-          </Text>
-          <Text style={styles.noteItem}>
-            · Medication intake history covers the last 90 days only.
-          </Text>
-          <Text style={styles.noteItem}>
-            · <Text style={styles.mono}>Bundle.total</Text> is not set — this is a <Text style={styles.mono}>document</Text> bundle, not a searchset.
-          </Text>
+          <Text style={styles.noteTitle}>ℹ️ Data quality note</Text>
+          <Text style={styles.noteItem}>• Only data entered by your doctor is included.</Text>
+          <Text style={styles.noteItem}>• Diagnoses without a valid ICD-10-GM code are omitted.</Text>
+          <Text style={styles.noteItem}>• Documents are referenced by URL, not embedded in the bundle.</Text>
+          <Text style={styles.noteItem}>• Medication intake records cover the last 90 days.</Text>
         </View>
 
-        {/* ── Pseudonym identifier preview ── */}
-        {exportEnabled && pseudonymSuffix && (
-          <View style={styles.identifierBanner}>
-            <Text style={styles.identifierBannerText}>
-              🔐  Export will use identifier: ****{pseudonymSuffix}
-            </Text>
-          </View>
-        )}
+        {/* ── Export button ── */}
+        <TouchableOpacity
+          style={[styles.exportBtn, exporting && styles.exportBtnLoading]}
+          onPress={handleExport}
+          disabled={exporting}
+          activeOpacity={0.85}
+        >
+          {exporting
+            ? <ActivityIndicator color={E.colors.textInverse} />
+            : <Text style={styles.exportBtnText}>⬇️  Export my FHIR bundle</Text>}
+        </TouchableOpacity>
 
-        {/* ── Export button / result ── */}
-        {!bundle ? (
-          <>
-            <TouchableOpacity
-              style={[
-                styles.exportBtn,
-                (exporting || !exportEnabled) && styles.exportBtnDisabled,
-              ]}
-              onPress={handleExport}
-              disabled={exporting || !exportEnabled}
-              activeOpacity={exportEnabled ? 0.8 : 1}
-            >
-              {exporting ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.exportBtnText}>⬇️  Export my FHIR bundle</Text>
-              )}
-            </TouchableOpacity>
-
-            {/* Gate message — shown when pseudonymSuffix is absent */}
-            {!exportEnabled && (
-              <Text style={styles.gateMessage}>
-                Accept data consent to enable pseudonymized export.
-              </Text>
-            )}
-          </>
-        ) : (
-          <>
-            <BundleSummaryCard entries={entries} />
-
-            <TouchableOpacity
-              style={styles.shareBtn}
-              onPress={handleShare}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.shareBtnText}>📤  Share JSON</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.reExportBtn}
-              onPress={handleExport}
-              disabled={exporting}
-              activeOpacity={0.8}
-            >
-              {exporting
-                ? <ActivityIndicator color={E.colors.primary} />
-                : <Text style={styles.reExportBtnText}>↺  Re-export</Text>
-              }
-            </TouchableOpacity>
-          </>
-        )}
-
-        {/* ── Error state ── */}
-        {error ? (
+        {/* ── Error ── */}
+        {error && (
           <View style={styles.errorBox}>
             <Text style={styles.errorText}>⚠️ {error}</Text>
           </View>
-        ) : null}
+        )}
 
+        {/* ── Bundle summary ── */}
+        {bundle && entries.length > 0 && (
+          <BundleSummaryCard entries={entries} />
+        )}
+
+        {/* ── Share / re-export ── */}
+        {bundle && (
+          <View style={styles.actionRow}>
+            <TouchableOpacity
+              style={[styles.shareBtn, { flex: 2 }]}
+              onPress={handleShare}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.shareBtnText}>📤  Share / Save JSON</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.reExportBtn, { flex: 1 }]}
+              onPress={handleExport}
+              disabled={exporting}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.reExportBtnText}>↺  Re-export</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ── bottom padding ── */}
+        <View style={{ height: 32 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -413,19 +389,18 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: E.colors.bg,
   },
-  scroll: { flex: 1 },
+  scroll:  { flex: 1 },
   content: {
     padding: E.padSm,
-    paddingBottom: 48,
     gap: E.padSm,
   },
 
-  // ── Hero banner ──
-  heroBanner: {
-    flexDirection: 'row',
+  // ── Hero ──
+  hero: {
     backgroundColor: E.colors.primary,
     borderRadius: E.radius,
     padding: E.pad,
+    flexDirection: 'row',
     gap: E.padSm,
     alignItems: 'flex-start',
     ...E.shadow,
@@ -442,6 +417,34 @@ const styles = StyleSheet.create({
     ...ET.small,
     color: E.colors.primaryLight,
     lineHeight: 18,
+  },
+
+  // ── Availability banner ──
+  availabilityBanner: {
+    backgroundColor: '#E8F5E9',
+    borderRadius: E.radius,
+    borderWidth: 1,
+    borderColor: '#A5D6A7',
+    padding: E.padSm,
+    flexDirection: 'row',
+    gap: E.padXs,
+    alignItems: 'flex-start',
+  },
+  availabilityIcon: { fontSize: 18, lineHeight: 24 },
+  availabilityText: { flex: 1, gap: 4 },
+  availabilityTitle: {
+    ...ET.bodyBold,
+    color: '#1B5E20',
+    fontWeight: '700',
+  },
+  availabilityBody: {
+    ...ET.small,
+    color: '#2E7D32',
+    lineHeight: 18,
+  },
+  availabilityLink: {
+    fontWeight: '700',
+    textDecorationLine: 'underline',
   },
 
   // ── Compliance badges ──
@@ -473,11 +476,6 @@ const styles = StyleSheet.create({
     color: E.colors.textSecondary,
     lineHeight: 18,
     marginBottom: 2,
-  },
-  mono: {
-    fontFamily: 'Courier New',
-    fontSize: 12,
-    color: E.colors.textSecondary,
   },
 
   // ── Resource card ──
@@ -539,7 +537,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
 
-  // ── Data-quality note ──
+  // ── Data quality note ──
   noteBox: {
     backgroundColor: '#FFFDE7',
     borderRadius: E.radius,
@@ -560,21 +558,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 
-  // ── Identifier preview banner ──
-  identifierBanner: {
-    backgroundColor: E.colors.primary + '15',
-    borderRadius: E.radius,
-    borderWidth: 1,
-    borderColor: E.colors.primary + '44',
-    padding: E.padSm,
-  },
-  identifierBannerText: {
-    ...ET.bodyBold,
-    color: E.colors.primary,
-    fontFamily: 'Courier New',
-    fontSize: 13,
-  },
-
   // ── Export button ──
   exportBtn: {
     backgroundColor: E.colors.primary,
@@ -585,23 +568,14 @@ const styles = StyleSheet.create({
     minHeight: 52,
     ...E.shadow,
   },
-  exportBtnDisabled: {
-    opacity: 0.4,
+  exportBtnLoading: {
+    opacity: 0.7,
   },
   exportBtnText: {
     ...ET.bodyBold,
     color: E.colors.textInverse,
     fontWeight: '700',
     fontSize: 16,
-  },
-
-  // ── Gate message ──
-  gateMessage: {
-    ...ET.small,
-    color: E.colors.textSecondary,
-    textAlign: 'center',
-    marginTop: -E.padXs,
-    fontStyle: 'italic',
   },
 
   // ── Bundle summary ──
@@ -653,7 +627,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  // ── Share / re-export buttons ──
+  // ── Share / re-export ──
+  actionRow: {
+    flexDirection: 'row',
+    gap: E.padXs,
+  },
   shareBtn: {
     backgroundColor: E.colors.accent,
     borderRadius: E.radius,

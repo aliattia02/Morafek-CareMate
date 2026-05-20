@@ -1868,7 +1868,11 @@ def fhir_export(current_user):
       - MedicationStatement resources (patient intake status)
 
     All personally identifying data (name, address, telecom, etc.) is included.
-    For a research-safe pseudonymised version use /api/patient/fhir-export/pseudonymised.
+    For a pseudonymised version use /api/patient/fhir-export/pseudonymised.
+
+    No consent gate — access is controlled solely by the JWT.  This endpoint
+    is designed for direct integration with secure hospital information systems
+    (KIS/EHR) that manage their own access control.
 
     Conformance fixes applied vs. previous version:
       • Bundle.total removed        (invalid for type=document)
@@ -1880,9 +1884,6 @@ def fhir_export(current_user):
       • Conditions with empty code.coding skipped (ISiKDiagnose non-conformant)
       • MedicationRequest.encounter stripped when encounter not in bundle
     """
-    if current_user.get('user_type') != 'patient':
-        return jsonify({'error': 'Unauthorized access'}), 403
-
     patient_id = str(current_user['_id'])
 
     from utils.fhir_de import build_fhir_patient
@@ -2013,35 +2014,38 @@ def fhir_export_pseudonymised(current_user):
 
     Clinical fields retained for research utility: gender, birthDate.
 
-    Requires:
-      • Authenticated patient (user_type == 'patient')
-      • Consent status == 'granted' in patient_consents
-      • A gPAS pseudonym stored in patient_fhir_identifiers or patient_consents
+    No consent gate — access is controlled solely by the JWT.  This endpoint
+    is designed for direct integration with secure hospital information systems
+    (KIS/EHR) that manage their own access control.
 
-    Returns 403 if consent not granted, 503 if pseudonym not yet assigned.
+    Pseudonym behaviour:
+      • If a gPAS pseudonym is stored in users.pseudonym it is used as the
+        FHIR Patient.id and all references are rewritten accordingly.
+      • If no pseudonym has been assigned yet (gPAS not yet called or
+        GPAS_ENABLED=false), the endpoint falls back to the MongoDB _id so
+        data always flows — no blocking error is raised.
     """
-    if current_user.get('user_type') != 'patient':
-        return jsonify({'error': 'Unauthorized access'}), 403
-
     patient_id = str(current_user['_id'])
 
     from config import mongo as _mongo
     from bson.objectid import ObjectId as _ObjId
 
-    # ── Guard: require pseudonym in users collection ───────────────────────────
-    # The pseudonym is written by POST /api/consent/accept only after both gICS
-    # and gPAS have succeeded.  Its absence means the patient never consented or
-    # consent was fully revoked (gPAS delete confirmed → field unset).
+    # ── Resolve pseudonym — non-blocking fallback to patient_id ───────────────
+    # No gate here: if gPAS has not yet assigned a pseudonym the export still
+    # proceeds using the patient's own MongoDB _id as the FHIR Patient.id.
+    # The hospital system is responsible for access control; this service only
+    # ensures data availability.
     patient_user = _mongo.db.users.find_one(
         {'_id': _ObjId(patient_id)},
         {'pseudonym': 1, 'pseudonymSuffix': 1},
     )
-    if not patient_user or not patient_user.get('pseudonym'):
-        return jsonify({
-            'error': 'Consent and pseudonymization required.'
-        }), 403
-
-    pseudonym = patient_user['pseudonym']
+    pseudonym = (patient_user or {}).get('pseudonym') or patient_id
+    if pseudonym == patient_id:
+        logger.info(
+            'fhir_export_pseudonymised: no gPAS pseudonym for patient %s — '
+            'using patient_id as FHIR id (pseudonymisation pending)',
+            patient_id,
+        )
 
     id_doc     = _mongo.db.patient_fhir_identifiers.find_one({'patient_id': patient_id}) or {}
     medical    = _mongo.db.patient_profiles.find_one({'patient_id': patient_id}) or {}

@@ -2,12 +2,12 @@
   "expo": {
     "name": "Morafek",
     "slug": "Morafek",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "Morafek",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -29,23 +29,28 @@
         "backgroundColor": "#8031A7"
       },
       "package": "com.morafek.mobile",
-      "runtimeVersion": "1.0.0",
-      "minSdkVersion": 26
+      "runtimeVersion": "1.0.1",
+      "minSdkVersion": 26,
+      "compileSdkVersion": 35,
+      "targetSdkVersion": 34
     },
     "web": {
       "bundler": "metro",
       "output": "single",
       "favicon": "./assets/favicon.png"
     },
-"plugins": [
-  "./plugins/withMinSdk",
-  "expo-router",
-  "expo-secure-store",
-  "expo-asset",
-  "expo-font",
-  "expo-sqlite",
-  "react-native-health-connect"
-],
+    "plugins": [
+      "./plugins/withMinSdk",
+      "expo-router",
+      "expo-secure-store",
+      "expo-asset",
+      "expo-font",
+      "expo-sqlite",
+      [
+        "react-native-health-connect",
+        {}
+      ]
+    ],
     "experiments": {
       "typedRoutes": true
     },

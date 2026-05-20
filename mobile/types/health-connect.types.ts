@@ -191,6 +191,13 @@ export interface UseHealthConnectReturn {
   isSupported: boolean;
   /** True when all required permissions have been granted by the OS */
   isPermissionGranted: boolean;
+  /**
+   * True when the OS will no longer show the permission dialog because the
+   * user previously selected "Don't ask again". When true, the UI should
+   * surface the openSettings() action so the user can grant permissions
+   * manually in the Health Connect settings screen.
+   */
+  isPermanentlyDenied: boolean;
   /** ISO-8601 datetime of last successful sync, or null */
   lastSync: string | null;
   /** Number of observations sent in the most recent sync */
@@ -205,6 +212,12 @@ export interface UseHealthConnectReturn {
   isLoading: boolean;
   /** Request Android Health Connect permissions */
   requestPermission: () => Promise<void>;
+  /**
+   * Opens the Health Connect system settings screen so the user can manually
+   * grant permissions that were permanently denied. Only actionable when
+   * isPermanentlyDenied is true.
+   */
+  openSettings: () => Promise<void>;
   /** Read HC records and POST FHIR Observations to backend */
   sync: (hoursBack?: number) => Promise<HCSyncResponse | null>;
   /** Reload status from backend without syncing */
