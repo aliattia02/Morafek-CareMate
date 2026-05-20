@@ -43,10 +43,15 @@ def login():
         user = users.find_one({"username": username, "user_type": user_type})
 
         if user and check_password_hash(user['password'], password):
-            token = generate_token(str(user['_id']), user['user_type'])
+            user_id_str = str(user['_id'])
+            token = generate_token(user_id_str, user['user_type'])
             return jsonify({
                 "message":              "Logged in successfully",
                 "token":                token,
+                # REQUIRED by mobile auth.ts: used to populate user._id in the
+                # auth store so useHealthConnect can build FHIR subject references.
+                # Must be the string form of the MongoDB ObjectId.
+                "id":                   user_id_str,
                 "user_type":            user['user_type'],
                 "firstName":            user.get('first_name', ''),
                 "lastName":             user.get('last_name', ''),

@@ -59,6 +59,7 @@ import type {
   HCSyncResponse,
   UseHealthConnectReturn,
 } from '@/types/health-connect.types';
+import { useHCStatusStore } from '@/store/health-connect.store';
 
 // ─── Conditional SDK import ───────────────────────────────────────────────────
 
@@ -132,9 +133,14 @@ export function useHealthConnect(): UseHealthConnectReturn {
   const [isSupported,         setIsSupported]         = useState(false);
   const [isPermissionGranted, setIsPermissionGranted] = useState(false);
   const [isPermanentlyDenied, setIsPermanentlyDenied] = useState(false);
-  const [lastSync,            setLastSync]            = useState<string | null>(null);
-  const [syncCount,           setSyncCount]           = useState(0);
-  const [counts,              setCounts]              = useState<HCRecordCounts>(defaultCounts());
+  // ── Persistent status state (survives screen unmount/remount) ─────────────────
+  // lastSync, counts, and syncCount live in a Zustand store so navigating
+  // away and back doesn't cause a blank-UI flash while refreshStatus() re-runs.
+  const lastSync     = useHCStatusStore(s => s.lastSync);
+  const counts       = useHCStatusStore(s => s.counts);
+  const syncCount    = useHCStatusStore(s => s.syncCount);
+  const setStatus    = useHCStatusStore(s => s.setStatus);
+  const setSyncCount = useHCStatusStore(s => s.setSyncCount);
   const [error,               setError]               = useState<string | null>(null);
   const [isSyncing,           setIsSyncing]           = useState(false);
   const [isLoading,           setIsLoading]           = useState(true);
@@ -208,12 +214,11 @@ export function useHealthConnect(): UseHealthConnectReturn {
   const refreshStatus = useCallback(async () => {
     try {
       const status = await getHealthConnectStatus();
-      setLastSync(status.last_sync);
-      setCounts(status.counts ?? defaultCounts());
+      setStatus(status.last_sync, status.counts ?? defaultCounts());
     } catch {
       // Non-fatal — backend may not have any HC records yet
     }
-  }, []);
+  }, [setStatus]);
 
   // ── Mount ─────────────────────────────────────────────────────────────────
 
@@ -423,7 +428,25 @@ export function useHealthConnect(): UseHealthConnectReturn {
 
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const { useAuthStore } = require('@/store/auth.store');
-      const patientId: string = useAuthStore.getState()?.user?._id ?? '';
+      let patientId: string = useAuthStore.getState()?.user?._id ?? '';
+
+      if (!patientId) {
+        // Migration fallback: UserData cached before the _id fix won't have _id.
+        // Recover it from the JWT `sub` claim so the user doesn't need to re-login.
+        try {
+          const { getStoredToken } = require('@/services/api/auth');
+          const token: string | null = await getStoredToken();
+          if (token) {
+            const base64  = token.split('.')[1];
+            const payload = JSON.parse(atob(base64.replace(/-/g, '+').replace(/_/g, '/')));
+            patientId     = (payload.sub ?? payload.identity ?? '') as string;
+            console.log('[HC] _id recovered from JWT fallback:', patientId || '(empty)');
+          }
+        } catch (e) {
+          console.warn('[HC] JWT _id fallback failed:', e);
+        }
+      }
+
       if (!patientId) {
         throw new Error('Patienten-ID nicht verfügbar. Bitte melden Sie sich ab und erneut an.');
       }

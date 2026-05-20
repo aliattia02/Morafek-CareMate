@@ -12,6 +12,13 @@
  * - Error handling and clearing
  * - Platform-agnostic storage (web/native)
  * - Pseudonym suffix persistence for consent/export gating
+ *
+ * Changes in this version:
+ *  - `login()` now maps `userData._id` into the user object so
+ *    useHealthConnect.sync() can read `useAuthStore.getState().user._id`
+ *    without hitting the "Patienten-ID nicht verfügbar" error.
+ *  - `checkAuth()` likewise restores `_id` from persisted user data on
+ *    app relaunch, so the fix survives session restores as well as fresh logins.
  */
 
 import { create } from 'zustand';
@@ -106,6 +113,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
       set({
         user: {
+          _id: userData._id,                 // ← ADDED: required by useHealthConnect.sync()
           firstName: userData.firstName,
           lastName: userData.lastName,
           user_type: userData.userType as 'patient' | 'doctor' | 'admin',
@@ -120,14 +128,14 @@ export const useAuthStore = create<AuthState>((set) => ({
       const errorMessage = error.response?.data?.message || error.message || 'Login failed';
       set({
         error: errorMessage,
-        isLoading: false
+        isLoading: false,
       });
       throw error;
     }
   },
 
   logout: async () => {
-    // DON'T set isLoading: true here - it unmounts the navigator!
+    // DON'T set isLoading: true here — it unmounts the navigator!
     try {
       await authService.logout();
     } catch (error) {
@@ -149,12 +157,13 @@ export const useAuthStore = create<AuthState>((set) => ({
       const token = await authService.getStoredToken();
 
       // Validate token exists and hasn't expired client-side.
-      // This prevents a silent 401 loop when an old 24h token is stored.
+      // This prevents a silent 401 loop when an old 24 h token is stored.
       if (token && isTokenValid(token)) {
         const userData = await authService.getStoredUserData();
 
         set({
           user: userData ? {
+            _id: userData._id,               // ← ADDED: restores _id from persisted data on relaunch
             firstName: userData.firstName,
             lastName: userData.lastName,
             user_type: userData.userType as 'patient' | 'doctor' | 'admin',

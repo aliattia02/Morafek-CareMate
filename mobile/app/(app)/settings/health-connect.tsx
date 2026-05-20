@@ -143,10 +143,15 @@ export default function HealthConnectScreen() {
           'Keine neuen Messungen im gewählten Zeitraum gefunden.',
         );
       }
-    } else if (error) {
-      Alert.alert('Synchronisation fehlgeschlagen', error);
     }
-  }, [sync, error]);
+    // NOTE: do NOT read `error` from the enclosing scope here.
+    // `sync()` calls setError() internally, but that state update will not have
+    // propagated to this component by the time we reach this line — so `error`
+    // would still hold its pre-call value (null on the first failure).
+    // The error banner in the JSX already re-renders as soon as the state update
+    // lands, which is the correct and sufficient user-facing feedback path.
+    // An additional Alert here is unnecessary and was broken by the stale closure.
+  }, [sync]);
 
   const handleDeleteData = useCallback(() => {
     Alert.alert(

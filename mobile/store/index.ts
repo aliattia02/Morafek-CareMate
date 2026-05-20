@@ -6,3 +6,4 @@
  */
 
 export { useAuthStore, default as authStore } from './auth.store';
+export { useHCStatusStore } from './health-connect.store';
