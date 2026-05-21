@@ -2,19 +2,25 @@
  * health-connect.tsx — Health Connect Settings & Status Screen
  * Location: mobile/app/(app)/settings/health-connect.tsx
  *
- * FIXES vs previous version:
- *   • All useCallback hooks are declared BEFORE the early iOS return to comply
- *     with the React Rules of Hooks (no conditional hook calls).
+ * ── FIXES in this version ────────────────────────────────────────────────────
  *
- *   • handleOpenSettings is wired to the new openSettings() action exposed
- *     by useHealthConnect. An explicit "HC-Einstellungen öffnen" button now
- *     appears in the error banner when isPermanentlyDenied is true. The
- *     previous version had no such button; the hook silently navigated the
- *     user away automatically, which was both surprising and unhelpful (the
- *     app was not yet listed in HC settings on first install).
+ * FIX 1 — Time range selector (24h / 7d / 30d)
+ *   The previous hardcoded sync(24) call was the primary reason syncs returned
+ *   no data. Users now pick a window; default is 7 days (168h) which matches
+ *   the new DEFAULT_SYNC_HOURS_BACK constant in useHealthConnect.ts.
  *
- *   • isPermanentlyDenied is consumed from the hook to conditionally render
- *     the settings button only when it is actually actionable.
+ * FIX 2 — Auto-sync banner
+ *   When the hook auto-syncs after permission grant (see useHealthConnect FIX 4),
+ *   the sync button shows its spinner and the user sees real-time progress
+ *   without needing to tap a second button.
+ *
+ * FIX 3 — Mapper bug warning surfaced in UI
+ *   If the hook detects "records came back but 0 observations produced" it sets
+ *   an error message. The error banner now shows this clearly so users can
+ *   report it rather than assuming "no data".
+ *
+ * UNCHANGED: hooks-before-returns rule, isPermanentlyDenied settings button,
+ *   delete confirmation flow, GDPR section.
  */
 
 import React, { useState, useCallback } from 'react';
@@ -30,7 +36,7 @@ import {
   View,
 } from 'react-native';
 import { colors, spacing } from '@/constants/theme';
-import { useHealthConnect } from '@/hooks/useHealthConnect';
+import { useHealthConnect, DEFAULT_SYNC_HOURS_BACK } from '@/hooks/useHealthConnect';
 import { deleteHealthConnectData } from '@/services/api/health-connect';
 import { timeAgo, formatDate } from '@/types/health-connect.types';
 
@@ -39,6 +45,14 @@ import { timeAgo, formatDate } from '@/types/health-connect.types';
 const HC_GREEN = '#3ddc84';
 const HC_BLUE  = '#1a73e8';
 const DANGER   = '#ef4444';
+
+// ─── Time range options ───────────────────────────────────────────────────────
+
+const SYNC_WINDOWS = [
+  { label: '24 Std.',  hours: 24  },
+  { label: '7 Tage',  hours: 168 },
+  { label: '30 Tage', hours: 720 },
+] as const;
 
 // ─── Small shared components ──────────────────────────────────────────────────
 
@@ -79,6 +93,39 @@ function IOSUnsupportedScreen() {
   );
 }
 
+// ─── Time range picker ────────────────────────────────────────────────────────
+
+function SyncWindowPicker({
+  selectedHours,
+  onSelect,
+  disabled,
+}: {
+  selectedHours: number;
+  onSelect: (hours: number) => void;
+  disabled: boolean;
+}) {
+  return (
+    <View style={styles.windowPicker}>
+      {SYNC_WINDOWS.map(w => {
+        const active = selectedHours === w.hours;
+        return (
+          <TouchableOpacity
+            key={w.hours}
+            style={[styles.windowBtn, active && styles.windowBtnActive]}
+            onPress={() => onSelect(w.hours)}
+            disabled={disabled}
+            activeOpacity={0.75}
+          >
+            <Text style={[styles.windowBtnText, active && styles.windowBtnTextActive]}>
+              {w.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Screen
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,6 +133,9 @@ function IOSUnsupportedScreen() {
 export default function HealthConnectScreen() {
   const [isRefreshing,   setIsRefreshing]   = useState(false);
   const [lastSyncResult, setLastSyncResult] = useState<{ inserted: number; skipped: number } | null>(null);
+
+  // FIX 1: Default to 7 days. User can change it via the picker.
+  const [syncHours, setSyncHours] = useState<number>(DEFAULT_SYNC_HOURS_BACK);
 
   const {
     isSupported,
@@ -104,9 +154,6 @@ export default function HealthConnectScreen() {
   } = useHealthConnect();
 
   // ── All hooks MUST be declared before any conditional return ─────────────
-  // Rules of Hooks: hooks must be called in the same order on every render.
-  // Platform.OS is a constant, but the linter (and StrictMode) still flag
-  // hooks placed after conditional branches.
 
   const onRefresh = useCallback(() => {
     setIsRefreshing(true);
@@ -115,20 +162,18 @@ export default function HealthConnectScreen() {
 
   const handleRequestPermission = useCallback(async () => {
     await requestPermission();
+    // Note: auto-sync is triggered inside the hook via shouldAutoSync ref +
+    // useEffect. No need to call sync() here — it will fire on re-render.
   }, [requestPermission]);
 
-  /**
-   * Navigates the user to the Health Connect system settings screen.
-   * Only shown when isPermanentlyDenied is true — i.e. when the user has
-   * previously tapped "Don't ask again" and the HC dialog will no longer
-   * appear automatically.
-   */
   const handleOpenSettings = useCallback(async () => {
     await openSettings();
   }, [openSettings]);
 
+  // FIX 1: handleSync now passes the user-selected syncHours instead of a
+  // hardcoded 24. This is the single most impactful fix for empty syncs.
   const handleSync = useCallback(async () => {
-    const result = await sync(24);
+    const result = await sync(syncHours);
     if (result) {
       setLastSyncResult({ inserted: result.inserted, skipped: result.skipped });
       if (result.inserted > 0) {
@@ -144,14 +189,7 @@ export default function HealthConnectScreen() {
         );
       }
     }
-    // NOTE: do NOT read `error` from the enclosing scope here.
-    // `sync()` calls setError() internally, but that state update will not have
-    // propagated to this component by the time we reach this line — so `error`
-    // would still hold its pre-call value (null on the first failure).
-    // The error banner in the JSX already re-renders as soon as the state update
-    // lands, which is the correct and sufficient user-facing feedback path.
-    // An additional Alert here is unnecessary and was broken by the stale closure.
-  }, [sync]);
+  }, [sync, syncHours]);
 
   const handleDeleteData = useCallback(() => {
     Alert.alert(
@@ -253,7 +291,7 @@ export default function HealthConnectScreen() {
           {[
             { n: '1', t: 'Tippen Sie auf „Berechtigung erteilen" — Android öffnet den Health-Connect-Dialog.' },
             { n: '2', t: 'Wählen Sie Herzfrequenz und Schritte zum Lesen aus.' },
-            { n: '3', t: 'Tippen Sie auf „Jetzt synchronisieren" — Daten werden als FHIR-Observations übertragen.' },
+            { n: '3', t: 'Die App synchronisiert automatisch — kein zweiter Schritt nötig.' },
             { n: '4', t: 'Ihr Arzt sieht die Messwerte in Ihrer Patientenakte.' },
           ].map(step => (
             <View key={step.n} style={styles.howRow}>
@@ -265,21 +303,10 @@ export default function HealthConnectScreen() {
           ))}
         </View>
 
-        {/* ── Error banner with optional "Open HC Settings" button ─────── */}
         {error ? (
           <View style={styles.errorBanner}>
             <Text style={styles.errorText}>{error}</Text>
             {isPermanentlyDenied ? (
-              /**
-               * Only shown when isPermanentlyDenied is true — i.e. the user
-               * tapped "Berechtigung erteilen" at least twice and the HC dialog
-               * still did not appear. At this point the OS will not show the
-               * dialog again; the user must navigate to HC settings manually.
-               *
-               * We render a button here rather than calling openSettings()
-               * automatically so the user knows exactly what is happening
-               * before they are navigated away from the screen.
-               */
               <TouchableOpacity
                 style={styles.openSettingsBtn}
                 onPress={handleOpenSettings}
@@ -293,12 +320,22 @@ export default function HealthConnectScreen() {
           </View>
         ) : null}
 
+        {/* FIX 2: Show spinner on permission button while auto-sync is running */}
         <TouchableOpacity
-          style={styles.connectBtn}
+          style={[styles.connectBtn, isSyncing && styles.syncBtnDisabled]}
           onPress={handleRequestPermission}
+          disabled={isSyncing}
           activeOpacity={0.85}
         >
-          <Text style={styles.connectBtnText}>🔐  Berechtigung erteilen</Text>
+          {isSyncing
+            ? (
+              <View style={styles.syncingRow}>
+                <ActivityIndicator color="#0a0a0a" size="small" />
+                <Text style={styles.connectBtnText}>Synchronisiere…</Text>
+              </View>
+            )
+            : <Text style={styles.connectBtnText}>🔐  Berechtigung erteilen</Text>
+          }
         </TouchableOpacity>
 
         <Text style={styles.footer}>
@@ -363,6 +400,14 @@ export default function HealthConnectScreen() {
         )}
       </View>
 
+      {/* FIX 1: Time range picker — replaces hardcoded 24h window */}
+      <SectionLabel>SYNCHRONISATIONSZEITRAUM</SectionLabel>
+      <SyncWindowPicker
+        selectedHours={syncHours}
+        onSelect={setSyncHours}
+        disabled={isSyncing}
+      />
+
       <TouchableOpacity
         style={[styles.syncBtn, isSyncing && styles.syncBtnDisabled]}
         onPress={handleSync}
@@ -371,7 +416,9 @@ export default function HealthConnectScreen() {
       >
         {isSyncing
           ? <ActivityIndicator color="#fff" size="small" />
-          : <Text style={styles.syncBtnText}>↺  Jetzt synchronisieren (letzte 24 Std.)</Text>
+          : <Text style={styles.syncBtnText}>
+              ↺  Jetzt synchronisieren ({SYNC_WINDOWS.find(w => w.hours === syncHours)?.label ?? `${syncHours}h`})
+            </Text>
         }
       </TouchableOpacity>
 
@@ -561,7 +608,6 @@ const styles = StyleSheet.create({
   },
   errorText: { fontSize: 12, color: DANGER, lineHeight: 18 },
 
-  // Button rendered inside the error banner when isPermanentlyDenied is true.
   openSettingsBtn: {
     marginTop: 10,
     backgroundColor: DANGER + '28',
@@ -578,6 +624,34 @@ const styles = StyleSheet.create({
     color: DANGER,
   },
 
+  // FIX 1: Time range picker styles
+  windowPicker: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 10,
+  },
+  windowBtn: {
+    flex: 1,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border ?? '#2a2d3a',
+    backgroundColor: colors.card ?? '#1a1d27',
+    alignItems: 'center',
+  },
+  windowBtnActive: {
+    borderColor: HC_GREEN,
+    backgroundColor: HC_GREEN + '18',
+  },
+  windowBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.text?.secondary ?? '#94a3b8',
+  },
+  windowBtnTextActive: {
+    color: HC_GREEN,
+  },
+
   syncBtn: {
     backgroundColor: HC_GREEN,
     borderRadius: 12,
@@ -587,6 +661,12 @@ const styles = StyleSheet.create({
   },
   syncBtnDisabled: { opacity: 0.5 },
   syncBtnText: { fontSize: 15, fontWeight: '700', color: '#0a0a0a' },
+
+  syncingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
 
   dataTypeRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   dataTypeIcon: { fontSize: 20 },

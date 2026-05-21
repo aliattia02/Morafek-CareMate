@@ -42,8 +42,8 @@ android {
         applicationId 'com.morafek.mobile'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0.0"
+        versionCode 8
+        versionName "1.0.3"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -54,15 +54,25 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            // Supply these via environment variables in your CI / EAS pipeline,
+            // or in a local gradle.properties that is NOT committed to git.
+            // EAS Build populates these automatically from the credentials you
+            // configure in eas.json / Expo dashboard.
+            storeFile     file(System.getenv("KEYSTORE_PATH")     ?: "release.keystore")
+            storePassword      System.getenv("KEYSTORE_PASSWORD") ?: ""
+            keyAlias           System.getenv("KEY_ALIAS")         ?: ""
+            keyPassword        System.getenv("KEY_PASSWORD")      ?: ""
+        }
     }
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            // Uses the dedicated release keystore so Health Connect's
+            // enforceValidPackage check matches the signature on Google Play.
+            signingConfig signingConfigs.release
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

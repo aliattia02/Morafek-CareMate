@@ -2,7 +2,7 @@
   "expo": {
     "name": "Morafek",
     "slug": "Morafek",
-    "version": "1.0.1",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "Morafek",
@@ -29,7 +29,7 @@
         "backgroundColor": "#0E7C8B"
       },
       "package": "com.morafek.mobile",
-      "runtimeVersion": "1.0.1",
+      "runtimeVersion": "1.0.2",
       "minSdkVersion": 26
     },
     "web": {
@@ -60,11 +60,12 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "85f11f8a-34e4-4d66-bfb5-b5edce06b2a6"
+        "projectId": "0d107619-d1ad-4983-8f81-a9c6500ba137"
       }
     },
     "updates": {
       "url": "https://u.expo.dev/85f11f8a-34e4-4d66-bfb5-b5edce06b2a6"
-    }
+    },
+    "owner": "aliattia"
   }
 }

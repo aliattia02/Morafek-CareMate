@@ -1,0 +1,58 @@
+# ── node_modules (every location) ────────────────────────────────────────────
+node_modules/
+node_modules/**
+mobile/node_modules/
+mobile/node_modules/**
+**/node_modules/
+**/node_modules/**
+
+# ── Android build/cache artefacts ────────────────────────────────────────────
+mobile/android/app/build/
+mobile/android/app/build/**
+mobile/android/.gradle/
+mobile/android/.gradle/**
+mobile/android/.cxx/
+mobile/android/.cxx/**
+
+# ── Expo / Metro cache ────────────────────────────────────────────────────────
+mobile/.expo/
+mobile/.expo/**
+mobile/.metro-cache/
+
+# ── Non-mobile directories ───────────────────────────────────────────────────
+backend/
+backend/**
+docs/
+docs/**
+.vercel/
+.vercel/**
+.github/
+.github/**
+
+# ── Python artifacts ─────────────────────────────────────────────────────────
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+venv/
+*.env
+
+# ── Git / IDE ────────────────────────────────────────────────────────────────
+.git/
+.idea/
+.vscode/
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# ── Root-level scripts / misc ────────────────────────────────────────────────
+test_gics.py
+tree_gen.py
+gics_inspect.ps1
+gics_state.txt
+*.wsdl
+*.sql
+*.cnf
+*.lnk

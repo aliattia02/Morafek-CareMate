@@ -1,6 +1,7 @@
 package com.morafek.mobile
 import expo.modules.splashscreen.SplashScreenManager
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 
@@ -34,6 +35,20 @@ class MainActivity : ReactActivity() {
     // Note: HealthConnectPermissionDelegate is a Kotlin object (singleton),
     // NOT a class — call it directly without ().
     HealthConnectPermissionDelegate.setPermissionDelegate(this)
+  }
+
+  /**
+   * Forward intents to the React Native bridge.
+   *
+   * Required for Health Connect: when the HC permissions dialog closes it
+   * delivers its result via a new Intent to the host activity. Without this
+   * override the bridgeless host has no forwarding path and React Native logs
+   * a ReactNoCrashSoftException on every dialog return, which can also prevent
+   * the permission result from reaching the JS thread correctly.
+   */
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
   }
 
   /**

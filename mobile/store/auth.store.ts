@@ -59,7 +59,7 @@ const isTokenValid = (token: string): boolean => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface User {
-  _id?: string;
+  _id: string;
   username?: string;
   email?: string;
   user_type?: 'patient' | 'doctor' | 'admin';
@@ -161,9 +161,30 @@ export const useAuthStore = create<AuthState>((set) => ({
       if (token && isTokenValid(token)) {
         const userData = await authService.getStoredUserData();
 
+        // Self-heal: if stored UserData pre-dates the _id fix in auth.ts,
+        // _id will be empty string. Recover it from the JWT payload.
+        // auth.py → generate_token() stores MongoDB _id under claim 'user_id'.
+        let resolvedId = userData?._id?.trim() ?? '';
+        if (!resolvedId) {
+          try {
+            const base64  = token.split('.')[1];
+            const payload = JSON.parse(atob(base64.replace(/-/g, '+').replace(/_/g, '/')));
+            resolvedId    = (payload.user_id ?? payload.sub ?? payload.identity ?? '').trim();
+            if (resolvedId) {
+              console.log('[AuthStore] checkAuth: _id recovered from JWT (user_id claim):', resolvedId);
+            } else {
+              console.warn('[AuthStore] checkAuth: JWT has no user_id/sub/identity claim — user must re-login');
+            }
+          } catch (e) {
+            console.warn('[AuthStore] checkAuth: JWT decode failed during _id recovery:', e);
+          }
+        } else {
+          console.log('[AuthStore] checkAuth: _id restored from stored UserData:', resolvedId);
+        }
+
         set({
           user: userData ? {
-            _id: userData._id,               // ← ADDED: restores _id from persisted data on relaunch
+            _id: resolvedId,                 // Required; self-healed from JWT for legacy sessions
             firstName: userData.firstName,
             lastName: userData.lastName,
             user_type: userData.userType as 'patient' | 'doctor' | 'admin',

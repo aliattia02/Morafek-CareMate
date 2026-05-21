@@ -1,0 +1,37 @@
+# ── node_modules (biggest offender — must be first) ──────────────────────────
+node_modules/
+node_modules/**
+**/node_modules/
+**/node_modules/**
+
+# ── Android build artefacts ──────────────────────────────────────────────────
+android/app/build/
+android/app/build/**
+android/.gradle/
+android/.gradle/**
+android/.cxx/
+android/.cxx/**
+android/app/release/
+
+# ── Expo / Metro cache ────────────────────────────────────────────────────────
+.expo/
+.expo/**
+.metro-cache/
+
+# ── IDE / OS ─────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ── Leftover Windows shortcuts ───────────────────────────────────────────────
+*.lnk
+
+# ── Env / secrets ────────────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Docker ───────────────────────────────────────────────────────────────────
+Dockerfile
+.dockerignore
