@@ -2,7 +2,7 @@
   "expo": {
     "name": "Morafek",
     "slug": "Morafek",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "Morafek",
@@ -19,9 +19,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.morafek.mobile",
-      "runtimeVersion": {
-        "policy": "appVersion"
-      }
+      "runtimeVersion": "1.0.3"
     },
     "android": {
       "adaptiveIcon": {
@@ -29,7 +27,7 @@
         "backgroundColor": "#0E7C8B"
       },
       "package": "com.morafek.mobile",
-      "runtimeVersion": "1.0.2",
+      "runtimeVersion": "1.0.3",
       "minSdkVersion": 26
     },
     "web": {
