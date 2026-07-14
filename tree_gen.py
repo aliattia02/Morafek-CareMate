@@ -1,31 +1,58 @@
 #!/usr/bin/env python3
 """
-Directory Tree Generator
-Generates a visual tree structure of your project directory
+Universal Smart Tree Generator
+Generates a clean, logic-focused directory tree for any project.
+Optimized for issue-fixing by hiding noise while preserving structural context.
 """
 
 import os
+import argparse
 from pathlib import Path
 from typing import Set, List
 
 
 class TreeGenerator:
-    # Default configuration embedded in the class
+    # Universal configuration for most modern software projects
     DEFAULT_CONFIG = {
         'exclude_dirs': [
+            # Common Build & Environment
             'node_modules', '__pycache__', '.git', '.vscode', '.idea',
-            'venv', 'env', 'dist', 'build', '.next', 'coverage',
-            '.pytest_cache', '.mypy_cache',
-            # Android build artifacts
-            '.cxx', '.gradle', '.kotlin',
+            'venv', '.venv', 'env', 'dist', 'build', 'target', '.next', 'coverage',
+            '.pytest_cache', '.mypy_cache', '.github', '.gradle', '.kotlin',
+            
+            # Common Assets & UI (usually non-logic)
+            'img', 'images', 'assets', 'fonts', 'static', 'public',
+            'css', 'less', 'scss', 'sass', 'webapp/css', 'webapp/fonts',
+            
+            # Project-specific non-logic (MoPat & similar)
+            'selenium', 'examples', 'fhir-dstu3-xsd', 'message/language',
+            'webapp/jQuery', 'webapp/wysiwyg'
         ],
         'exclude_files': [
+            # System & Lock files
             '.DS_Store', 'Thumbs.db', '.gitignore', 'package-lock.json',
-            'yarn.lock', '.env'
+            'yarn.lock', 'pnpm-lock.yaml', '.env',
+            
+            # Meta & Docs
+            'LICENSE', 'README.md', 'CONTRIBUTING.md', 'CHANGELOG.md'
         ],
-        'exclude_patterns': ['.pyc', '.pyo', '.log'],
-        'include_extensions': None,  # None = include all, or list like ['.py', '.js']
-        'max_depth': None  # None = unlimited
+        'exclude_patterns': [
+            # Compiled binaries
+            '.class', '.pyc', '.pyo', '.exe', '.dll', '.so',
+            
+            # Images & Fonts
+            '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.psd',
+            '.woff', '.woff2', '.eot', '.ttf', '.otf',
+            
+            # Style & UI
+            '.less', '.css', '.scss', '.sass',
+            
+            # Data & Config (Optional: can be toggled)
+            '.log', '.properties', '.xsd', '.ignore'
+        ],
+        'include_extensions': None,
+        'max_depth': None,
+        'prune_empty': True  # Hide folders that only contain excluded items
     }
 
     def __init__(self, config: dict = None):
@@ -36,31 +63,39 @@ class TreeGenerator:
         self.exclude_patterns = self.config['exclude_patterns']
         self.include_extensions = self.config['include_extensions']
         self.max_depth = self.config['max_depth']
+        self.prune_empty = self.config['prune_empty']
 
     def _should_exclude(self, path: Path) -> bool:
-        """Check if path should be excluded"""
+        """Check if path should be excluded based on config"""
         if path.is_dir():
             return path.name in self.exclude_dirs
         else:
-            # Check exact filename match
             if path.name in self.exclude_files:
                 return True
-
-            # Check pattern match
             for pattern in self.exclude_patterns:
-                if path.name.endswith(pattern):
+                if path.name.lower().endswith(pattern.lower()):
                     return True
-
-            # Check extension filter
             if self.include_extensions:
                 return path.suffix not in self.include_extensions
-
         return False
+
+    def _has_visible_children(self, path: Path) -> bool:
+        """Recursively check if a directory has any non-excluded files"""
+        try:
+            for item in path.iterdir():
+                if not self._should_exclude(item):
+                    if item.is_dir():
+                        if self._has_visible_children(item):
+                            return True
+                    else:
+                        return True
+            return False
+        except PermissionError:
+            return False
 
     def generate_tree(self, directory: str = ".", output_file: str = None) -> str:
         """Generate tree structure for directory"""
         root_path = Path(directory).resolve()
-
         if not root_path.exists():
             raise ValueError(f"Directory '{directory}' does not exist")
 
@@ -68,12 +103,10 @@ class TreeGenerator:
         self._build_tree(root_path, "", tree_lines, depth=0)
 
         tree_output = "\n".join(tree_lines)
-
         if output_file:
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(tree_output)
             print(f"Tree structure saved to '{output_file}'")
-
         return tree_output
 
     def _build_tree(self, path: Path, prefix: str, lines: List[str], depth: int):
@@ -82,45 +115,43 @@ class TreeGenerator:
             return
 
         try:
-            contents = sorted(path.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
-            contents = [item for item in contents if not self._should_exclude(item)]
+            # Filter contents
+            items = [item for item in path.iterdir() if not self._should_exclude(item)]
+            
+            # Prune empty directories if enabled
+            if self.prune_empty:
+                filtered_contents = []
+                for item in items:
+                    if item.is_dir():
+                        if self._has_visible_children(item):
+                            filtered_contents.append(item)
+                    else:
+                        filtered_contents.append(item)
+            else:
+                filtered_contents = items
+
+            # Sort: directories first, then files
+            contents = sorted(filtered_contents, key=lambda p: (not p.is_dir(), p.name.lower()))
+            
         except PermissionError:
             return
 
         for i, item in enumerate(contents):
             is_last = i == len(contents) - 1
+            current_prefix = "└── " if is_last else "├── "
+            next_prefix = "    " if is_last else "│   "
 
-            # Choose the appropriate tree characters
-            if is_last:
-                current_prefix = "└── "
-                next_prefix = "    "
-            else:
-                current_prefix = "├── "
-                next_prefix = "│   "
-
-            # Add directory indicator
             display_name = item.name + "/" if item.is_dir() else item.name
             lines.append(f"{prefix}{current_prefix}{display_name}")
 
-            # Recurse into directories
             if item.is_dir():
                 self._build_tree(item, prefix + next_prefix, lines, depth + 1)
 
 
 def main():
-    """Main function to run the tree generator"""
-    import argparse
-
+    """Main function to run the universal tree generator"""
     parser = argparse.ArgumentParser(
-        description='Generate directory tree structure',
-        epilog='''
-Examples:
-  python tree_generator.py                    # Current directory
-  python tree_generator.py native3            # Specific directory
-  python tree_generator.py -o tree.txt        # Save to file
-  python tree_generator.py --max-depth 3      # Limit depth
-  python tree_generator.py --ext .py .js      # Only Python and JS files
-        ''',
+        description='Universal Smart Tree Generator for clean project visualization',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -128,22 +159,22 @@ Examples:
                         help='Directory to generate tree for (default: current directory)')
     parser.add_argument('-o', '--output', help='Output file (default: print to console)')
     parser.add_argument('--max-depth', type=int, help='Maximum depth to traverse')
-    parser.add_argument('--ext', nargs='+', help='Include only these extensions (e.g., .py .js)')
-    parser.add_argument('--exclude-dirs', nargs='+', help='Additional directories to exclude')
-    parser.add_argument('--exclude-files', nargs='+', help='Additional files to exclude')
+    parser.add_argument('--ext', nargs='+', help='Include only these extensions (e.g., .java .py)')
+    parser.add_argument('--all', action='store_true', help='Show all files (disable pruning and common exclusions)')
 
     args = parser.parse_args()
 
-    # Build custom config from arguments
     config = {}
     if args.max_depth:
         config['max_depth'] = args.max_depth
     if args.ext:
         config['include_extensions'] = args.ext
-    if args.exclude_dirs:
-        config['exclude_dirs'] = TreeGenerator.DEFAULT_CONFIG['exclude_dirs'] + args.exclude_dirs
-    if args.exclude_files:
-        config['exclude_files'] = TreeGenerator.DEFAULT_CONFIG['exclude_files'] + args.exclude_files
+    
+    if args.all:
+        config['exclude_dirs'] = ['.git']
+        config['exclude_files'] = []
+        config['exclude_patterns'] = []
+        config['prune_empty'] = False
 
     generator = TreeGenerator(config=config)
     tree = generator.generate_tree(args.directory, args.output)
