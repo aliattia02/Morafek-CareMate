@@ -36,6 +36,8 @@ from typing import Any
 import uuid
 from uuid import uuid4
 
+from utils.vitals_storage import COLLECTION_BLOOD_PRESSURE
+
 
 # ─── Profile URL constants ─────────────────────────────────────────────────────
 
@@ -373,26 +375,118 @@ def build_observations_from_vitals_doc(
     *,
     performer_ref: str | None = None,
     encounter_ref: str | None = None,
+    collection_name: str | None = None,
 ) -> list[dict]:
     """
-    Convert a single stored vitals document (which may contain mixed components)
-    into a list of separate, conformant FHIR Observations — one per vital sign.
+    Convert a single stored vitals document into a list of separate,
+    conformant FHIR Observations — one per vital sign.
 
     German FHIR profiles (MII, ISiK, KBV baseline) require each vital sign to
     be its own Observation. The only exception is blood pressure: systolic and
     diastolic MAY share one Observation under LOINC 55284-4.
 
-    Returns 1-3 Observation resources depending on which values are present.
-
     Parameters
     ----------
-    doc           : MongoDB vitals document as stored by create_vitals()
-    patient_id    : patient's MongoDB ObjectId string
-    performer_ref : FHIR reference string for the recorder,
-                    e.g. "Practitioner/abc123" or "Patient/abc123".
-                    Falls back to the patient reference for self-measurements.
-    encounter_ref : Optional Encounter reference (e.g. "Encounter/xyz").
+    doc             : MongoDB vitals document, either from one of the
+                       per-type vitals_* collections (see
+                       utils/vitals_storage.py) or, for pre-migration data,
+                       the legacy shared ehr_vitals collection.
+    patient_id      : patient's MongoDB ObjectId string
+    performer_ref   : FHIR reference string for the recorder,
+                       e.g. "Practitioner/abc123" or "Patient/abc123".
+                       Falls back to the patient reference for
+                       self-measurements.
+    encounter_ref   : Optional Encounter reference (e.g. "Encounter/xyz").
+    collection_name : Name of the vitals_* collection `doc` was read from
+                       (e.g. utils.vitals_storage.COLLECTION_HEART_RATE).
+                       Pass this whenever the caller knows it — it tells this
+                       function exactly how to interpret `doc`'s shape
+                       instead of guessing. Omit it only for legacy
+                       ehr_vitals docs that predate the per-type-collection
+                       migration; those fall back to the old
+                       mixed-component[] parsing below.
+
+    Returns 1-3 Observation resources depending on which values are present.
     """
+    # ── Current shape: per-type vitals_* collection docs ───────────────────
+    #
+    # As of the ehr_vitals → per-type-collections migration (see
+    # vitals_storage.py), every write path (manual/patient-home entry via
+    # fan_out_reading(), and Health Connect sync via enrich_for_storage())
+    # produces documents in a known, collection-specific shape:
+    #
+    #   • vitals_blood_pressure — still a "panel" doc: systolic + diastolic
+    #     travel together in one Observation's component[] array (per LOINC
+    #     55284-4), because German FHIR profiles allow BP to be a pair.
+    #   • vitals_heart_rate / vitals_weight / vitals_steps /
+    #     vitals_blood_sugar — flat, single-value docs: top-level
+    #     code/valueQuantity, one Observation per document, no component[]
+    #     to parse.
+    #
+    # Because the caller (the fhir-export loop in ehr_routes.py) already
+    # knows which collection it queried, it passes that name in as
+    # `collection_name`, so we don't have to sniff the doc's shape or branch
+    # on `source` to figure out what kind of document this is.
+    if collection_name is not None:
+        storage_only_fields = {
+            "_id", "patient_id", "recorded_by", "source",
+            "device_type", "synced_at", "loinc_code", "reading_id",
+        }
+        flat_obs: dict = {
+            k: v for k, v in doc.items() if k not in storage_only_fields
+        }
+        flat_obs["resourceType"] = "Observation"
+        flat_obs.setdefault("id", str(uuid4()))
+        flat_obs.setdefault("status", "final")
+        flat_obs["subject"]   = {"reference": f"Patient/{patient_id}"}
+        flat_obs["performer"] = [{"reference": performer_ref or f"Patient/{patient_id}"}]
+        if encounter_ref:
+            flat_obs["encounter"] = {"reference": encounter_ref}
+        add_de_profile(flat_obs, PROFILE.OBSERVATION_DE, PROFILE.ISIK_OBSERVATION_VITALS)
+
+        if collection_name == COLLECTION_BLOOD_PRESSURE:
+            # BP docs already carry their own component[] array (systolic +
+            # diastolic) exactly as written by fan_out_reading() — nothing
+            # further to split out, it's already one conformant Observation.
+            return [flat_obs]
+
+        # vitals_heart_rate / vitals_weight / vitals_steps / vitals_blood_sugar:
+        # single value, already flat — one Observation, verbatim.
+        return [flat_obs]
+
+    # ── LEGACY FALLBACK: pre-migration ehr_vitals docs only ────────────────
+    #
+    # Only reached when the caller has no collection hint, i.e. it's reading
+    # from the old shared ehr_vitals collection (docs written before the
+    # per-type-collections migration). New code should always pass
+    # `collection_name`; this branch exists purely so historical data isn't
+    # dropped from exports.
+    #
+    # Pre-migration Health Connect syncs used the same flat single-Observation
+    # shape as today's vitals_heart_rate/vitals_steps docs (just co-located in
+    # ehr_vitals instead of their own collection), so they're handled the
+    # same way as the `collection_name is not None`, non-BP branch above.
+    if doc.get("source") == "health_connect":
+        storage_only_fields = {
+            "_id", "patient_id", "recorded_by", "source",
+            "device_type", "synced_at", "loinc_code",
+        }
+        hc_obs: dict = {
+            k: v for k, v in doc.items() if k not in storage_only_fields
+        }
+        hc_obs["resourceType"] = "Observation"
+        hc_obs.setdefault("id", str(uuid4()))
+        hc_obs.setdefault("status", "final")
+        hc_obs["subject"]   = {"reference": f"Patient/{patient_id}"}
+        hc_obs["performer"] = [{"reference": performer_ref or f"Patient/{patient_id}"}]
+        if encounter_ref:
+            hc_obs["encounter"] = {"reference": encounter_ref}
+        add_de_profile(hc_obs, PROFILE.OBSERVATION_DE, PROFILE.ISIK_OBSERVATION_VITALS)
+        return [hc_obs]
+
+    # Legacy manual/patient-home entries: one doc could bundle several vital
+    # signs together in a mixed component[] array (systolic + diastolic +
+    # heart rate, etc). Split it back out into separate Observations.
     components = doc.get("component", [])
 
     # Extract values from stored mixed components

@@ -63,6 +63,54 @@ export interface HCDataTypeConfig {
   hcRecord: HCRecordType;
 }
 
+// ─── Data origin filtering (cross-source duplicate/overlap fix) ───────────────
+//
+// Health Connect's readRecords() returns records from EVERY app that has
+// ever written to it, tagged via record.metadata.dataOrigin. This is NOT
+// the same as Health Connect's own "Data sources and priority" Settings UI
+// — that priority only affects HC's internal aggregate queries (e.g. a step
+// widget total); it has no effect on raw readRecords() results.
+//
+// Confirmed via direct inspection: Samsung Health, Google Fit, and Health
+// Sync all write genuinely overlapping (not identical — the deterministic-ID
+// dedup in health-connect-mapper.ts does not catch this) heart-rate data for
+// the same time windows. The fix has to happen in Morafek's own code, by
+// filtering raw records on metadata.dataOrigin before they reach the mapper.
+
+/**
+ * Known Health Connect contributing app package names, for reference and
+ * debug display. Values other than GOOGLE_FIT are unverified against this
+ * device's actual metadata.dataOrigin strings — cross-check against the
+ * debug card / Health Connect's own data screen before relying on them.
+ */
+export const HC_KNOWN_ORIGINS = {
+  GOOGLE_FIT: 'com.google.android.apps.fitness',
+  SAMSUNG_HEALTH: 'com.sec.android.app.shealth',
+  HEALTH_SYNC: 'nl.appyhapps.healthsync',
+} as const;
+
+/**
+ * Preferred dataOrigin per Morafek data-type key (heart_rate, steps, ...).
+ * These are the DEFAULT values layered under a patient's stored overrides —
+ * see preferredOriginsByUser / getPreferredOriginsForUser in
+ * health-connect.store.ts, and preferredOrigins/setPreferredOrigin on
+ * UseHealthConnectReturn. readAllRecords() in useHealthConnect.ts uses the
+ * resolved (defaults + per-user overrides) map to discard records from
+ * non-preferred sources before they reach the mapper.
+ *
+ * Decision: Google Fit is the default for all current types — its
+ * per-sample granularity/values closely match the underlying watch data,
+ * while Health Sync's writes are coarser bridge summaries less suitable for
+ * a medical record.
+ */
+export const DEFAULT_PREFERRED_ORIGINS: Record<string, string> = {
+  heart_rate: HC_KNOWN_ORIGINS.GOOGLE_FIT,
+  steps: HC_KNOWN_ORIGINS.GOOGLE_FIT,
+};
+
+/** Per-data-type origin preference map, as used by readAllRecords(). */
+export type HCOriginPreferences = Record<string, string>;
+
 // ─── Raw HC SDK record shapes (minimal — only fields we consume) ──────────────
 
 /** Heart rate sample within a HeartRate record */
@@ -210,6 +258,15 @@ export interface UseHealthConnectReturn {
   isSyncing: boolean;
   /** True while the initial status is loading */
   isLoading: boolean;
+  /**
+   * TEMP DEBUG — inline diagnostic text from the most recent sync() call
+   * (raw record counts, sample record shapes, patient ID resolution, etc).
+   * Null until the first sync attempt. Remove this field once the
+   * empty-sync root cause is confirmed and fixed.
+   */
+  debugInfo: string | null;
+  /** TEMP DEBUG — clears debugInfo. Remove alongside debugInfo. */
+  clearDebugInfo: () => void;
   /** Request Android Health Connect permissions */
   requestPermission: () => Promise<void>;
   /**
@@ -222,6 +279,18 @@ export interface UseHealthConnectReturn {
   sync: (hoursBack?: number) => Promise<HCSyncResponse | null>;
   /** Reload status from backend without syncing */
   refreshStatus: () => Promise<void>;
+  /**
+   * Active per-data-type preferred dataOrigin map (see FIX 8 /
+   * DEFAULT_PREFERRED_ORIGINS). Starts as a copy of DEFAULT_PREFERRED_ORIGINS
+   * and can be overridden at runtime via setPreferredOrigin — e.g. from a
+   * settings screen, if the user switches primary tracking app/watch.
+   * Tied to the current patient and persisted via health-connect.store.ts
+   * (keyed by user._id), so it survives app restarts and stays isolated
+   * per patient on a shared device.
+   */
+  preferredOrigins: HCOriginPreferences;
+  /** Override the preferred dataOrigin for one data-type key (e.g. 'heart_rate'). */
+  setPreferredOrigin: (dataType: string, origin: string) => void;
 }
 
 // ─── Display helpers ──────────────────────────────────────────────────────────

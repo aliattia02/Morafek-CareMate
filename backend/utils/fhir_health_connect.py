@@ -9,17 +9,28 @@ Responsibilities
   • ALLOWED_HC_LOINC_CODES   — gating set; only these LOINC codes are accepted
   • validate_hc_observation() — structural + semantic validation of each FHIR
                                 Observation arriving in POST /api/healthconnect/sync
-  • build_hc_status_response() — fast aggregation query over ehr_vitals for
-                                  GET /api/healthconnect/status
+  • build_hc_status_response() — fast per-collection queries over the
+                                  vitals_* collections (see vitals_storage.py)
+                                  for GET /api/healthconnect/status
   • enrich_for_storage()      — add server-side fields (patient_id, recorded_by,
-                                 source bookkeeping) before upsert into ehr_vitals
+                                 source bookkeeping, reading_id) before upsert
+                                 into the per-type vitals_* collection
 
 Design notes
 ────────────
-  • Adding a new Health Connect data type requires only:
+  • As of the ehr_vitals → per-type-collections migration (see
+    utils/vitals_storage.py), each validated observation is upserted into
+    the collection given by LOINC_TO_COLLECTION[loinc_code] rather than a
+    shared ehr_vitals collection. ALLOWED_HC_LOINC_CODES is reconciled
+    against LOINC_TO_COLLECTION at import time (see the assertion below) so
+    an allowed code always has a routing target.
+
+  • Adding a new Health Connect data type requires:
       1. Adding the LOINC code to ALLOWED_HC_LOINC_CODES
       2. Adding its label to _LOINC_LABELS (for status breakdown)
-    No pipeline logic changes are needed.
+      3. Making sure the code has an entry in vitals_storage.LOINC_TO_COLLECTION
+         (add a writer/collection there if one doesn't exist yet)
+    No other pipeline logic changes are needed.
 
   • All validation errors return a dict {"field": ..., "reason": ...} so the
     route can build a structured 422 response rather than a raw string.
@@ -33,6 +44,13 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
+
+from utils.vitals_storage import (
+    COLLECTION_HEART_RATE,
+    COLLECTION_STEPS,
+    LOINC_TO_COLLECTION,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +69,17 @@ ALLOWED_HC_LOINC_CODES: frozenset[str] = frozenset({
     # "15074-8",  # Glucose [Moles/volume] in Blood
     # "93832-4",  # Sleep duration
 })
+
+# Every allowed HC LOINC code must have a routing target in
+# vitals_storage.LOINC_TO_COLLECTION, or a validated observation would have
+# nowhere to be upserted. Fail fast at import time rather than at sync time.
+_unrouted = ALLOWED_HC_LOINC_CODES - LOINC_TO_COLLECTION.keys()
+if _unrouted:
+    raise RuntimeError(
+        "ALLOWED_HC_LOINC_CODES contains code(s) with no entry in "
+        f"vitals_storage.LOINC_TO_COLLECTION: {sorted(_unrouted)}. "
+        "Add a collection mapping there before enabling this code."
+    )
 
 # Human-readable labels for status breakdown (keyed by LOINC code)
 _LOINC_LABELS: dict[str, str] = {
@@ -224,15 +253,23 @@ def enrich_for_storage(
 ) -> dict[str, Any]:
     """
     Add server-side fields to a validated FHIR Observation before it is
-    upserted into ehr_vitals. Mutates and returns the same dict.
+    upserted into its per-type vitals_* collection (see
+    vitals_storage.LOINC_TO_COLLECTION). Mutates and returns the same dict.
 
-    Added fields (following the existing ehr_vitals document shape):
+    Added fields (matching the shape fan_out_reading() produces so that both
+    write paths — manual/patient-home entry and Health Connect sync — land
+    documents with a consistent shape in the per-type collections):
         patient_id      — redundant top-level copy for fast index queries
         recorded_by     — "health_connect" (not a doctor user_id)
         source          — "health_connect" (already set by client, enforced here)
         device_type     — "android_watch"
         synced_at       — server UTC timestamp of the sync request
         loinc_code      — top-level index copy for the status aggregation query
+        reading_id       — groups documents written together in one logical
+                            reading (see vitals_storage.py docstring). Health
+                            Connect syncs are unbatched — one Observation is
+                            one reading — so reading_id is just the
+                            observation's own client-generated id.
 
     Does NOT add a Mongo _id — PyMongo generates that on insert.
     """
@@ -244,6 +281,7 @@ def enrich_for_storage(
     obs["device_type"]  = "android_watch"
     obs["synced_at"]    = now_iso
     obs["loinc_code"]   = loinc_code         # top-level copy for fast queries
+    obs["reading_id"]   = obs.get("id") or str(uuid4())
 
     return obs
 
@@ -258,7 +296,9 @@ def build_hc_status_response(
     """
     Build the response dict for GET /api/healthconnect/status.
 
-    Queries ehr_vitals for documents where:
+    Queries the per-type vitals_* collections that Health Connect currently
+    writes to (vitals_heart_rate, vitals_steps — see
+    vitals_storage.LOINC_TO_COLLECTION) for documents where:
         patient_id == patient_id  AND  source == 'health_connect'
 
     Returns:
@@ -272,45 +312,52 @@ def build_hc_status_response(
           }
         }
 
-    Uses two targeted queries:
-      1. find + sort(-synced_at, 1) limit 1  → last_sync
-      2. aggregation pipeline              → per-LOINC counts
+    Runs one find + one count per HC-writeable collection. This scales with
+    the (small, fixed) number of Health Connect data types rather than with
+    document volume, and stays fast as long as each collection is indexed
+    on (patient_id, source).
 
-    Both are fast when the collection is indexed on (patient_id, source).
-    Recommended index (add to main.py startup):
-        mongo.db.ehr_vitals.create_index(
+    Recommended indexes (add to main.py startup):
+        mongo.db.vitals_heart_rate.create_index(
+            [("patient_id", 1), ("source", 1), ("synced_at", -1)]
+        )
+        mongo.db.vitals_steps.create_index(
             [("patient_id", 1), ("source", 1), ("synced_at", -1)]
         )
     """
     base_filter = {"patient_id": patient_id, "source": "health_connect"}
 
-    # ── 1. Last sync timestamp ────────────────────────────────────────────────
-    most_recent = mongo_db.ehr_vitals.find_one(
-        base_filter,
-        {"synced_at": 1},
-        sort=[("synced_at", -1)],
-    )
-    last_sync: str | None = most_recent.get("synced_at") if most_recent else None
+    # LOINC code → collection, restricted to the collections Health Connect
+    # actually writes to today. Extending ALLOWED_HC_LOINC_CODES with a new
+    # code automatically picks up its collection here.
+    hc_collections: dict[str, str] = {
+        loinc: LOINC_TO_COLLECTION[loinc] for loinc in ALLOWED_HC_LOINC_CODES
+    }
 
-    # ── 2. Per-LOINC observation counts ──────────────────────────────────────
-    pipeline = [
-        {"$match": base_filter},
-        {"$group": {"_id": "$loinc_code", "count": {"$sum": 1}}},
-    ]
-    agg_result = list(mongo_db.ehr_vitals.aggregate(pipeline))
-
-    # Map loinc_code → label → count, defaulting unknown codes to their raw code
     counts: dict[str, int] = {}
-    for row in agg_result:
-        loinc = row["_id"] or ""
-        label = _LOINC_LABELS.get(loinc, loinc)   # fallback to raw code
-        counts[label] = row["count"]
+    last_sync: str | None = None
+
+    for loinc, coll_name in hc_collections.items():
+        label = _LOINC_LABELS.get(loinc, loinc)
+        collection = mongo_db[coll_name]
+
+        counts[label] = collection.count_documents(base_filter)
+
+        most_recent = collection.find_one(
+            base_filter,
+            {"synced_at": 1},
+            sort=[("synced_at", -1)],
+        )
+        if most_recent and most_recent.get("synced_at"):
+            candidate = most_recent["synced_at"]
+            if last_sync is None or candidate > last_sync:
+                last_sync = candidate
 
     # Ensure the two current types are always present in the response
     counts.setdefault("heart_rate", 0)
     counts.setdefault("steps", 0)
 
-    has_data = bool(most_recent)
+    has_data = any(count > 0 for count in counts.values())
 
     logger.debug(
         "[hc_status] patient=%s has_data=%s last_sync=%s counts=%s",

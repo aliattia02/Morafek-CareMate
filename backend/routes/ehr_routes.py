@@ -18,6 +18,7 @@ from utils.fhir_de import (
     validate_kbv_medication_request_resource,
     validate_medication_bundle_entries,
 )
+from utils.vitals_storage import fan_out_reading, collect_readings, ALL_VITALS_COLLECTIONS
 from config import mongo
 import cloudinary.uploader
 import logging
@@ -74,71 +75,25 @@ def create_vitals(current_user, patient_id):
     performer_type = 'Practitioner' if recorder_type == 'doctor' else 'Patient'
     performer_ref  = f'{performer_type}/{recorded_by}'
 
-    document = {
-        'resourceType': 'Observation',
-        'id': str(uuid4()),
-        'patient_id': patient_id,
-        'recorded_by': recorded_by,
-        'status': 'final',
-        'category': [{
-            'coding': [{
-                'system': 'http://terminology.hl7.org/CodeSystem/observation-category',
-                'code': 'vital-signs',
-                'display': 'Vital Signs'
-            }]
-        }],
-        'code': {
-            'coding': [{
-                'system': 'http://loinc.org',
-                'code': '55284-4',
-                'display': 'Blood pressure systolic and diastolic'
-            }]
-        },
-        'subject': {'reference': f'Patient/{patient_id}'},
-        'effectiveDateTime': effective_dt,
-        # performer — required by ISiK and MII profiles
-        'performer': [{'reference': performer_ref}],
-        'component': [
-            {
-                'code': {'coding': [{'system': 'http://loinc.org',
-                                     'code': '8480-6', 'display': 'Systolic BP'}]},
-                'valueQuantity': {'value': systolic, 'unit': 'mmHg',
-                                  'system': 'http://unitsofmeasure.org', 'code': 'mm[Hg]'}
-            },
-            {
-                'code': {'coding': [{'system': 'http://loinc.org',
-                                     'code': '8462-4', 'display': 'Diastolic BP'}]},
-                'valueQuantity': {'value': diastolic, 'unit': 'mmHg',
-                                  'system': 'http://unitsofmeasure.org', 'code': 'mm[Hg]'}
-            },
-            {
-                'code': {'coding': [{'system': 'http://loinc.org',
-                                     'code': '8867-4', 'display': 'Heart rate'}]},
-                'valueQuantity': {'value': pulse, 'unit': '/min',
-                                  'system': 'http://unitsofmeasure.org', 'code': '/min'}
-            }
-        ],
-        'note': [{'text': notes}] if notes else [],
-        'extension': [
-            {
-                'url': 'https://morafek.app/fhir/StructureDefinition/urgent-flag',
-                'valueBoolean': urgent
-            },
-            {
-                'url': 'https://morafek.app/fhir/StructureDefinition/source',
-                'valueString': source
-            }
-        ]
-    }
-
-    # Stamp de.basisprofil.r4 + ISiK profile URLs onto meta.profile
-    build_isik_observation_vitals_fields(document)
-
-    result = mongo.db.ehr_vitals.insert_one(document)
-    logger.info("Vitals observation stored in ehr_vitals")
+    # Fans out into vitals_blood_pressure + vitals_heart_rate, linked by a
+    # shared reading_id, instead of one bundled ehr_vitals document.
+    reading_id = fan_out_reading(
+        mongo.db,
+        patient_id=patient_id,
+        recorded_by=recorded_by,
+        source=source,
+        performer_ref=performer_ref,
+        effective_dt=effective_dt,
+        systolic=systolic,
+        diastolic=diastolic,
+        pulse=pulse,
+        notes=notes,
+        urgent=urgent,
+    )
+    logger.info("Vitals observation stored (reading_id=%s)", reading_id)
 
     return jsonify({
-        'id': str(result.inserted_id),
+        'id': reading_id,
         'systolic': systolic,
         'diastolic': diastolic,
         'pulse': pulse,
@@ -156,40 +111,9 @@ def get_vitals(current_user, patient_id):
     if not has_access:
         return jsonify(err), code
 
-    docs = list(
-        mongo.db.ehr_vitals
-        .find({'patient_id': patient_id})
-        .sort('effectiveDateTime', -1)
-    )
-
-    result = []
-    for doc in docs:
-        systolic = diastolic = pulse = None
-        for comp in doc.get('component', []):
-            codings = comp.get('code', {}).get('coding', [])
-            code_val = codings[0].get('code') if codings else None
-            qty = comp.get('valueQuantity', {}).get('value')
-            if code_val == '8480-6':
-                systolic = qty
-            elif code_val == '8462-4':
-                diastolic = qty
-            elif code_val == '8867-4':
-                pulse = qty
-
-        urgent = False
-        for ext in doc.get('extension', []):
-            if ext.get('url') == 'https://morafek.app/fhir/StructureDefinition/urgent-flag':
-                urgent = ext.get('valueBoolean', False)
-
-        result.append({
-            'id': str(doc['_id']),
-            'systolic': systolic,
-            'diastolic': diastolic,
-            'pulse': pulse,
-            'urgent': urgent,
-            'timestamp': doc.get('effectiveDateTime')
-        })
-
+    # Reads from the new per-type collections (vitals_blood_pressure,
+    # vitals_heart_rate, vitals_weight), regrouped by reading_id.
+    result = collect_readings(mongo.db, patient_id)
     return jsonify(result), 200
 
 
@@ -205,40 +129,9 @@ def get_own_vitals(current_user):
 
     patient_id = str(current_user['_id'])
 
-    docs = list(
-        mongo.db.ehr_vitals
-        .find({'patient_id': patient_id})
-        .sort('effectiveDateTime', -1)
-    )
-
-    result = []
-    for doc in docs:
-        systolic = diastolic = pulse = None
-        for comp in doc.get('component', []):
-            codings = comp.get('code', {}).get('coding', [])
-            code_val = codings[0].get('code') if codings else None
-            qty = comp.get('valueQuantity', {}).get('value')
-            if code_val == '8480-6':
-                systolic = qty
-            elif code_val == '8462-4':
-                diastolic = qty
-            elif code_val == '8867-4':
-                pulse = qty
-
-        urgent = False
-        for ext in doc.get('extension', []):
-            if ext.get('url') == 'https://morafek.app/fhir/StructureDefinition/urgent-flag':
-                urgent = ext.get('valueBoolean', False)
-
-        result.append({
-            'id': str(doc['_id']),
-            'systolic': systolic,
-            'diastolic': diastolic,
-            'pulse': pulse,
-            'urgent': urgent,
-            'timestamp': doc.get('effectiveDateTime')
-        })
-
+    # Reads from the new per-type collections (vitals_blood_pressure,
+    # vitals_heart_rate, vitals_weight), regrouped by reading_id.
+    result = collect_readings(mongo.db, patient_id)
     return jsonify(result), 200
 
 
@@ -271,80 +164,33 @@ def create_own_vitals(current_user):
     urgent = systolic > 180 or diastolic > 120
 
     effective_dt = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    performer_ref = f'Patient/{patient_id}'
 
-    components = [
-        {
-            'code': {'coding': [{'system': 'http://loinc.org',
-                                 'code': '8480-6', 'display': 'Systolic BP'}]},
-            'valueQuantity': {'value': systolic, 'unit': 'mmHg',
-                              'system': 'http://unitsofmeasure.org', 'code': 'mm[Hg]'}
-        },
-        {
-            'code': {'coding': [{'system': 'http://loinc.org',
-                                 'code': '8462-4', 'display': 'Diastolic BP'}]},
-            'valueQuantity': {'value': diastolic, 'unit': 'mmHg',
-                              'system': 'http://unitsofmeasure.org', 'code': 'mm[Hg]'}
-        },
-        {
-            'code': {'coding': [{'system': 'http://loinc.org',
-                                 'code': '8867-4', 'display': 'Heart rate'}]},
-            'valueQuantity': {'value': pulse, 'unit': '/min',
-                              'system': 'http://unitsofmeasure.org', 'code': '/min'}
-        }
-    ]
-
-    if weight_kg is not None:
-        components.append({
-            'code': {'coding': [{'system': 'http://loinc.org',
-                                 'code': '29463-7', 'display': 'Body weight'}]},
-            'valueQuantity': {'value': weight_kg, 'unit': 'kg',
-                              'system': 'http://unitsofmeasure.org', 'code': 'kg'}
-        })
-
-    document = {
-        'resourceType': 'Observation',
-        'id': str(uuid4()),
-        'patient_id': patient_id,
-        'recorded_by': recorded_by,
-        'status': 'final',
-        'category': [{
-            'coding': [{
-                'system': 'http://terminology.hl7.org/CodeSystem/observation-category',
-                'code': 'vital-signs',
-                'display': 'Vital Signs'
-            }]
-        }],
-        'code': {
-            'coding': [{
-                'system': 'http://loinc.org',
-                'code': '55284-4',
-                'display': 'Blood pressure systolic and diastolic'
-            }]
-        },
-        'subject': {'reference': f'Patient/{patient_id}'},
-        'effectiveDateTime': effective_dt,
-        'component': components,
-        'note': [{'text': notes}] if notes else [],
-        'extension': [
-            {
-                'url': 'https://morafek.app/fhir/StructureDefinition/urgent-flag',
-                'valueBoolean': urgent
-            },
-            {
-                'url': 'https://morafek.app/fhir/StructureDefinition/source',
-                'valueString': source
-            }
-        ]
-    }
-
-    result = mongo.db.ehr_vitals.insert_one(document)
-    logger.info("Patient home vitals observation stored in ehr_vitals")
+    # Fans out into vitals_blood_pressure + vitals_heart_rate (+ vitals_weight
+    # if provided), linked by a shared reading_id, instead of one bundled
+    # ehr_vitals document.
+    reading_id = fan_out_reading(
+        mongo.db,
+        patient_id=patient_id,
+        recorded_by=recorded_by,
+        source=source,
+        performer_ref=performer_ref,
+        effective_dt=effective_dt,
+        systolic=systolic,
+        diastolic=diastolic,
+        pulse=pulse,
+        weight_kg=weight_kg,
+        notes=notes,
+        urgent=urgent,
+    )
+    logger.info("Patient home vitals observation stored (reading_id=%s)", reading_id)
 
     return jsonify({
-        'id': str(result.inserted_id),
+        'id': reading_id,
         'systolic': systolic,
         'diastolic': diastolic,
         'pulse': pulse,
+        'weight_kg': weight_kg,
         'urgent': urgent,
         'timestamp': effective_dt
     }), 201
@@ -1697,17 +1543,48 @@ def _build_ehr_entries(patient_id: str, default_performer_ref: str) -> list:
     entries: list = []
 
     # ── Vitals — one Observation per vital sign ───────────────────────────────
-    for doc in mongo.db.ehr_vitals.find({'patient_id': patient_id}):
-        recorded_by = doc.get('recorded_by')
-        if recorded_by:
+    def _performer_ref_for_recorder(recorded_by: str | None) -> str:
+        if recorded_by and ObjectId.is_valid(recorded_by):
+            # A real doctor/patient user _id — look up their role so we can
+            # build a Practitioner/ or Patient/ performer reference.
             doc_user = mongo.db.users.find_one(
                 {'_id': ObjectId(recorded_by)}, {'user_type': 1}
             ) or {}
-            utype       = doc_user.get('user_type', 'patient')
-            performer_r = f"{'Practitioner' if utype == 'doctor' else 'Patient'}/{recorded_by}"
-        else:
-            performer_r = default_performer_ref
+            utype = doc_user.get('user_type', 'patient')
+            return f"{'Practitioner' if utype == 'doctor' else 'Patient'}/{recorded_by}"
+        elif recorded_by:
+            # Non-ObjectId sentinel values — e.g. "health_connect" from the
+            # Health Connect sync pipeline (see enrich_for_storage() in
+            # fhir_health_connect.py), or any other future automated source.
+            # These aren't a doctor/patient user, so ObjectId(recorded_by)
+            # would raise bson.errors.InvalidId. Represent them as a Device
+            # performer instead of attempting a user lookup.
+            return f"Device/{recorded_by}"
+        return default_performer_ref
 
+    # Current data: one pass per per-type vitals_* collection (see
+    # utils/vitals_storage.py — this is where create_vitals()/fan_out_reading()
+    # and the Health Connect sync now write). Passing collection_name tells
+    # build_observations_from_vitals_doc() exactly how to interpret each
+    # doc's shape instead of guessing from its contents.
+    for collection_name in ALL_VITALS_COLLECTIONS:
+        for doc in mongo.db[collection_name].find({'patient_id': patient_id}):
+            performer_r = _performer_ref_for_recorder(doc.get('recorded_by'))
+            for obs in build_observations_from_vitals_doc(
+                doc, patient_id,
+                performer_ref=performer_r,
+                collection_name=collection_name,
+            ):
+                entries.append({'fullUrl': f'urn:uuid:{obs["id"]}', 'resource': obs})
+
+    # Legacy data: docs written before the ehr_vitals → per-type-collections
+    # migration that haven't been backfilled into vitals_* yet. No
+    # collection_name is passed, so build_observations_from_vitals_doc()
+    # falls back to its old mixed-component[]/HC-flat parsing. Once the
+    # one-time migration script has run and been verified for a given
+    # patient, this loop will simply find no documents.
+    for doc in mongo.db.ehr_vitals.find({'patient_id': patient_id}):
+        performer_r = _performer_ref_for_recorder(doc.get('recorded_by'))
         for obs in build_observations_from_vitals_doc(
             doc, patient_id, performer_ref=performer_r
         ):

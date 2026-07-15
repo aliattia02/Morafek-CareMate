@@ -2,7 +2,9 @@
 health_connect_routes.py — Google Health Connect Integration Endpoints
 ==============================================================================
 Flask Blueprint that receives FHIR R4 Observations from the mobile Health
-Connect integration and stores them in the existing ehr_vitals collection.
+Connect integration and stores them in the per-type vitals_* collections
+(see utils/vitals_storage.py — this route no longer writes to the legacy
+shared ehr_vitals collection).
 
 Unlike the Google Fit integration in watch_sync_routes.py, there is NO OAuth
 flow, NO server-side token storage, and NO background scheduler. Health
@@ -12,17 +14,25 @@ Observations to this endpoint. The backend simply validates and persists them.
 Endpoints
 ─────────
   POST   /api/healthconnect/sync    — receive FHIR Observations, validate,
-                                      upsert into ehr_vitals
+                                      upsert into the vitals_* collection
+                                      given by LOINC_TO_COLLECTION
   GET    /api/healthconnect/status  — last sync time + per-type record counts
   DELETE /api/healthconnect/data    — GDPR/DSGVO: erase all HC-sourced records
-                                      for this patient from ehr_vitals
+                                      for this patient from every vitals_*
+                                      collection
 
 Register in main.py:
     from routes.health_connect_routes import health_connect_bp
     app.register_blueprint(health_connect_bp)
 
-Index recommendation (add once in main.py or a migration script):
-    mongo.db.ehr_vitals.create_index(
+Index recommendation (add once in main.py or a migration script, one per
+collection Health Connect writes to — see ALLOWED_HC_LOINC_CODES):
+    mongo.db.vitals_heart_rate.create_index(
+        [("patient_id", 1), ("source", 1), ("synced_at", -1)],
+        name="hc_patient_source_synced",
+        background=True,
+    )
+    mongo.db.vitals_steps.create_index(
         [("patient_id", 1), ("source", 1), ("synced_at", -1)],
         name="hc_patient_source_synced",
         background=True,
@@ -47,6 +57,7 @@ from utils.fhir_health_connect import (
     enrich_for_storage,
     validate_hc_observation,
 )
+from utils.vitals_storage import ALL_VITALS_COLLECTIONS, LOINC_TO_COLLECTION
 
 logger = logging.getLogger(__name__)
 
@@ -67,7 +78,9 @@ _MAX_OBSERVATIONS_PER_REQUEST: int = 2_000
 def sync_health_connect(current_user):
     """
     Accept an array of FHIR R4 Observations produced by the mobile
-    Health Connect mapper and upsert them into ehr_vitals.
+    Health Connect mapper and upsert each one into the per-type vitals_*
+    collection given by LOINC_TO_COLLECTION[loinc_code] (e.g. heart-rate
+    observations go to vitals_heart_rate, steps to vitals_steps).
 
     Each observation is validated individually. Invalid observations are
     counted as skipped (not inserted) and their errors are logged, but they
@@ -124,8 +137,11 @@ def sync_health_connect(current_user):
         }), 413
 
     # ── Validate each observation ─────────────────────────────────────────────
-    valid_ops: list[UpdateOne] = []      # pymongo bulk write operations
-    errors:    list[dict]      = []
+    # Bulk write ops are grouped per target collection, since each LOINC
+    # code routes to its own vitals_* collection (LOINC_TO_COLLECTION) and
+    # bulk_write() only operates against a single collection at a time.
+    valid_ops_by_collection: dict[str, list[UpdateOne]] = {}
+    errors: list[dict] = []
 
     for idx, obs in enumerate(raw_observations):
         if not isinstance(obs, dict):
@@ -149,12 +165,18 @@ def sync_health_connect(current_user):
             errors.append({"index": idx, "id": obs_id, **exc.to_dict()})
             continue
 
-        # Enrich with server-side fields
+        # Enrich with server-side fields (including reading_id)
         enriched = enrich_for_storage(dict(obs), user_id, loinc_code)
+
+        # loinc_code was already checked against ALLOWED_HC_LOINC_CODES in
+        # validate_hc_observation(), and ALLOWED_HC_LOINC_CODES is reconciled
+        # against LOINC_TO_COLLECTION at import time, so this lookup cannot
+        # KeyError in practice.
+        collection_name = LOINC_TO_COLLECTION[loinc_code]
 
         # Build an upsert operation keyed on the client UUID
         # This makes the sync endpoint idempotent.
-        valid_ops.append(
+        valid_ops_by_collection.setdefault(collection_name, []).append(
             UpdateOne(
                 filter={"id": enriched["id"]},
                 update={"$setOnInsert": enriched},
@@ -162,14 +184,14 @@ def sync_health_connect(current_user):
             )
         )
 
-    # ── Bulk write ────────────────────────────────────────────────────────────
+    # ── Bulk write, one batch per target collection ───────────────────────────
     inserted_count = 0
 
-    if valid_ops:
-        result = mongo.db.ehr_vitals.bulk_write(valid_ops, ordered=False)
+    for collection_name, ops in valid_ops_by_collection.items():
+        result = mongo.db[collection_name].bulk_write(ops, ordered=False)
         # upserted_count = newly inserted documents
         # modified_count will be 0 because we use $setOnInsert
-        inserted_count = result.upserted_count
+        inserted_count += result.upserted_count
 
     skipped_count = len(raw_observations) - inserted_count
 
@@ -183,7 +205,7 @@ def sync_health_connect(current_user):
     )
 
     # If every single observation failed validation, return 422
-    if errors and not valid_ops:
+    if errors and not valid_ops_by_collection:
         return jsonify({
             "message":  "No observations were stored — all failed validation",
             "received": len(raw_observations),
@@ -213,8 +235,10 @@ def health_connect_status(current_user):
     """
     Return the Health Connect sync status for the authenticated patient.
 
-    This is a fast aggregation query over ehr_vitals — no separate collection
-    is needed. The response is used by the mobile settings screen to display:
+    This queries the small, fixed set of vitals_* collections that Health
+    Connect writes to (see build_hc_status_response() in
+    utils/fhir_health_connect.py). The response is used by the mobile
+    settings screen to display:
       • whether any HC data exists
       • the last sync timestamp
       • per-type observation counts (heart_rate, steps, ...)
@@ -247,14 +271,22 @@ def delete_health_connect_data(current_user):
     GDPR/DSGVO Article 17 — Right to erasure (selective).
 
     Deletes all Health Connect sourced observations for the authenticated
-    patient from ehr_vitals. This is for selective HC data withdrawal —
-    the patient's manually recorded vitals, visits, and other records are
-    NOT affected.
+    patient from every per-type vitals_* collection (see
+    utils.vitals_storage.ALL_VITALS_COLLECTIONS). This is for selective HC
+    data withdrawal — the patient's manually recorded vitals, visits, and
+    other records are NOT affected, since those share the same collections
+    but carry a different `source` value.
+
+    Also sweeps the legacy ehr_vitals collection for any HC-sourced docs
+    that predate the per-type-collection migration and haven't been backfilled
+    yet, so a patient's erasure request is honored regardless of where their
+    data physically lives.
 
     For full account erasure, use DELETE /api/auth/delete-account which
-    wipes all ehr_vitals documents (regardless of source) along with all
-    other patient collections. That endpoint already covers HC-sourced
-    records automatically since they share the same collection.
+    wipes all vitals_* (and legacy ehr_vitals) documents regardless of
+    source, along with all other patient collections. That endpoint already
+    covers HC-sourced records automatically since they share the same
+    collections.
 
     Response 200:
         {
@@ -264,15 +296,20 @@ def delete_health_connect_data(current_user):
     """
     user_id = str(current_user["_id"])
 
-    result = mongo.db.ehr_vitals.delete_many({
-        "patient_id": user_id,
-        "source":     "health_connect",
-    })
+    hc_filter = {"patient_id": user_id, "source": "health_connect"}
 
-    deleted_count = result.deleted_count
+    deleted_count = 0
+    for collection_name in ALL_VITALS_COLLECTIONS:
+        result = mongo.db[collection_name].delete_many(hc_filter)
+        deleted_count += result.deleted_count
+
+    # Legacy pre-migration data, if any is still sitting in ehr_vitals.
+    legacy_result = mongo.db.ehr_vitals.delete_many(hc_filter)
+    deleted_count += legacy_result.deleted_count
 
     logger.info(
-        "[hc_delete] user=%s deleted %d HC-sourced observations from ehr_vitals",
+        "[hc_delete] user=%s deleted %d HC-sourced observations across "
+        "vitals_* collections (including legacy ehr_vitals)",
         user_id, deleted_count,
     )
 

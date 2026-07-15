@@ -20,10 +20,33 @@
  *   • valueQuantity: UCUM unit (http://unitsofmeasure.org)
  *   • extension: device-type (android_watch)
  *   • source: "health_connect" (non-FHIR field, added for backend filtering)
+ *
+ * ── FIX 7 — Deterministic observation IDs (fixes duplicate re-sync bug) ─────
+ *
+ *   Previously `id` was `uuidv4()` — a fresh random value every time this
+ *   file built an Observation, even for the exact same underlying HC/Google
+ *   Fit reading across repeated syncs.
+ *
+ *   The backend (health_connect_routes.py) relies on the `id` field to make
+ *   sync idempotent:
+ *       UpdateOne(filter={"id": enriched["id"]},
+ *                 update={"$setOnInsert": enriched}, upsert=True)
+ *   This only skips a duplicate if the SAME reading produces the SAME id on
+ *   a later sync. A random id defeats that entirely — every tap of "Jetzt
+ *   synchronisieren" re-inserted the same readings as brand-new documents,
+ *   so counts doubled/tripled on every sync.
+ *
+ *   Fix: `id` is now derived deterministically from the fields that
+ *   uniquely identify one measurement — patient + LOINC code + effective
+ *   timestamp + value — via buildDeterministicObservationId(). The same
+ *   reading always hashes to the same id, so the backend upsert correctly
+ *   no-ops it as a duplicate. Two distinct readings would need to collide on
+ *   patient + code + timestamp + value simultaneously to produce the same
+ *   id, which does not happen in practice.
+ *
+ *   uuidv4()/react-native-get-random-values are no longer used by this file.
  */
 
-import 'react-native-get-random-values'; // required before uuid on RN
-import { v4 as uuidv4 } from 'uuid';
 import type {
   HCDataTypeConfig,
   HCFHIRObservation,
@@ -78,6 +101,52 @@ export const HC_DATA_TYPES = {
 
 export type HCDataTypeKey = keyof typeof HC_DATA_TYPES;
 
+// ─── Deterministic ID generation ──────────────────────────────────────────────
+//
+// See FIX 7 above. This replaces uuidv4() so the same underlying reading
+// always produces the same Observation.id across repeated syncs, which is
+// what makes the backend's upsert-based duplicate detection actually work.
+
+/**
+ * FNV-1a 32-bit hash, run twice with different seeds (once over the input,
+ * once over the reversed input) and concatenated into a 64-bit-ish hex
+ * digest. This is NOT cryptographic — it doesn't need to be. It only needs
+ * to be a) fully deterministic for the same input, and b) collision-resistant
+ * enough for a handful of observations per patient per sync, which a 64-bit
+ * digest comfortably provides.
+ */
+function hashToHex(input: string): string {
+  function fnv1a(str: string, seed: number): number {
+    let hash = seed;
+    for (let i = 0; i < str.length; i++) {
+      hash ^= str.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  const forward = fnv1a(input, 0x811c9dc5);
+  const reversed = fnv1a(input.split('').reverse().join(''), 0x1000193);
+  return forward.toString(16).padStart(8, '0') + reversed.toString(16).padStart(8, '0');
+}
+
+/**
+ * Build a stable Observation id from the fields that uniquely identify one
+ * measurement. Re-mapping the exact same HC/Google Fit reading — even from
+ * a completely fresh readRecords() call in a later sync — yields the exact
+ * same id, so the backend's upsert-by-id treats it as an already-synced
+ * duplicate instead of inserting a new document.
+ */
+function buildDeterministicObservationId(
+  patientId: string,
+  loincCode: string,
+  effectiveDateTime: string,
+  value: number,
+): string {
+  const key = `hc|${patientId}|${loincCode}|${effectiveDateTime}|${value}`;
+  return `hc-${hashToHex(key)}`;
+}
+
 // ─── FHIR builder helpers ─────────────────────────────────────────────────────
 
 /**
@@ -92,7 +161,7 @@ function buildBaseObservation(
 ): HCFHIRObservation {
   return {
     resourceType: 'Observation',
-    id: uuidv4(),
+    id: buildDeterministicObservationId(patientId, config.loincCode, effectiveDateTime, value),
     status: 'final',
     category: [
       {
