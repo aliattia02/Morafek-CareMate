@@ -110,6 +110,9 @@ def sync_health_connect(current_user):
     Response 400: body missing or not JSON
     Response 422: every single observation in the batch failed validation
     """
+    # ── TEMP DEPLOY-CHECK — remove once confirmed this build is live on Render ──
+    logger.warning("[hc_sync] DEPLOY-CHECK v2 — this build only writes vitals_*, never ehr_vitals")
+
     body = request.get_json(silent=True) or {}
     user_id = str(current_user["_id"])
 
