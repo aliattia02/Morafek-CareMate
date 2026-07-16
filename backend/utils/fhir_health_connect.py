@@ -81,6 +81,46 @@ if _unrouted:
         "Add a collection mapping there before enabling this code."
     )
 
+# ─── Source-app identification ────────────────────────────────────────────────
+#
+# Health Connect aggregates readings from multiple installed apps (Google Fit,
+# Samsung Health, Health Sync, ...) — see useHealthConnect.ts's Fix 8
+# (metadata.dataOrigin filtering). The mobile mapper (health-connect-mapper.ts)
+# carries the winning record's origin package through to the FHIR Observation
+# it builds, in two places for both FHIR-conformance and easy querying:
+#
+#   device.identifier[] — { system: SOURCE_APP_IDENTIFIER_SYSTEM, value: <pkg> }
+#   extension[]          — { url: SOURCE_APP_EXTENSION_URL, valueString: <pkg> }
+#
+# Both carry the same raw Android package id (e.g. "com.google.android.apps.fitness").
+# Unrecognized/unmapped packages are stored as-is, not normalized to "Other" —
+# that labeling decision belongs to whatever UI eventually surfaces this, not
+# to storage.
+SOURCE_APP_IDENTIFIER_SYSTEM = "https://morafek.app/fhir/source-app-package"
+SOURCE_APP_EXTENSION_URL     = "https://morafek.app/fhir/StructureDefinition/source-app"
+
+
+def _extract_source_app(obs: dict[str, Any]) -> str | None:
+    """
+    Pull the Health Connect source-app package id off an incoming Observation,
+    checking device.identifier[] first (FHIR-conformant location) and falling
+    back to extension[] (matches how device-type is already carried).
+
+    Returns None if absent — older mobile app builds that predate this field
+    won't have it, and that's fine; it's optional, not validated.
+    """
+    device = obs.get("device") or {}
+    for ident in device.get("identifier", []) or []:
+        if ident.get("system") == SOURCE_APP_IDENTIFIER_SYSTEM and ident.get("value"):
+            return ident["value"]
+
+    for ext in obs.get("extension", []) or []:
+        if ext.get("url") == SOURCE_APP_EXTENSION_URL and ext.get("valueString"):
+            return ext["valueString"]
+
+    return None
+
+
 # Human-readable labels for status breakdown (keyed by LOINC code)
 _LOINC_LABELS: dict[str, str] = {
     "8867-4":  "heart_rate",
@@ -263,6 +303,12 @@ def enrich_for_storage(
         recorded_by     — "health_connect" (not a doctor user_id)
         source          — "health_connect" (already set by client, enforced here)
         device_type     — "android_watch"
+        source_app      — raw HC source-app package id (e.g.
+                           "com.google.android.apps.fitness"), pulled from
+                           device.identifier[]/extension[] via
+                           _extract_source_app(). None for older mobile app
+                           builds that predate this field — optional, not
+                           validated, doesn't block storage.
         synced_at       — server UTC timestamp of the sync request
         loinc_code      — top-level index copy for the status aggregation query
         reading_id       — groups documents written together in one logical
@@ -279,6 +325,7 @@ def enrich_for_storage(
     obs["recorded_by"]  = "health_connect"
     obs["source"]       = "health_connect"   # already present, reinforce
     obs["device_type"]  = "android_watch"
+    obs["source_app"]   = _extract_source_app(obs)   # top-level copy for fast queries; None if absent
     obs["synced_at"]    = now_iso
     obs["loinc_code"]   = loinc_code         # top-level copy for fast queries
     obs["reading_id"]   = obs.get("id") or str(uuid4())

@@ -430,7 +430,7 @@ def build_observations_from_vitals_doc(
     if collection_name is not None:
         storage_only_fields = {
             "_id", "patient_id", "recorded_by", "source",
-            "device_type", "synced_at", "loinc_code", "reading_id",
+            "device_type", "source_app", "synced_at", "loinc_code", "reading_id",
         }
         flat_obs: dict = {
             k: v for k, v in doc.items() if k not in storage_only_fields
