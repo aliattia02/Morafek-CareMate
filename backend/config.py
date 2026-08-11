@@ -70,12 +70,17 @@ ALLOWED_ORIGINS = [
     "https://morafek-caremate.onrender.com",
     "https://morafek.vercel.app",
     "https://morafek-care-mate.vercel.app",
+    # ── Phase 2: Researcher portal ──────────────────────────────────────────
+    "https://morafek-research.vercel.app",
+    "https://morafek-research-staging.vercel.app",
 ]
 
 # Regex patterns to allow ALL Vercel preview deployments for this project
 ALLOWED_ORIGIN_PATTERNS = [
     re.compile(r"^https://morafek-care-mate.*\.vercel\.app$"),
     re.compile(r"^https://morafek.*\.vercel\.app$"),
+    # ── Phase 2: Researcher portal Vercel preview deployments ────────────────
+    re.compile(r"^https://morafek-research.*\.vercel\.app$"),
 ]
 
 

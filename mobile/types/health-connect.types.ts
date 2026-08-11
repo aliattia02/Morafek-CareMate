@@ -111,6 +111,49 @@ export const DEFAULT_PREFERRED_ORIGINS: Record<string, string> = {
 /** Per-data-type origin preference map, as used by readAllRecords(). */
 export type HCOriginPreferences = Record<string, string>;
 
+// ─── Source-app identification (FIX 9) ────────────────────────────────────────
+//
+// Distinct from the filtering constants above: HC_KNOWN_ORIGINS /
+// DEFAULT_PREFERRED_ORIGINS decide WHICH source's records survive the FIX 8
+// filter in useHealthConnect.ts. The constants below decide how the
+// surviving record's origin gets STAMPED onto the FHIR Observation that
+// health-connect-mapper.ts builds from it, so the app it came from isn't
+// discarded once the reading passes the filter.
+//
+// SOURCE_APP_IDENTIFIER_SYSTEM / SOURCE_APP_EXTENSION_URL must match
+// backend/utils/fhir_health_connect.py's constants of the same name exactly
+// — that file's _extract_source_app() checks device.identifier[] first,
+// then falls back to extension[], in that order. Confirmed against the
+// actual backend file: identical strings, identical check order.
+
+export const SOURCE_APP_IDENTIFIER_SYSTEM = 'https://morafek.app/fhir/source-app-package';
+export const SOURCE_APP_EXTENSION_URL     = 'https://morafek.app/fhir/StructureDefinition/source-app';
+
+/**
+ * Best-effort friendly names for common Health Connect data sources, shown
+ * in device.display instead of the raw package id when recognized.
+ * NOT exhaustive — verify these package ids against what your devices
+ * actually report (log `record.metadata?.dataOrigin` once to confirm) before
+ * relying on the label in anything user-facing. Unrecognized packages are
+ * never collapsed into "Other" — resolveSourceAppDisplay() falls back to the
+ * raw id as-is, so new sources remain identifiable and can be added here
+ * later.
+ *
+ * Deliberately keyed by explicit string literals rather than derived from
+ * HC_KNOWN_ORIGINS' keys — avoids any casing/formatting mismatch between an
+ * enum-style key (e.g. GOOGLE_FIT) and its intended display label.
+ */
+export const KNOWN_SOURCE_APPS: Record<string, string> = {
+  'com.google.android.apps.fitness': 'Google Fit',
+  'com.sec.android.app.shealth':     'Samsung Health',
+  'nl.appyhapps.healthsync':         'Health Sync',
+};
+
+/** Resolve a raw dataOrigin package id to a friendly display name, or the raw id if unrecognized. */
+export function resolveSourceAppDisplay(dataOrigin: string): string {
+  return KNOWN_SOURCE_APPS[dataOrigin] ?? dataOrigin;
+}
+
 // ─── Raw HC SDK record shapes (minimal — only fields we consume) ──────────────
 
 /** Heart rate sample within a HeartRate record */
@@ -187,13 +230,24 @@ export interface HCFHIRObservation {
   };
   /** Fixed: marks this Observation as originating from Health Connect */
   source: 'health_connect';
+  /**
+   * FIX 9: display widened from the literal 'health_connect' to a general
+   * string — it now shows a friendly source-app name (KNOWN_SOURCE_APPS) or
+   * the raw package id when the record's dataOrigin is known, falling back
+   * to the original 'health_connect' literal when it isn't. identifier is
+   * optional and only populated when dataOrigin is present on the source
+   * record (see buildBaseObservation() in health-connect-mapper.ts).
+   */
   device: {
-    display: 'health_connect';
+    display: string;
+    identifier?: Array<{ system: string; value: string }>;
   };
-  extension: Array<{
-    url: 'https://morafek.app/fhir/StructureDefinition/device-type';
-    valueString: 'android_watch';
-  }>;
+  /**
+   * FIX 9: widened from a single fixed-shape entry to a general array so it
+   * can carry both the original device-type entry and, when available, a
+   * second source-app entry (SOURCE_APP_EXTENSION_URL) alongside it.
+   */
+  extension: Array<{ url: string; valueString: string }>;
 }
 
 // ─── API request / response shapes ───────────────────────────────────────────

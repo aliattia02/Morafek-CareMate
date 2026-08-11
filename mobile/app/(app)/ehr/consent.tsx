@@ -235,7 +235,7 @@ export default function ConsentScreen() {
       setConsentAccepted(false);
       setLegacyStatus(null);
       setLocalGrantedAt(null);
-      setMessage('Consent revoked. Your pseudonym has been deleted.');
+      setMessage('Consent revoked. Your existing identifier will be reused if you grant consent again.');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to revoke consent');
     } finally {
@@ -246,9 +246,9 @@ export default function ConsentScreen() {
   const handleRevoke = () => {
     showConfirm(
       'Revoke Consent',
-      'This will remove your pseudonym from our research systems and ' +
-      'disable pseudonymised data export. Your medical records are ' +
-      'not affected.\n\nContinue?',
+      'This will disable pseudonymised data export. Your existing research ' +
+      'identifier is kept so re-granting consent later resumes under the ' +
+      'same one. Your medical records are not affected.\n\nContinue?',
       handleRevokeConfirmed,
     );
   };

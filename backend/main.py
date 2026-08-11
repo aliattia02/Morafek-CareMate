@@ -79,6 +79,19 @@ def create_app():
         # part of patient_routes — no separate fhir_patient_route module needed.
         from routes.metadata_route import metadata_bp
 
+        # ── Phase 2: Research consent sync ──────────────────────────────────
+        # Researcher-triggered on-demand sync job to refresh research_eligible
+        # flag from live gICS consent status (data-store-separation-reference.md
+        # §4 & §7.3). No background scheduler — sync is request-triggered.
+        # Phase 2.5: the same sync pass now also mirrors vitals into
+        # research_vitals for eligible patients (utils/research_mirror.py).
+        from routes.research_routes import research_routes
+
+        # ── Admin: sync-issue visibility + data-erasure approval ────────────
+        # Added 2026-08-11 (admin-routes-plan.md). Admin-only routes for
+        # GET /api/admin/sync-issues and the erasure-request approval queue.
+        from routes.admin_routes import admin_routes
+
         blueprints = [
             (auth_routes,        ''),
             (doctor_routes,      ''),
@@ -91,6 +104,8 @@ def create_app():
             (consent_routes,     ''),
             (health_connect_bp,  ''),   # /api/healthconnect/* — wearable FHIR sync
             (metadata_bp,        ''),   # /metadata — must be unauthenticated
+            (research_routes,    ''),   # /api/research/* — researcher sync + data access (Phase 2/2.5)
+            (admin_routes,       ''),   # /api/admin/* — admin-only sync-issue + erasure routes
         ]
 
         for blueprint, url_prefix in blueprints:
@@ -107,6 +122,7 @@ def create_app():
     # a context, so we do it explicitly here before returning the app.
     with app.app_context():
         _ensure_mongo_indexes(logger)
+        _ensure_dev_admin_account(logger)
 
     return app
 
@@ -142,6 +158,22 @@ def _ensure_mongo_indexes(logger):
             name="idx_patient_consents_unique",
         )
 
+        # ── consent_history + patient_identifiers ──────────────────────────
+        # See utils/consent_history.py and data-store-separation-reference.md.
+        # consent_history is append-only and keyed by pseudonym, not
+        # patient_id — a patient can have many rows under one pseudonym, so
+        # no unique constraint here, just the compound index the sync job
+        # and open/close/get_consent_intervals() rely on for lookups.
+        mongo.db.consent_history.create_index(
+            [("pseudonym", ASCENDING), ("granted_at", ASCENDING)],
+            name="idx_consent_history_pseudonym_granted",
+        )
+        mongo.db.patient_identifiers.create_index(
+            [("patient_id", ASCENDING)],
+            unique=True,
+            name="idx_patient_identifiers_unique",
+        )
+
         for coll_name in ("ehr_vitals", "ehr_visits", "ehr_conditions"):
             mongo.db[coll_name].create_index(
                 [("patient_id", ASCENDING)],
@@ -168,14 +200,132 @@ def _ensure_mongo_indexes(logger):
             background=True,
         )
 
+        # ── Research sync indexes (Phase 2) ────────────────────────────────────
+        # Fast lookup of research_eligible status in dataset export queries
+        mongo.db.patient_identifiers.create_index(
+            [("research_eligible", ASCENDING), ("patient_id", ASCENDING)],
+            name="idx_patient_identifiers_research_eligible",
+        )
+        # Support queries like "who became eligible in the last N hours?"
+        mongo.db.patient_identifiers.create_index(
+            [("last_synced_at", DESCENDING)],
+            name="idx_patient_identifiers_last_synced",
+            sparse=True,
+        )
+        # Audit trail queries and ops dashboards
+        mongo.db.research_sync_log.create_index(
+            [("synced_at", DESCENDING)],
+            name="idx_research_sync_log_synced_at",
+        )
+
+        # ── research_vitals indexes (Phase 2.5) ────────────────────────────────
+        # Idempotency key for mirror_patient_vitals()'s upsert — must be unique
+        # or concurrent/retried syncs could double-insert the same reading.
+        mongo.db.research_vitals.create_index(
+            [("research_pseudonym", ASCENDING),
+             ("source_collection", ASCENDING),
+             ("source_observation_id", ASCENDING)],
+            unique=True,
+            name="idx_research_vitals_dedup",
+        )
+        # Primary read pattern for researchers: all readings for a pseudonym,
+        # ordered by time.
+        mongo.db.research_vitals.create_index(
+            [("research_pseudonym", ASCENDING), ("effectiveDateTime", DESCENDING)],
+            name="idx_research_vitals_pseudonym_time",
+        )
+
+        # ── sync_issues indexes (added 2026-08-11, admin-routes-plan.md §1) ────
+        # One open doc per (patient_id, issue_type) — unique index doubles as
+        # the constraint flag_sync_issue()/resolve_sync_issue() rely on to
+        # avoid duplicate open issues for the same pair.
+        mongo.db.sync_issues.create_index(
+            [("patient_id", ASCENDING), ("issue_type", ASCENDING)],
+            unique=True,
+            name="idx_sync_issues_patient_type",
+        )
+        # Supports GET /api/admin/sync-issues's default "open issues only"
+        # filter ({"resolved_at": None}) without a full collection scan.
+        mongo.db.sync_issues.create_index(
+            [("resolved_at", ASCENDING)],
+            name="idx_sync_issues_resolved",
+            sparse=True,
+        )
+
+        # ── erasure_requests indexes (added 2026-08-11, admin-routes-plan.md §3) ─
+        # Primary read pattern for the admin queue: filter by status, newest
+        # first.
+        mongo.db.erasure_requests.create_index(
+            [("status", ASCENDING), ("requested_at", DESCENDING)],
+            name="idx_erasure_requests_status_requested",
+        )
+        # Lets a patient (or an admin looking up one patient) find their own
+        # request history without a collection scan.
+        mongo.db.erasure_requests.create_index(
+            [("patient_id", ASCENDING)],
+            name="idx_erasure_requests_patient",
+        )
+
         # Medication module indexes
         from routes.medication_routes import ensure_medication_indexes
         ensure_medication_indexes()
 
-        logger.info("MongoDB indexes ensured for German FHIR layer + Health Connect")
+        logger.info("MongoDB indexes ensured for German FHIR layer + Health Connect + Research sync + Admin")
 
     except Exception as exc:
         logger.warning(f"Could not ensure MongoDB indexes: {exc}")
+
+
+def _ensure_dev_admin_account(logger):
+    """
+    ⚠️ TEMPORARY / DEV-ONLY — added 2026-08-11 at explicit request, in place
+    of building a real admin-invite/promotion flow for now. Seeds a
+    hardcoded admin account (username "admin", password "1234") on every
+    startup if one doesn't already exist, so backend/routes/admin_routes.py
+    (erasure approval, sync-issue visibility) is reachable without a
+    manual DB insert.
+
+    NOT SAFE for any shared, staging, or production environment — these
+    credentials are fixed and public in this source file. Before this app
+    is exposed anywhere beyond localhost:
+      • change the password below (or better, drive it from an env var and
+        skip seeding entirely if unset), and
+      • decide what to do about auth_routes.py's /register endpoint, which
+        still allows anyone to self-register a SECOND admin account with
+        user_type="admin" and a password of their choosing — this function
+        only seeds one known account, it does not close that door.
+
+    Idempotent via upsert + $setOnInsert — safe to call on every restart.
+    Won't overwrite the password if it's since been changed through the
+    app (e.g. via a future admin profile/password-change endpoint).
+    """
+    from werkzeug.security import generate_password_hash
+    from datetime import datetime, timezone
+
+    try:
+        result = mongo.db.users.update_one(
+            {"username": "admin", "user_type": "admin"},
+            {"$setOnInsert": {
+                "username":      "admin",
+                "email":         "admin@local.dev",
+                "password":      generate_password_hash("1234"),
+                "first_name":    "Admin",
+                "last_name":     "Account",
+                "date_of_birth": "",
+                "user_type":     "admin",
+                "created_at":    datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+        if result.upserted_id is not None:
+            logger.warning(
+                "Seeded default admin account — username='admin', "
+                "password='1234'. INSECURE, dev-only — see "
+                "_ensure_dev_admin_account()'s docstring in main.py before "
+                "deploying this anywhere shared."
+            )
+    except Exception as exc:
+        logger.warning(f"Could not ensure dev admin account: {exc}")
 
 
 # Expose app at module level for Gunicorn

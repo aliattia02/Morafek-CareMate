@@ -13,6 +13,12 @@ Usage
     gics.add_consent(patient_id, template_id)         # raises RuntimeError on fail
     gics.revoke_consent(patient_id)                   # fire-and-forget, returns bool
     status = gics.get_consent_status(patient_id)      # "ACCEPTED" | "REJECTED" | "UNKNOWN"
+                                                       # (collapses failures into "UNKNOWN")
+    result = gics.get_consent_status_detailed(patient_id)  # {"status", "ok", "error"} —
+                                                       # use this when a failed query must
+                                                       # NOT be treated the same as a real
+                                                       # "no consent" answer (added 2026-08-11,
+                                                       # see get_consent_status_detailed())
 
 Architecture note
 -----------------
@@ -558,14 +564,45 @@ class GICSService:
         logger.info("gICS consent revoked  domain=%s  patient=%.20s…", domain, patient_id)
         return True
 
-    def get_consent_status(
+    def get_consent_status_detailed(
         self,
         patient_id: str,
         template_id: str = GICS_DOMAIN,
-    ) -> str:
+    ) -> dict:
         """
-        Query the current policy state for *patient_id*.
-        Returns "ACCEPTED" | "REJECTED" | "UNKNOWN". Never raises.
+        Query the current policy state for *patient_id*, distinguishing a
+        genuine "no consent record" answer from gICS being unreachable or
+        erroring.
+
+        get_consent_status() (below) collapses all of the failure modes
+        this method distinguishes into a single "UNKNOWN" string. That's
+        the right contract for callers that only care about the tri-state
+        ACCEPTED/REJECTED/UNKNOWN status and treat "gICS is down" and
+        "gICS says nothing on file" the same way on purpose — e.g.
+        accept_consent()'s idempotency check and the patient-facing
+        GET /api/consent/status endpoint, both of which want "proceed as
+        if not yet accepted" either way. It is the WRONG contract for a
+        caller that must NOT silently treat a failed query the same as a
+        real "no consent" answer — e.g. research_routes.py's sync job,
+        which would otherwise flip research_eligible to False for a
+        patient just because gICS timed out on their turn in the loop.
+        Added 2026-08-11 for exactly that caller — see
+        data-store-separation-reference.md §2.1.
+
+        Returns
+        -------
+        {
+          "status": "ACCEPTED" | "REJECTED" | "UNKNOWN",
+          "ok":      bool  — True if this is gICS's genuine answer,
+                              including a genuine "no record for this
+                              patient" UNKNOWN. False if the call itself
+                              failed — unreachable, a SOAP fault that
+                              isn't "not found", or a response with no
+                              parseable consent state — in which case
+                              "status" is always "UNKNOWN" but should be
+                              read as "we don't know," not "gICS said no."
+          "error":   str | None — failure detail when ok is False.
+        }
         """
         payload = _envelope_get_policy_states(patient_id, template_id)
         try:
@@ -578,22 +615,57 @@ class GICSService:
             resp.raise_for_status()
         except requests.RequestException as exc:
             logger.error("gICS get_consent_status request failed: %s", exc)
-            return "UNKNOWN"
+            return {"status": "UNKNOWN", "ok": False, "error": f"gICS unreachable: {exc}"}
 
         fault = _parse_soap_fault(resp.text)
         if fault:
-            # "not found" / "unknown signer" means no consent on record — return UNKNOWN gracefully.
+            # "not found" / "unknown signer" means no consent on record —
+            # a genuine answer, not a failed call.
             if "not found" in fault.lower() or "unknown" in fault.lower():
                 logger.debug(
                     "gICS get_consent_status: no record for patient %.20s… in domain %s",
                     patient_id, template_id,
                 )
-                return "UNKNOWN"
+                return {"status": "UNKNOWN", "ok": True, "error": None}
 
             _log_soap_fault("getCurrentPolicyStates", patient_id, template_id, fault, resp.text)
-            return "UNKNOWN"
+            return {"status": "UNKNOWN", "ok": False, "error": fault}
 
-        return _parse_consent_status(resp.text)
+        status = _parse_consent_status(resp.text)
+        if status == "UNKNOWN":
+            # Response came back with no SOAP fault, but with no
+            # consentState/status tag either — an unexpected response
+            # shape, not gICS telling us "no consent." Treat it as a
+            # failed query so a distinguishing caller doesn't read it as
+            # a real answer.
+            logger.warning(
+                "gICS get_consent_status: no consentState in response for "
+                "patient %.20s… in domain %s — treating as a failed query, "
+                "not a genuine UNKNOWN",
+                patient_id, template_id,
+            )
+            return {"status": "UNKNOWN", "ok": False, "error": "no consentState in gICS response"}
+
+        return {"status": status, "ok": True, "error": None}
+
+    def get_consent_status(
+        self,
+        patient_id: str,
+        template_id: str = GICS_DOMAIN,
+    ) -> str:
+        """
+        Query the current policy state for *patient_id*.
+        Returns "ACCEPTED" | "REJECTED" | "UNKNOWN". Never raises.
+
+        Thin wrapper over get_consent_status_detailed() that drops the
+        ok/error distinction, kept for every existing caller
+        (accept_consent()'s idempotency check, GET /api/consent/status,
+        diagnose_consent_stack()) that is written to treat "gICS
+        unreachable" and "no consent on record" the same way. Callers that
+        need to tell those apart should call get_consent_status_detailed()
+        instead — currently only the research sync job does.
+        """
+        return self.get_consent_status_detailed(patient_id, template_id)["status"]
 
     def is_available(self) -> bool:
         """Return True if the gICS SOAP endpoint is reachable."""

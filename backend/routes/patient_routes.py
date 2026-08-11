@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from utils.auth import token_required
 from utils.error_handler import api_error_handler
 from utils.fhir_de import build_fhir_patient, IdentifierSystem
+from utils.consent_history import get_doctor_sharing, set_doctor_sharing
 from config import mongo
 import logging
 import re
@@ -156,6 +157,61 @@ def get_patient_medical_profile(current_user):
     return jsonify(profile), 200
 
 
+# ─── Doctor data-sharing toggle (independent of research consent) ────────────
+#
+# Plain MongoDB flag in the new patient_identifiers collection. No gICS/gPAS
+# involvement at all — see patient_journeys.svg §3 and
+# data-store-separation-reference.md §7.1. Gates doctor reads that go
+# through check_doctor_patient_access() (doctor_routes.py) as a strict AND
+# on top of the existing authorized_doctors check; it can only remove
+# access, never grant access authorized_doctors would otherwise deny.
+#
+# Default when the patient has never touched this toggle: see
+# DEFAULT_DOCTOR_SHARING in utils/consent_history.py (currently True, to
+# avoid this feature silently cutting off existing doctor access on launch).
+
+@patient_routes.route('/api/patient/doctor-sharing', methods=['GET'])
+@token_required
+@api_error_handler
+def get_doctor_sharing_setting(current_user):
+    """GET /api/patient/doctor-sharing — read the current toggle state."""
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Patients only'}), 403
+
+    patient_id = str(current_user['_id'])
+    enabled = get_doctor_sharing(mongo.db, patient_id)
+    return jsonify({'enabled': enabled}), 200
+
+
+@patient_routes.route('/api/patient/doctor-sharing', methods=['POST'])
+@token_required
+@api_error_handler
+def update_doctor_sharing_setting(current_user):
+    """
+    POST /api/patient/doctor-sharing — patient toggles doctor data-sharing.
+
+    Body: { "enabled": true | false }
+
+    Purely a MongoDB write — no gICS or gPAS call. Independent of research
+    consent status; a patient can share with their doctor while never
+    having touched research consent at all, or vice versa.
+    """
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Patients only'}), 403
+
+    data = request.get_json() or {}
+    if 'enabled' not in data or not isinstance(data['enabled'], bool):
+        return jsonify({'error': 'Body must be { "enabled": true|false }'}), 400
+
+    patient_id = str(current_user['_id'])
+    set_doctor_sharing(mongo.db, patient_id, data['enabled'])
+
+    logger.info(
+        'doctor_sharing set to %s for patient %s', data['enabled'], patient_id,
+    )
+    return jsonify({'enabled': data['enabled']}), 200
+
+
 # ─── FHIR Patient — app alias (token-based, no ID in URL) ────────────────────
 
 @patient_routes.route('/api/patient/fhir-profile', methods=['GET'])
@@ -244,8 +300,13 @@ def fhir_patient_read(current_user, patient_id: str):
 
     Access:
       • Patient reads their own record only.
-      • Doctor reads any patient in their authorized list.
-      • Admin reads any patient.
+      • Doctor reads any patient in their authorized list, AND ONLY IF the
+        patient has doctor_sharing enabled (data-store-separation-reference.md
+        §7.1). Closes the gap flagged in check_doctor_patient_access()'s
+        docstring in doctor_routes.py — this endpoint used to reimplement its
+        own authorized_doctors check with no doctor_sharing gate at all.
+      • Admin reads any patient — unchanged, bypasses the gate exactly like
+        check_doctor_patient_access() does for its admin branch.
     """
     requester_id   = str(current_user['_id'])
     requester_type = current_user.get('user_type')
@@ -263,6 +324,8 @@ def fhir_patient_read(current_user, patient_id: str):
             }), 404
         if requester_id not in patient.get('authorized_doctors', []):
             return jsonify({'error': 'Patient has not authorized this doctor'}), 403
+        if not get_doctor_sharing(mongo.db, patient_id):
+            return jsonify({'error': 'This patient has turned off doctor data-sharing'}), 403
     elif requester_type != 'admin':
         return jsonify({'error': 'Unauthorized'}), 403
 
@@ -335,6 +398,28 @@ def fhir_patient_search(current_user):
     if not users:
         return jsonify(_empty_bundle()), 200
 
+    # Doctor-sharing gate — patient-controlled, applies only to the doctor
+    # branch (admins bypass, matching check_doctor_patient_access()'s admin
+    # branch in doctor_routes.py). Closes the gap flagged in that function's
+    # docstring: this endpoint used to have no doctor_sharing gate at all.
+    #
+    # Batch-fetched to avoid N+1 — same pattern as the id_docs_raw fetch
+    # below. Only patients with an EXPLICIT doctor_sharing=False are
+    # excluded; missing patient_identifiers docs or docs without the field
+    # default to shared (see DEFAULT_DOCTOR_SHARING in consent_history.py),
+    # matching get_doctor_sharing()'s own default exactly.
+    if requester_type == 'doctor':
+        candidate_ids = [str(u['_id']) for u in users]
+        opted_out_docs = list(mongo.db.patient_identifiers.find(
+            {'patient_id': {'$in': candidate_ids}, 'doctor_sharing': False},
+            {'patient_id': 1},
+        ))
+        opted_out_ids = {d['patient_id'] for d in opted_out_docs}
+        users = [u for u in users if str(u['_id']) not in opted_out_ids]
+
+        if not users:
+            return jsonify(_empty_bundle()), 200
+
     # Batch-fetch identifier docs to avoid N+1
     patient_ids   = [str(u['_id']) for u in users]
     id_docs_raw   = list(mongo.db.patient_fhir_identifiers.find(
@@ -397,4 +482,4 @@ def fhir_patient_search(current_user):
         'type':         'searchset',
         'total':        len(entries),
         'entry':        entries,
-    }), 200
+    }), 200 

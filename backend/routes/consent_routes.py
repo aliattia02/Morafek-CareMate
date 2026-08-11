@@ -463,6 +463,12 @@ def accept_consent(current_user):
             "Pseudonym stored in users for patient %s (suffix: …%s)",
             patient_id, pseudonym_suffix,
         )
+
+        # Open (or confirm already-open) a consent_history interval under
+        # this pseudonym. No-ops if one is already open — covers the
+        # idempotency-guard retry path (already ACCEPTED in gICS).
+        from utils.consent_history import open_consent_interval
+        open_consent_interval(db, pseudonym)
     else:
         logger.info(
             "accept_consent: no pseudonym for patient %s (gPAS skipped or unavailable)",
@@ -533,6 +539,16 @@ def revoke_consent_strict(current_user):
 
     template_id = current_app.config.get('CONSENT_TEMPLATE_ID', 'morafek-data-sharing')
 
+    # ── Step 0: Read the current pseudonym BEFORE any writes ───────────────────
+    # consent_history intervals are keyed by pseudonym, not patient_id, so we
+    # need this value to know which interval to close. Read-only — nothing
+    # here is touched or cleared, matching the existing "pseudonym stays"
+    # design.
+    existing = db.patient_consents.find_one(
+        {'patient_id': patient_id}, {'pseudonym': 1}
+    )
+    pseudonym = (existing or {}).get('pseudonym')
+
     # ── Step 1: Revoke in gICS ─────────────────────────────────────────────────
     ok = gics.revoke_consent(patient_id, template_id)
     if not ok:
@@ -559,6 +575,13 @@ def revoke_consent_strict(current_user):
         "Consent revoked for patient %s — pseudonym retained in gPAS and MongoDB",
         patient_id,
     )
+
+    # ── Step 3: Close the open consent_history interval for this pseudonym ────
+    # No-op if there was no pseudonym yet, or no open interval (e.g. revoke
+    # called when nothing had ever been granted) — mirrors gICS's own
+    # tolerance of "nothing to revoke" as a success case.
+    from utils.consent_history import close_consent_interval
+    close_consent_interval(db, pseudonym)
 
     return jsonify({'success': True}), 200
 
@@ -637,6 +660,15 @@ def admin_reactivate_consent(current_user, patient_id):
     template_id = current_app.config.get('CONSENT_TEMPLATE_ID', 'morafek-data-sharing')
     gpas_domain = current_app.config.get('GPAS_DOMAIN',          'morafek-patients')
     gpas_enabled = current_app.config.get('GPAS_ENABLED',        True)
+
+    # ── Step 0: Read the OLD pseudonym before it's deleted ─────────────────────
+    # Needed to close its consent_history interval below. Read-only — this
+    # route already deletes the pseudonym from gPAS itself in step 1; we're
+    # only reading MongoDB's record of it first.
+    existing = db.patient_consents.find_one(
+        {'patient_id': patient_id}, {'pseudonym': 1}
+    )
+    old_pseudonym = (existing or {}).get('pseudonym')
 
     # ── Step 1: Delete old pseudonym from gPAS ────────────────────────────────
     if gpas_enabled:
@@ -723,6 +755,26 @@ def admin_reactivate_consent(current_user, patient_id):
         {'patient_id': patient_id},
         {'$set': consent_doc},
     )
+
+    # ── Step 5: consent_history — close old pseudonym's interval, ─────────────
+    #            open a fresh one under the new pseudonym.
+    # This is the ONE path where the pseudonym genuinely changes (see
+    # data-store-separation-reference.md §3, "Exception"). Existing
+    # research_vitals rows stay attributed to old_pseudonym — they are not
+    # migrated to new_pseudonym anywhere in this flow, by design.
+    #
+    # Gated on gpas_enabled, not just "old_pseudonym truthy": if
+    # GPAS_ENABLED=false this call, the gPAS delete/create branch above never
+    # ran, so old_pseudonym (a leftover from some earlier gPAS-enabled
+    # session) was NOT actually touched in gPAS — closing its interval here
+    # would be recording an event that didn't happen.
+    if gpas_enabled:
+        from utils.consent_history import close_consent_interval, open_consent_interval
+        if old_pseudonym and old_pseudonym != new_pseudonym:
+            close_consent_interval(db, old_pseudonym)
+        if new_pseudonym:
+            open_consent_interval(db, new_pseudonym)
+
     logger.info(
         "admin_reactivate: patient %s reactivated by %s (%s) — new suffix …%s",
         patient_id, str(current_user.get('_id')), caller_type, new_suffix,
