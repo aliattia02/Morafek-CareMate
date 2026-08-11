@@ -1,0 +1,104 @@
+The Complete Process — End to End
+
+1. How a Researcher Knows This Hospital Has the Patient Group
+This happens through national registries and networks, mainly:
+
+MII (Medizininformatik-Initiative) — all 36 German university hospitals publish metadata (not patient data) about what cohorts they have
+FDPG (Forschungsdatenportal Gesundheit) — a portal where researchers search across all hospitals like a catalog:
+
+"Which hospitals have: diabetic patients > 60, with ECG data, 
+ collected after 2020?"
+→ Frankfurt: 847 matching patients
+→ Berlin: 1,203 matching patients
+Only counts are shown, never identities.
+
+2. The Researcher Submits a Request (Antrag)
+The researcher submits a formal data access request including:
+
+Scientific justification
+Which patient criteria they need
+Which data fields
+Ethical approval (Ethikvotum) from their institution
+How data will be stored/protected
+
+This goes to multiple places simultaneously:
+Researcher (Uni Hamburg)
+    ↓ submits request
+Ethics Committee → approves study
+    ↓
+Treuhandstelle Frankfurt → receives request
+    ↓
+Data Integration Center (DIZ) Frankfurt → checks feasibility
+
+3. Consent Check — gICS Role
+This is where gICS becomes critical.
+To answer your question: patients do NOT consent to a specific study in advance. Instead they sign a Broad Consent — a general consent allowing their data to be used for future medical research under defined conditions. This is standardized across all MII hospitals.
+Patient signs Broad Consent on admission
+    ↓
+gICS stores: 
+  - Patient agreed to: research use ✓
+  - Patient agreed to: data sharing across hospitals ✓  
+  - Patient agreed to: re-contact ✗ (maybe they said no)
+  - Patient agreed to: commercial use ✗
+When a request comes in, the Treuhandstelle queries gICS:
+"Of the 847 matching patients, how many have valid 
+ Broad Consent covering this type of study?"
+→ 731 patients with valid consent
+→ 116 excluded (withdrew consent, too old, specific opt-outs)
+gICS is NOT specific to each hospital — the MII standardized one Broad Consent form used across all German university hospitals, making cross-institutional research possible.
+
+4. The Treuhandstelle Approval Process
+Treuhandstelle checks:
+1. ✓ Ethical approval exists
+2. ✓ Consent valid for these patients (via gICS)
+3. ✓ Request fits within what patients agreed to
+4. ✓ Data minimization (only necessary fields requested)
+5. ✓ Requester institution is legitimate
+If all checks pass → approval granted
+
+5. Data Preparation and Pseudonymization — gPAS Role
+Now the actual data export happens, but the Treuhandstelle and the clinic work separately:
+Step A — Treuhandstelle side:
+Generates pseudonyms for the 731 approved patients
+gPAS: patient_real_id → STUDY_2025_001_pseudonym
+
+Step B — DIZ (clinical data) side:
+Exports clinical data (labs, diagnoses, medications)
+but REPLACES all identifiers with pseudonyms
+
+Step C — What researcher receives:
+{
+  pseudonym: "STUDY_2025_001_448291",
+  diagnosis: "E11.9",  ← diabetes
+  hba1c: 8.2,
+  age_group: "60-65"   ← not exact age, grouped
+}
+Key point: The Treuhandstelle holds the mapping table. The researcher can never re-identify. Only the Treuhandstelle can reverse it (e.g. if a finding requires patient notification).
+
+6. Cross-Hospital Data — the Federated Model
+For multi-hospital studies, Germany uses a federated approach — data does NOT all go to one place:
+Researcher query
+    ↓
+Frankfurt Hospital → runs analysis locally → sends back only RESULTS
+Berlin Hospital   → runs analysis locally → sends back only RESULTS  
+Munich Hospital   → runs analysis locally → sends back only RESULTS
+    ↓
+Researcher receives aggregated results
+(raw patient data never leaves the hospital)
+This is done via tools like DataSHIELD or FHIR-based federated queries. Your project already has FHIR support which is exactly this standard.
+
+7. The Full Timeline
+Month 1:  Researcher finds Frankfurt has matching cohort via FDPG
+Month 2:  Formal request submitted + Ethics approval
+Month 3:  Treuhandstelle reviews, consent check via gICS
+Month 4:  Approval granted, pseudonymization via gPAS
+Month 5:  Pseudonymized data delivered to researcher
+Ongoing:  Researcher can request re-contact via Treuhandstelle
+          if clinically significant finding emerges
+
+What to Say in Your Interview
+You can connect this to your project:
+
+gPAS — you've implemented and understand the pseudonymization layer
+FHIR export — you built the data exchange format the federated model depends on
+The separation of concerns — your backend separates auth, patient data, and EHR routes exactly mirroring how Treuhandstelle separates identity from clinical data
