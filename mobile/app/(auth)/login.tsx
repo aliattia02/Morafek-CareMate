@@ -25,7 +25,7 @@ import { E, ET } from '@/constants/elderlyTheme';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type UserType = 'patient' | 'doctor';
+type UserType = 'patient' | 'doctor' | 'researcher' | 'admin';
 
 // ─── Wake-up progress banner ──────────────────────────────────────────────────
 
@@ -139,8 +139,16 @@ export default function LoginScreen() {
     }
   };
 
-  const welcomeLine = userType === 'doctor' ? ' Welcome, Doctor'              : ' Welcome back';
-  const welcomeSub  = userType === 'doctor' ? ' Sign in to your doctor account' : ' Sign in to your patient account';
+  const welcomeLine =
+    userType === 'doctor'     ? ' Welcome, Doctor' :
+    userType === 'researcher' ? ' Welcome, Researcher' :
+    userType === 'admin'      ? ' Welcome, Admin' :
+    ' Welcome back';
+  const welcomeSub =
+    userType === 'doctor'     ? ' Sign in to your doctor account' :
+    userType === 'researcher' ? ' Sign in to your researcher account' :
+    userType === 'admin'      ? ' Sign in to your admin account' :
+    ' Sign in to your patient account';
 
   return (
     <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
@@ -177,9 +185,9 @@ export default function LoginScreen() {
             </View>
             <Text style={styles.heroSub}>Your personal health companion</Text>
 
-            {/* Role chips — Patient / Doctor */}
+            {/* Role chips — Patient / Doctor / Researcher / Admin */}
             <View style={styles.roleChips}>
-              {(['patient', 'doctor'] as UserType[]).map((type) => (
+              {(['patient', 'doctor', 'researcher', 'admin'] as UserType[]).map((type) => (
                 <TouchableOpacity
                   key={type}
                   style={[styles.roleChip, userType === type && styles.roleChipActive]}
@@ -188,13 +196,13 @@ export default function LoginScreen() {
                   activeOpacity={0.8}
                 >
                   <Text style={styles.roleChipIcon}>
-                    {type === 'patient' ? '🧑' : '👨‍⚕️'}
+                    {type === 'patient' ? '🧑' : type === 'doctor' ? '👨‍⚕️' : type === 'researcher' ? '🔬' : '🛡️'}
                   </Text>
                   <Text style={[
                     styles.roleChipLabel,
                     userType === type ? styles.roleChipLabelActive : styles.roleChipLabelInactive,
                   ]}>
-                    {type === 'patient' ? 'Patient' : 'Doctor'}
+                    {type === 'patient' ? 'Patient' : type === 'doctor' ? 'Doctor' : type === 'researcher' ? 'Researcher' : 'Admin'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -271,30 +279,56 @@ export default function LoginScreen() {
               </Link>
             </View>
 
-            {/* ── Test Credentials ── */}
-            <TouchableOpacity
-              style={testCredStyles.box}
-              onPress={() => {
-                setUsername(userType === 'doctor' ? 'testd1' : 'test1');
-                setPassword('4444');
-                setValidationErrors({});
-              }}
-              activeOpacity={0.75}
-              disabled={busy}
-            >
-              <View style={testCredStyles.row}>
-                <Text style={testCredStyles.title}>
-                  🧪 Demo {userType === 'doctor' ? 'Doctor' : 'Patient'} Account
-                </Text>
-                <View style={testCredStyles.fillBadge}>
-                  <Text style={testCredStyles.fillBadgeText}>Tap to fill</Text>
+            {/* ── Test Credentials — only patient/doctor have real demo accounts ── */}
+            {(userType === 'patient' || userType === 'doctor') && (
+              <TouchableOpacity
+                style={testCredStyles.box}
+                onPress={() => {
+                  setUsername(userType === 'doctor' ? 'testd1' : 'test1');
+                  setPassword('4444');
+                  setValidationErrors({});
+                }}
+                activeOpacity={0.75}
+                disabled={busy}
+              >
+                <View style={testCredStyles.row}>
+                  <Text style={testCredStyles.title}>
+                    🧪 Demo {userType === 'doctor' ? 'Doctor' : 'Patient'} Account
+                  </Text>
+                  <View style={testCredStyles.fillBadge}>
+                    <Text style={testCredStyles.fillBadgeText}>Tap to fill</Text>
+                  </View>
                 </View>
-              </View>
-              <Text style={testCredStyles.cred}>
-                Username: <Text style={testCredStyles.credVal}>{userType === 'doctor' ? 'testd1' : 'test1'}</Text>
-                {'   '}Password: <Text style={testCredStyles.credVal}>4444</Text>
-              </Text>
-            </TouchableOpacity>
+                <Text style={testCredStyles.cred}>
+                  Username: <Text style={testCredStyles.credVal}>{userType === 'doctor' ? 'testd1' : 'test1'}</Text>
+                  {'   '}Password: <Text style={testCredStyles.credVal}>4444</Text>
+                </Text>
+              </TouchableOpacity>
+            )}
+            {userType === 'admin' && (
+              <TouchableOpacity
+                style={testCredStyles.box}
+                onPress={() => {
+                  setUsername('admin');
+                  setPassword('1234');
+                  setValidationErrors({});
+                }}
+                activeOpacity={0.75}
+                disabled={busy}
+              >
+                <View style={testCredStyles.row}>
+                  <Text style={testCredStyles.title}>🧪 Dev Admin Account</Text>
+                  <View style={testCredStyles.fillBadge}>
+                    <Text style={testCredStyles.fillBadgeText}>Tap to fill</Text>
+                  </View>
+                </View>
+                <Text style={testCredStyles.cred}>
+                  Username: <Text style={testCredStyles.credVal}>admin</Text>
+                  {'   '}Password: <Text style={testCredStyles.credVal}>1234</Text>
+                  {'   '}(temporary dev seed — not a real provisioning flow)
+                </Text>
+              </TouchableOpacity>
+            )}
 
             {/* Wake-up banner */}
             {isWakingUp && (

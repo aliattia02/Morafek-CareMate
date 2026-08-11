@@ -49,7 +49,7 @@ import {
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 // Types
-type UserType = 'patient' | 'doctor';
+type UserType = 'patient' | 'doctor' | 'researcher' | 'admin';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -151,38 +151,30 @@ export default function RegisterScreen() {
             <View style={styles.userTypeSection}>
               <Text style={styles.label}>I am a</Text>
               <View style={styles.userTypeButtons}>
-                <TouchableOpacity
-                  style={[
-                    styles.userTypeButton,
-                    userType === 'patient' && styles.userTypeButtonActive,
-                  ]}
-                  onPress={() => setUserType('patient')}
-                >
-                  <Text
+                {([
+                  { type: 'patient' as UserType, label: 'Patient' },
+                  { type: 'doctor' as UserType, label: 'Doctor' },
+                  { type: 'researcher' as UserType, label: 'Researcher' },
+                  { type: 'admin' as UserType, label: 'Admin' },
+                ]).map(({ type, label }) => (
+                  <TouchableOpacity
+                    key={type}
                     style={[
-                      styles.userTypeText,
-                      userType === 'patient' && styles.userTypeTextActive,
+                      styles.userTypeButton,
+                      userType === type && styles.userTypeButtonActive,
                     ]}
+                    onPress={() => setUserType(type)}
                   >
-                    Patient
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.userTypeButton,
-                    userType === 'doctor' && styles.userTypeButtonActive,
-                  ]}
-                  onPress={() => setUserType('doctor')}
-                >
-                  <Text
-                    style={[
-                      styles.userTypeText,
-                      userType === 'doctor' && styles.userTypeTextActive,
-                    ]}
-                  >
-                    Doctor
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.userTypeText,
+                        userType === type && styles.userTypeTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
 

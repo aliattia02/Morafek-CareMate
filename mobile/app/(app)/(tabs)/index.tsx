@@ -2,7 +2,10 @@
  * Patient Home Screen
  * Location: mobile/app/(app)/(tabs)/index.tsx
  *
- * Patients only — doctors are redirected to doctor-dashboard.
+ * Patients only — doctors/admins are redirected to doctor-dashboard,
+ * researchers to the research sync screen (this tab is also declared
+ * first in (tabs)/_layout.tsx, so it can still mount as the initial
+ * route even though href:null hides it from the tab bar for non-patients).
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -52,10 +55,12 @@ export default function PatientHomeScreen() {
   const [usingCache, setUsingCache] = useState(false);
   const [pendingMedicationCount, setPendingMedicationCount] = useState(0);
 
-  // Redirect doctors immediately
+  // Redirect non-patients immediately
   useEffect(() => {
     if (user?.user_type === 'doctor' || user?.user_type === 'admin') {
       router.replace('/(app)/(tabs)/doctor-dashboard');
+    } else if (user?.user_type === 'researcher') {
+      router.replace('/(app)/research/sync');
     }
   }, [user?.user_type]);
 
@@ -64,7 +69,7 @@ export default function PatientHomeScreen() {
     initDB();
   }, []);
 
-  if (user?.user_type === 'doctor' || user?.user_type === 'admin') {
+  if (user?.user_type === 'doctor' || user?.user_type === 'admin' || user?.user_type === 'researcher') {
     return <View style={{ flex: 1, backgroundColor: E.colors.bg }} />;
   }
 

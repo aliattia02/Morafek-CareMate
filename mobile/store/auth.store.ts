@@ -62,7 +62,7 @@ interface User {
   _id: string;
   username?: string;
   email?: string;
-  user_type?: 'patient' | 'doctor' | 'admin';
+  user_type?: 'patient' | 'doctor' | 'researcher' | 'admin';
   firstName?: string;
   lastName?: string;
   profile_picture_url?: string;
@@ -116,7 +116,7 @@ export const useAuthStore = create<AuthState>((set) => ({
           _id: userData._id,                 // ← ADDED: required by useHealthConnect.sync()
           firstName: userData.firstName,
           lastName: userData.lastName,
-          user_type: userData.userType as 'patient' | 'doctor' | 'admin',
+          user_type: userData.userType as 'patient' | 'doctor' | 'researcher' | 'admin',
           profile_picture_url: userData.profile_picture_url,
         },
         token: userData.token,
@@ -187,7 +187,7 @@ export const useAuthStore = create<AuthState>((set) => ({
             _id: resolvedId,                 // Required; self-healed from JWT for legacy sessions
             firstName: userData.firstName,
             lastName: userData.lastName,
-            user_type: userData.userType as 'patient' | 'doctor' | 'admin',
+            user_type: userData.userType as 'patient' | 'doctor' | 'researcher' | 'admin',
             profile_picture_url: userData.profile_picture_url,
           } : null,
           token,
