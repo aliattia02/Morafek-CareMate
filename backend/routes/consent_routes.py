@@ -250,7 +250,8 @@ def revoke_consent(current_user):
     ----
     1. Update patient_consents: status "revoked", revoked_at = now.
        Pseudonym is intentionally NOT cleared — re-grant reuses same pseudonym.
-    2. Call gICS revokeConsent — fire-and-forget.
+    2. Call gics.revoke_consent() (refuseConsent under the hood as of
+       2026-08-12 — see gics_service.py) — fire-and-forget.
     3. Return { status: "revoked" }.
 
     gPAS is NOT touched on revoke.  The pseudonym remains in gPAS and MongoDB
@@ -507,11 +508,27 @@ def revoke_consent_strict(current_user):
 
     Flow
     ----
-    1. Call gics.revoke_consent(patient_id, template_id).
-       "not found" faults are treated as success (already revoked / never granted).
+    1. Call gics.revoke_consent(patient_id, template_id) → hard failure.
     2. Update patient_consents: status="revoked", revoked_at=now.
        Pseudonym is intentionally NOT touched in patient_consents or users.
     3. Return { "success": true }.
+
+    Fixed 2026-08-12 — step 1 used to log a warning on gICS failure and
+    proceed to mark MongoDB revoked regardless. Root-caused to two real
+    bugs found the same day: revoke_consent() was calling a SOAP operation
+    that didn't exist at all (see gics_service.py's _envelope_revoke_consent()
+    docstring), and this gICS instance is also intermittently flaky under
+    rapid consecutive calls — verified live, a failed call often succeeds
+    on a bare retry. Tolerating that failure here meant a patient could be
+    told their withdrawal succeeded while gICS's actual record — the real
+    system of record for consent — never changed, reproduced concretely:
+    revoke returned {"success": true}, and a status check immediately
+    after still showed ACCEPTED in gICS. Now hard-fails (502) instead,
+    matching accept_consent()'s existing strict behavior — MongoDB is only
+    marked revoked after gICS confirms it. The mobile app's existing
+    TTP_UNAVAILABLE / "please visit your hospital" handling already covers
+    a 5xx from this endpoint, so this degrades the same way accept already
+    does, not a new failure mode for the client to handle.
 
     Why pseudonym is kept
     ─────────────────────
@@ -549,13 +566,22 @@ def revoke_consent_strict(current_user):
     )
     pseudonym = (existing or {}).get('pseudonym')
 
-    # ── Step 1: Revoke in gICS ─────────────────────────────────────────────────
+    # ── Step 1: Revoke in gICS — hard failure ──────────────────────────────────
+    # Fixed 2026-08-12: a False return here used to be logged and ignored,
+    # letting MongoDB be marked "revoked" while gICS's own record stayed
+    # ACCEPTED — see the docstring above for how this was found and why
+    # tolerating it was actively wrong. gICS is the source of truth for
+    # consent status; MongoDB must not disagree with it.
     ok = gics.revoke_consent(patient_id, template_id)
     if not ok:
-        logger.warning(
-            "gICS revoke_consent returned False for patient %s — continuing with MongoDB update",
+        logger.error(
+            "gICS revoke_consent failed for patient %s — NOT marking MongoDB "
+            "revoked (gICS remains the source of truth)",
             patient_id,
         )
+        return jsonify({
+            'error': 'Consent withdrawal failed — gICS error. Please try again.',
+        }), 502
 
     # ── Step 2: Mark revoked in MongoDB — pseudonym fields left intact ─────────
     # NOTE: We do NOT call gpas.delete_pseudonym() here.
@@ -610,6 +636,45 @@ def get_consent_status_strict(current_user):
 
     status = gics.get_consent_status(patient_id, template_id)
     return jsonify({'status': status}), 200
+
+
+@consent_routes.route('/api/consent/template', methods=['GET'])
+@token_required
+@api_error_handler
+def get_consent_template(current_user):
+    """
+    GET /api/consent/template — fetch the live, gICS-authored consent
+    document (title/header/footer + each module's title/text) for the
+    "View full consent document" screen.
+
+    Added 2026-08-12. Purely additive and read-only — does NOT affect
+    accept/revoke, which keep calling /api/consent/accept and
+    /api/consent/revoke directly exactly as before. This lets a patient
+    read the authoritative text sourced live from gICS's admin UI,
+    alongside (not instead of) the existing direct accept/revoke actions.
+
+    Returns
+    -------
+    { "domain": str, "template": {...} }  — see gics.get_current_template()
+
+    502 — gICS unreachable, errored, or no template configured for the
+          domain matches what this app submits consent against. This is a
+          display-only feature, so a failure here is never treated as a
+          data-integrity problem — just "document unavailable right now."
+    Only patients may call this endpoint.
+    """
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Patients only'}), 403
+
+    domain = current_app.config.get('CONSENT_TEMPLATE_ID', 'morafek-data-sharing')
+
+    from services.gics_service import gics
+
+    template = gics.get_current_template(domain)
+    if template is None:
+        return jsonify({'error': 'Consent document is temporarily unavailable'}), 502
+
+    return jsonify({'domain': domain, 'template': template}), 200
 
 
 # ═════════════════════════════════════════════════════════════════════════════

@@ -8,10 +8,13 @@ cross-links the others where a feature spans roles.
 |---|---|
 | [1 — Patient Journey](01-patient-journey.md) | Registration/login, dashboard, vitals, medications, visits, messaging, documents, exercises, medical profile, doctor authorization & data-sharing, research consent, FHIR export, Health Connect sync, account/privacy controls, offline behaviour |
 | [2 — Doctor Journey](02-doctor-journey.md) | Patient authorization model, dashboard, recording visits, ICD-10-GM AI suggest, prescribing medications, sensor alerts, assigning exercises, clinic management, admin facility reactivation |
-| [3 — Research, Admin & Consent Infrastructure](03-research-admin-consent.md) | gICS/gPAS architecture, pseudonym lifecycle, identified vs. research data collections, the researcher sync journey, the admin sync-issues & erasure-approval journey, what's deferred |
+| [3 — Research, Admin & Consent Infrastructure](03-research-admin-consent.md) | gICS/gPAS architecture, pseudonym lifecycle, first-time gICS setup (domain/policy/module/template), identified vs. research data collections, the researcher sync journey, the admin sync-issues & erasure-approval journey, what's deferred |
 
-**Last verified:** 2026-08-11, against the actual backend routes (`backend/routes/*.py`) and mobile
-screens (`mobile/app/(app)/**`) in this repository — not just prior documentation drafts.
+**Last verified:** 2026-08-12, against the actual backend routes (`backend/routes/*.py`), mobile
+screens (`mobile/app/(app)/**`), and — for gICS specifics in Part 3 — live SOAP calls against the
+running gICS instance, not just its admin UI or source code. Part 3 §10 in particular reflects a
+same-day gICS domain reconfiguration (new policy/module/templates) and several backend fixes
+that came out of testing it end-to-end, not a static snapshot.
 
 ## Tech stack, at a glance
 

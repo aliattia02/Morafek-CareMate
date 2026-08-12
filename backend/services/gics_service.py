@@ -83,6 +83,15 @@ For revokeConsent / getCurrentPolicyStatesForPersonAndTemplate the
 consentKeyDTO (no consentDate) must have: consentTemplateKey → signerIds
 (alphabetical: c < s).
 
+Fixed 2026-08-12 — both operations named above turned out not to exist in
+this gICS version's WSDL at all (confirmed via live SOAP faults: "was not
+recognized. Does it exist in service WSDL?" for each). Replaced with
+refuseConsent and getPolicyStatesForPolicyNameAndSignerIds respectively —
+see _envelope_revoke_consent() and _envelope_get_policy_states() below for
+the real, verified-working shapes. This paragraph is left as-is for
+historical context on the JAXB ordering investigation; it no longer
+describes what the code actually calls.
+
 Environment variables
 ---------------------
 GICS_URL                    — base URL of the gICS container  (default: http://gics:8080)
@@ -92,10 +101,27 @@ GICS_SIGNER_ID_TYPE         — signer-id type configured in the gICS domain
 GICS_TIMEOUT                — request timeout in seconds      (default: 10)
 GICS_SIGNER_TYPE_PARTICIPANT— SignatureType.id for participant (default: participant)
 GICS_SIGNER_TYPE_PHYSICIAN  — SignatureType.id for physician  (default: physician)
+GICS_TEMPLATE_NAME          — consent template key (default: data-sharing) — MUST match
+                              an actual template in GICS_DOMAIN, exactly
+GICS_TEMPLATE_VERSION       — consent template version (default: 1.0)
+GICS_MODULE_NAME            — consent module key (default: data-sharing-module) — MUST
+                              match an actual module in GICS_DOMAIN, exactly
+GICS_MODULE_VERSION         — consent module version (default: 1.0)
+GICS_POLICY_NAME            — consent policy key (default: data-sharing) — used by
+                              getPolicyStatesForPolicyNameAndSignerIds (status queries)
+GICS_POLICY_VERSION         — consent policy version (default: 1.0) — not currently
+                              sent in any envelope (that operation takes a plain
+                              policyName string, no version), kept for parity
+GICS_WITHDRAWAL_TEMPLATE_NAME    — withdrawal (REVOCATION-type) template key
+                                   (default: withdrawal_wearable_health_data) — used
+                                   by refuseConsent (revoke_consent()). MUST share
+                                   the same module as GICS_TEMPLATE_NAME above.
+GICS_WITHDRAWAL_TEMPLATE_VERSION — withdrawal template version (default: 1.0)
 """
 
 from __future__ import annotations
 
+import html
 import logging
 import os
 import xml.etree.ElementTree as ET
@@ -125,18 +151,51 @@ _SOAP_HEADERS = {
 # Correct namespace for gICS 2025.x consent operations
 NS_CONSENT_OPS = "http://cm2.ttp.ganimed.icmvc.emau.org/"
 
-# ── Constants matching gics_setup.py exactly ──────────────────────────────────
-# Template key (used in consentTemplateKey)
-_TEMPLATE_NAME    = "data-sharing"
-_TEMPLATE_VERSION = "1.0"
+# ── Consent template/module/policy identity ───────────────────────────────────
+# These must match an actual template/module/policy configured in gICS's admin
+# UI for GICS_DOMAIN, exactly (name + version) — gICS does not resolve these
+# dynamically, and a mismatch fails closed as an unhandled 500 from gICS
+# (not a clean SOAP fault), surfaced to the client as 502. Originally hardcoded
+# to match what gics_setup.py provisions ("data-sharing" / "data-sharing-module"),
+# now overridable via env vars so switching the active policy in gICS's admin
+# UI (e.g. to a new template) doesn't require a code change — just update these
+# to match. See data-store-separation-reference.md / the 2026-08-12 ENRICH
+# policy migration notes for why this became configurable.
 
-# Policy key (within moduleStates — references the policy, not the template)
-_POLICY_NAME    = "data-sharing"
-_POLICY_VERSION = "1.0"
+# Template key (used in consentTemplateKey) — the CONSENT-type document,
+# submitted by addConsent / used as the reference document for status reads.
+_TEMPLATE_NAME    = os.environ.get("GICS_TEMPLATE_NAME",    "data-sharing")
+_TEMPLATE_VERSION = os.environ.get("GICS_TEMPLATE_VERSION", "1.0")
+
+# Withdrawal template key — the REVOCATION-type document, submitted by
+# refuseConsent (revoke_consent()). Added 2026-08-12: previously revoke
+# reused _TEMPLATE_NAME/_TEMPLATE_VERSION above, filing every withdrawal
+# under the CONSENT document instead of a proper Widerruf record — gICS's
+# own domain model treats these as distinct document types (CONSENT /
+# REVOCATION / REFUSAL), with separate admin-UI sections for each. This
+# template MUST have the same module (and therefore the same policy)
+# assigned as the CONSENT template above — status reads
+# (getPolicyStatesForPolicyNameAndSignerIds) query by policy name across
+# the whole domain, not scoped to one template, so as long as both
+# templates share the module, a withdrawal recorded here is still visible
+# through the exact same status-read code path as before. Verified live
+# before wiring this in: refuseConsent against this template succeeds and
+# getPolicyStatesForPolicyNameAndSignerIds picks up the resulting REFUSED
+# status via the shared policy, unchanged.
+_WITHDRAWAL_TEMPLATE_NAME    = os.environ.get("GICS_WITHDRAWAL_TEMPLATE_NAME",    "withdrawal_wearable_health_data")
+_WITHDRAWAL_TEMPLATE_VERSION = os.environ.get("GICS_WITHDRAWAL_TEMPLATE_VERSION", "1.0")
+
+# Policy key — used by getPolicyStatesForPolicyNameAndSignerIds (status
+# queries, fixed 2026-08-12). addConsent's moduleStates keys the module, not
+# the policy, so _POLICY_NAME isn't used there. _POLICY_VERSION isn't sent
+# in any envelope (that operation takes a plain policyName string, no
+# version) — kept configurable for parity/documentation.
+_POLICY_NAME    = os.environ.get("GICS_POLICY_NAME",    "data-sharing")
+_POLICY_VERSION = os.environ.get("GICS_POLICY_VERSION", "1.0")
 
 # Module key (referenced in moduleStates and moduleStateDTO.key)
-_MODULE_NAME    = "data-sharing-module"
-_MODULE_VERSION = "1.0"
+_MODULE_NAME    = os.environ.get("GICS_MODULE_NAME",    "data-sharing-module")
+_MODULE_VERSION = os.environ.get("GICS_MODULE_VERSION", "1.0")
 
 
 # ─── XML helpers ───────────────────────────────────────────────────────────────
@@ -266,9 +325,39 @@ def _envelope_add_consent(patient_id: str, domain: str) -> str:
 
 def _envelope_revoke_consent(patient_id: str, domain: str) -> str:
     """
-    Build the SOAP XML for revokeConsent (gICS 2.x).
+    Build the SOAP XML for refuseConsent (gICS 2.x).
 
-    consentKeyDTO field order (alphabetical JAXB): consentTemplateKey → signerIds.
+    Fixed 2026-08-12 — this previously built revokeConsent, which does not
+    exist in this gICS version's WSDL at all (confirmed via a live SOAP
+    fault: "Message part ...revokeConsent was not recognized. Does it
+    exist in service WSDL?", HTTP 500) — the exact same class of bug as
+    the getCurrentPolicyStatesForPersonAndTemplate one fixed earlier this
+    session. Because revoke_consent() below treats most fault text as a
+    tolerable "nothing to revoke" success, and the route that calls it
+    (consent_routes.py::revoke_consent_strict()) proceeds to mark MongoDB
+    revoked regardless of gICS's answer, this failed silently: the app
+    reported success, MongoDB said "revoked", but gICS's own record never
+    changed — verified live by checking a real patient's status
+    immediately after using the app's revoke button: still ACCEPTED.
+
+    refuseConsent takes consentTemplateKey (unwrapped — NOT nested inside
+    a <consentKey>, unlike revokeConsent's shape) + signerIds. Verified
+    live: calling it against a patient with an ACCEPTED consent appends a
+    new signed-policy record with status REFUSED — gICS keeps the full
+    history rather than overwriting the prior record. See
+    get_consent_status_detailed() for how the "latest by consentDate, not
+    first in document order" read side accounts for that.
+
+    Updated 2026-08-12, later same day — now references the dedicated
+    REVOCATION-type withdrawal template (_WITHDRAWAL_TEMPLATE_NAME) instead
+    of reusing the CONSENT template (_TEMPLATE_NAME). Filing a withdrawal
+    under the same document as the original consent worked (gICS doesn't
+    enforce document Type for this operation) but was semantically wrong —
+    every revoke was showing up in gICS's admin UI under "Consents"
+    instead of its own "Withdrawals" section. The withdrawal template
+    shares the same module (and therefore the same policy) as the consent
+    template, so the read side needs no changes — verified live before
+    this was wired in.
     """
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
@@ -276,30 +365,42 @@ def _envelope_revoke_consent(patient_id: str, domain: str) -> str:
     xmlns:gics="{NS_CONSENT_OPS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <gics:revokeConsent>
-      <consentKey>
-        <!-- consentKeyDTO alphabetical order: consentTemplateKey → signerIds -->
-        <consentTemplateKey>
-          <domainName>{_xml_escape(domain)}</domainName>
-          <name>{_xml_escape(_TEMPLATE_NAME)}</name>
-          <version>{_xml_escape(_TEMPLATE_VERSION)}</version>
-        </consentTemplateKey>
-        <signerIds>
-          <idType>{_xml_escape(GICS_SIGNER_ID_TYPE)}</idType>
-          <id>{_xml_escape(patient_id)}</id>
-          <orderNumber>1</orderNumber>
-        </signerIds>
-      </consentKey>
-    </gics:revokeConsent>
+    <gics:refuseConsent>
+      <consentTemplateKey>
+        <domainName>{_xml_escape(domain)}</domainName>
+        <name>{_xml_escape(_WITHDRAWAL_TEMPLATE_NAME)}</name>
+        <version>{_xml_escape(_WITHDRAWAL_TEMPLATE_VERSION)}</version>
+      </consentTemplateKey>
+      <signerIds>
+        <idType>{_xml_escape(GICS_SIGNER_ID_TYPE)}</idType>
+        <id>{_xml_escape(patient_id)}</id>
+        <orderNumber>1</orderNumber>
+      </signerIds>
+    </gics:refuseConsent>
   </soapenv:Body>
 </soapenv:Envelope>"""
 
 
 def _envelope_get_policy_states(patient_id: str, domain: str) -> str:
     """
-    Build the SOAP XML for getCurrentPolicyStatesForPersonAndTemplate (gICS 2.x).
+    Build the SOAP XML for getPolicyStatesForPolicyNameAndSignerIds (gICS 2.x).
 
-    consentKeyDTO field order (alphabetical JAXB): consentTemplateKey → signerIds.
+    Fixed 2026-08-12 — this previously built getCurrentPolicyStatesForPersonAndTemplate,
+    which does not exist in this gICS version's WSDL at all (confirmed via a
+    live SOAP fault: "Message part ...getCurrentPolicyStatesForPersonAndTemplate
+    was not recognized. Does it exist in service WSDL?", HTTP 500). Every
+    status query has been silently failing since before this fix — masked
+    everywhere except research_routes.py's sync job, the only caller using
+    get_consent_status_detailed()'s ok=False signal instead of swallowing the
+    failure into an indistinguishable plain "UNKNOWN" string.
+
+    getPolicyStatesForPolicyNameAndSignerIds takes domainName + policyName
+    (a plain string, no version — unlike consentTemplateKey) + signerIds +
+    useAliases. Verified against a live gICS instance: a patient with an
+    accepted consent returns <signedPolicies><status>ACCEPTED</status>...
+    a patient who has never consented returns HTTP 200 with an empty
+    <return/> — no fault, no signedPolicies element at all (see
+    get_consent_status_detailed()'s handling of that case below).
     """
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <soapenv:Envelope
@@ -307,21 +408,38 @@ def _envelope_get_policy_states(patient_id: str, domain: str) -> str:
     xmlns:gics="{NS_CONSENT_OPS}">
   <soapenv:Header/>
   <soapenv:Body>
-    <gics:getCurrentPolicyStatesForPersonAndTemplate>
-      <consentKey>
-        <!-- consentKeyDTO alphabetical order: consentTemplateKey → signerIds -->
-        <consentTemplateKey>
-          <domainName>{_xml_escape(domain)}</domainName>
-          <name>{_xml_escape(_TEMPLATE_NAME)}</name>
-          <version>{_xml_escape(_TEMPLATE_VERSION)}</version>
-        </consentTemplateKey>
-        <signerIds>
-          <idType>{_xml_escape(GICS_SIGNER_ID_TYPE)}</idType>
-          <id>{_xml_escape(patient_id)}</id>
-          <orderNumber>1</orderNumber>
-        </signerIds>
-      </consentKey>
-    </gics:getCurrentPolicyStatesForPersonAndTemplate>
+    <gics:getPolicyStatesForPolicyNameAndSignerIds>
+      <domainName>{_xml_escape(domain)}</domainName>
+      <policyName>{_xml_escape(_POLICY_NAME)}</policyName>
+      <signerIds>
+        <idType>{_xml_escape(GICS_SIGNER_ID_TYPE)}</idType>
+        <id>{_xml_escape(patient_id)}</id>
+        <orderNumber>1</orderNumber>
+      </signerIds>
+      <useAliases>false</useAliases>
+    </gics:getPolicyStatesForPolicyNameAndSignerIds>
+  </soapenv:Body>
+</soapenv:Envelope>"""
+
+
+def _envelope_list_current_templates(domain: str) -> str:
+    """
+    Build the SOAP XML for listCurrentConsentTemplates (gICS 2.x).
+
+    Added 2026-08-12 for get_current_template() — lets the mobile app show
+    the live, gICS-authored consent document (title/header/footer/module
+    text) instead of app-hardcoded copy. Read-only; unrelated to
+    addConsent/revokeConsent/getPolicyStatesForPolicyNameAndSignerIds above.
+    """
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<soapenv:Envelope
+    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
+    xmlns:gics="{NS_CONSENT_OPS}">
+  <soapenv:Header/>
+  <soapenv:Body>
+    <gics:listCurrentConsentTemplates>
+      <domainName>{_xml_escape(domain)}</domainName>
+    </gics:listCurrentConsentTemplates>
   </soapenv:Body>
 </soapenv:Envelope>"""
 
@@ -339,6 +457,54 @@ def _parse_soap_tag(xml_text: str, tag: str) -> Optional[str]:
     except ET.ParseError as exc:
         logger.error("gICS SOAP XML parse error: %s | raw: %.200s", exc, xml_text)
     return None
+
+
+def _local_name(tag: str) -> str:
+    """Strip the namespace prefix from an ElementTree tag, e.g. '{ns}foo' -> 'foo'."""
+    return tag.split("}")[-1] if "}" in tag else tag
+
+
+def _child(parent: Optional[ET.Element], name: str) -> Optional[ET.Element]:
+    """First DIRECT child of *parent* whose local name matches *name* (not recursive —
+    needed because e.g. a template and its nested module both have their own <title>,
+    and only direct-child lookup can tell them apart)."""
+    if parent is None:
+        return None
+    for el in parent:
+        if _local_name(el.tag) == name:
+            return el
+    return None
+
+
+def _children(parent: Optional[ET.Element], name: str) -> list[ET.Element]:
+    """All DIRECT children of *parent* whose local name matches *name*."""
+    if parent is None:
+        return []
+    return [el for el in parent if _local_name(el.tag) == name]
+
+
+def _child_text(parent: Optional[ET.Element], name: str) -> str:
+    el = _child(parent, name)
+    return (el.text or "").strip() if el is not None and el.text else ""
+
+
+def _deep_html_unescape(value: str, max_passes: int = 4) -> str:
+    """
+    Repeatedly HTML-entity-decode until stable.
+
+    Some rich-text content authored in gICS's admin UI (e.g. pasted as raw
+    HTML source into a code/pre block rather than the visual editor) comes
+    back double- or triple-escaped — e.g. "&amp;lt;p&amp;gt;" instead of
+    "<p>". A single unescape leaves it still-escaped; this loops until a
+    pass makes no further change (capped so malformed input can't spin).
+    """
+    prev = value
+    for _ in range(max_passes):
+        nxt = html.unescape(prev)
+        if nxt == prev:
+            break
+        prev = nxt
+    return prev
 
 
 def _parse_soap_fault(xml_text: str) -> Optional[str]:
@@ -359,15 +525,27 @@ def _parse_soap_fault(xml_text: str) -> Optional[str]:
     return fault_msg or "Unknown SOAP fault"
 
 
-def _parse_consent_status(xml_text: str) -> str:
-    """Parse getCurrentPolicyStatesForPersonAndTemplate response → ACCEPTED | REJECTED | UNKNOWN."""
-    status = _parse_soap_tag(xml_text, "consentState") or _parse_soap_tag(xml_text, "status")
-    if not status:
+def _normalize_signed_status(raw_status: str) -> str:
+    """
+    Normalise a single gICS <status> value → ACCEPTED | REJECTED | UNKNOWN.
+
+    Renamed from _parse_consent_status() 2026-08-12 — now takes an
+    already-extracted status string rather than re-parsing XML, since
+    get_consent_status_detailed() has to walk multiple <signedPolicies>
+    entries itself to find the current one (see that method's docstring)
+    and only needs this for the final normalisation step.
+
+    "REFUSED" added to the REJECTED-equivalent set — it's the literal
+    status refuseConsent() (revoke_consent()'s underlying operation as of
+    2026-08-12) produces, so a revoked patient must map here the same way
+    an explicitly REJECTED one does, not fall through to UNKNOWN.
+    """
+    if not raw_status:
         return "UNKNOWN"
-    upper = status.upper()
+    upper = raw_status.upper()
     if upper in ("ACCEPTED", "CONSENT"):
         return "ACCEPTED"
-    if upper in ("REJECTED", "REVOKED", "DECLINED", "WITHDRAWN"):
+    if upper in ("REJECTED", "REVOKED", "DECLINED", "WITHDRAWN", "REFUSED"):
         return "REJECTED"
     return "UNKNOWN"
 
@@ -532,7 +710,19 @@ class GICSService:
         domain: str = GICS_DOMAIN,
     ) -> bool:
         """
-        Revoke a patient's consent in gICS.
+        Revoke a patient's consent in gICS by recording a REFUSED
+        signed-policy entry (via refuseConsent — see _envelope_revoke_consent()
+        for why this replaced the nonexistent revokeConsent operation).
+
+        Verified live 2026-08-12: refuseConsent succeeds (200, no fault)
+        even for a signer with no prior consent record at all — unlike the
+        old revokeConsent shape, there's no legitimate "not found" fault
+        case to tolerate here. Any fault now genuinely means something is
+        misconfigured (e.g. an unknown domain/template), so — unlike the
+        old code — a fault is no longer swallowed as success; that
+        swallowing is exactly what let the broken revokeConsent operation
+        go unnoticed for however long it was live.
+
         Returns True on success, False if gICS is unreachable or errors.
         """
         payload = _envelope_revoke_consent(patient_id, domain)
@@ -550,18 +740,10 @@ class GICSService:
 
         fault = _parse_soap_fault(resp.text)
         if fault:
-            # "not found" is acceptable for revoke — nothing to revoke.
-            if "not found" in fault.lower() or "unknown" in fault.lower() or "no consent" in fault.lower():
-                logger.info(
-                    "gICS revokeConsent: no consent found for patient %.20s… in domain %s — treating as success",
-                    patient_id, domain,
-                )
-                return True
-
-            _log_soap_fault("revokeConsent", patient_id, domain, fault, resp.text)
+            _log_soap_fault("refuseConsent", patient_id, domain, fault, resp.text)
             return False
 
-        logger.info("gICS consent revoked  domain=%s  patient=%.20s…", domain, patient_id)
+        logger.info("gICS consent refused (revoked)  domain=%s  patient=%.20s…", domain, patient_id)
         return True
 
     def get_consent_status_detailed(
@@ -619,33 +801,99 @@ class GICSService:
 
         fault = _parse_soap_fault(resp.text)
         if fault:
-            # "not found" / "unknown signer" means no consent on record —
-            # a genuine answer, not a failed call.
-            if "not found" in fault.lower() or "unknown" in fault.lower():
-                logger.debug(
-                    "gICS get_consent_status: no record for patient %.20s… in domain %s",
-                    patient_id, template_id,
-                )
-                return {"status": "UNKNOWN", "ok": True, "error": None}
-
-            _log_soap_fault("getCurrentPolicyStates", patient_id, template_id, fault, resp.text)
+            # Fixed 2026-08-12: this used to treat any fault containing
+            # "not found" / "unknown" as a genuine "no consent" answer.
+            # Verified live against getPolicyStatesForPolicyNameAndSignerIds
+            # that a genuine "never consented" patient does NOT come back
+            # as a fault at all — it's a clean 200 with an empty <return/>
+            # (handled below). A fault from THIS operation now always means
+            # something is actually wrong — e.g. an unknown domain or policy
+            # name, exactly the class of config mismatch that caused this
+            # whole investigation — so it must not be swallowed as ok=True
+            # anymore; doing so would have hidden today's bug as "patient
+            # hasn't consented" instead of surfacing it as an error.
+            _log_soap_fault("getPolicyStatesForPolicyNameAndSignerIds", patient_id, template_id, fault, resp.text)
             return {"status": "UNKNOWN", "ok": False, "error": fault}
 
-        status = _parse_consent_status(resp.text)
-        if status == "UNKNOWN":
-            # Response came back with no SOAP fault, but with no
-            # consentState/status tag either — an unexpected response
-            # shape, not gICS telling us "no consent." Treat it as a
-            # failed query so a distinguishing caller doesn't read it as
-            # a real answer.
-            logger.warning(
-                "gICS get_consent_status: no consentState in response for "
-                "patient %.20s… in domain %s — treating as a failed query, "
-                "not a genuine UNKNOWN",
+        if "<signedPolicies" not in resp.text:
+            # A fault-free 200 with an empty <return/> — verified live
+            # against gICS as exactly what a patient who has never
+            # consented gets back from this operation. This is gICS's
+            # genuine answer, not a failed or malformed response.
+            logger.debug(
+                "gICS get_consent_status: no signed policy for patient "
+                "%.20s… in domain %s (empty return — never consented)",
                 patient_id, template_id,
             )
-            return {"status": "UNKNOWN", "ok": False, "error": "no consentState in gICS response"}
+            return {"status": "UNKNOWN", "ok": True, "error": None}
 
+        # Fixed 2026-08-12: gICS returns the FULL signed-policy history for
+        # this signer+policy, not just the current state — verified live
+        # that refuseConsent (the operation revoke_consent() now uses)
+        # APPENDS a new entry rather than replacing the prior one. Picking
+        # the first <status> tag in document order (the old approach, via
+        # _parse_consent_status()) was a latent bug: it happened to read
+        # correctly only for a patient with exactly one signed-policy
+        # record ever. A patient who accepted then revoked would still
+        # read back as ACCEPTED, since that entry appears first. Instead,
+        # parse every <signedPolicies> entry and take the one with the
+        # latest <consentKey><consentDate> — the genuinely current status.
+        try:
+            root = ET.fromstring(resp.text)
+        except ET.ParseError as exc:
+            logger.error("gICS get_consent_status: XML parse error: %s", exc)
+            return {"status": "UNKNOWN", "ok": False, "error": f"unparseable gICS response: {exc}"}
+
+        return_el = next((el for el in root.iter() if _local_name(el.tag) == "return"), None)
+        signed_policies = _children(return_el, "signedPolicies")
+
+        # Fixed 2026-08-12, same day — the tie-breaking below used to require
+        # a STRICTLY later consentDate to replace the current pick. Verified
+        # live that consentDate only carries second-level precision, and an
+        # accept immediately followed by a revoke (the exact accept-then-
+        # revoke test this whole fix exists for) can land both records in
+        # the same second — a real, reproduced case, not a hypothetical
+        # edge case. A strict ">" meant a same-second revoke lost the tie to
+        # the earlier accept and status read back as ACCEPTED right after a
+        # successful revoke. Now uses ">=": among entries with the same
+        # timestamp, gICS returns them in creation order (observed
+        # consistently in every test today), so preferring whichever is
+        # later IN THE LIST on an exact tie means the more recent action
+        # wins — matches every case we've actually seen.
+        latest_status: Optional[str] = None
+        latest_dt: Optional[datetime] = None
+        for sp_el in signed_policies:
+            status_text = _child_text(sp_el, "status")
+            if not status_text:
+                continue
+            date_text = _child_text(_child(sp_el, "consentKey"), "consentDate")
+            dt: Optional[datetime] = None
+            if date_text:
+                try:
+                    dt = datetime.fromisoformat(date_text.replace("Z", "+00:00"))
+                except ValueError:
+                    dt = None
+            # A record with no parseable date can't be safely ordered — only
+            # let it win if nothing else has been picked yet.
+            if latest_status is None or (dt is not None and (latest_dt is None or dt >= latest_dt)):
+                latest_status = status_text
+                latest_dt = dt if dt is not None else latest_dt
+
+        if latest_status is None:
+            # signedPolicies WAS present (unlike the empty-return case
+            # above) but no entry had a parseable <status> — this is
+            # genuinely an unexpected response shape, not gICS telling us
+            # "no consent." Treat it as a failed query so a distinguishing
+            # caller doesn't read it as a real answer.
+            logger.warning(
+                "gICS get_consent_status: signedPolicies present but no "
+                "status tag for patient %.20s… in domain %s — treating as "
+                "a failed query, not a genuine UNKNOWN",
+                patient_id, template_id,
+            )
+            return {"status": "UNKNOWN", "ok": False, "error": "no status tag inside signedPolicies"}
+
+        status = _normalize_signed_status(latest_status)
         return {"status": status, "ok": True, "error": None}
 
     def get_consent_status(
@@ -666,6 +914,106 @@ class GICSService:
         instead — currently only the research sync job does.
         """
         return self.get_consent_status_detailed(patient_id, template_id)["status"]
+
+    def get_current_template(self, domain: str = GICS_DOMAIN) -> Optional[dict]:
+        """
+        Fetch the currently active consent template for *domain* — title,
+        header, footer, and each assigned module's label/title/text — so
+        the mobile app can display the authoritative, gICS-authored
+        consent document instead of app-hardcoded copy.
+
+        Added 2026-08-12 for the "View full consent document" feature.
+        Display-only and read-only: never called by accept_consent() or
+        revoke_consent_strict(), so a failure here can never block granting
+        or revoking consent — those keep working exactly as before,
+        independent of whether this call succeeds.
+
+        A domain can have multiple current templates; this filters to the
+        one matching _TEMPLATE_NAME/_TEMPLATE_VERSION — the same template
+        add_consent()/get_consent_status_detailed() actually operate
+        against — rather than just returning "the first one" from gICS.
+
+        Content fields (title/header/footer/module title/text) are run
+        through _deep_html_unescape() — see its docstring for why some of
+        this content came back double-escaped from gICS's admin UI.
+
+        Returns
+        -------
+        {
+          "label": str, "title": str (HTML), "header": str (HTML), "footer": str (HTML),
+          "modules": [
+            {"label": str, "title": str (HTML), "short_text": str, "text": str (HTML), "mandatory": bool},
+            ...
+          ]
+        }
+        None if gICS is unreachable, returns a fault, the response doesn't
+        parse, or no template matching _TEMPLATE_NAME/_TEMPLATE_VERSION is
+        found. Callers should treat None as "document unavailable right
+        now" — this is a display-only convenience, not a data integrity
+        signal, so there's no need to distinguish the failure reason the
+        way get_consent_status_detailed() does for the research sync job.
+        """
+        payload = _envelope_list_current_templates(domain)
+        try:
+            resp = requests.post(
+                _SOAP_ENDPOINT,
+                data=payload.encode("utf-8"),
+                headers=_SOAP_HEADERS,
+                timeout=GICS_TIMEOUT,
+            )
+            resp.raise_for_status()
+        except requests.RequestException as exc:
+            logger.error("gICS get_current_template request failed: %s", exc)
+            return None
+
+        fault = _parse_soap_fault(resp.text)
+        if fault:
+            _log_soap_fault("listCurrentConsentTemplates", "-", domain, fault, resp.text)
+            return None
+
+        try:
+            root = ET.fromstring(resp.text)
+        except ET.ParseError as exc:
+            logger.error("gICS get_current_template: XML parse error: %s", exc)
+            return None
+
+        return_el = next((el for el in root.iter() if _local_name(el.tag) == "return"), None)
+        if return_el is None:
+            return None
+
+        for template_el in _children(return_el, "currentConsentTemplates"):
+            key_el = _child(template_el, "key")
+            name = _child_text(key_el, "name")
+            version = _child_text(key_el, "version")
+            if name != _TEMPLATE_NAME or version != _TEMPLATE_VERSION:
+                continue  # a different template in this domain — not the one this app submits consent against
+
+            modules = []
+            for am_el in _children(template_el, "assignedModules"):
+                module_el = _child(am_el, "module")
+                if module_el is None:
+                    continue
+                modules.append({
+                    "label":      _child_text(module_el, "label"),
+                    "title":      _deep_html_unescape(_child_text(module_el, "title")),
+                    "short_text": _child_text(module_el, "shortText"),
+                    "text":       _deep_html_unescape(_child_text(module_el, "text")),
+                    "mandatory":  _child_text(am_el, "mandatory").lower() == "true",
+                })
+
+            return {
+                "label":   _child_text(template_el, "label"),
+                "title":   _deep_html_unescape(_child_text(template_el, "title")),
+                "header":  _deep_html_unescape(_child_text(template_el, "header")),
+                "footer":  _deep_html_unescape(_child_text(template_el, "footer")),
+                "modules": modules,
+            }
+
+        logger.warning(
+            "gICS get_current_template: no current template named %r v%s found in domain %s",
+            _TEMPLATE_NAME, _TEMPLATE_VERSION, domain,
+        )
+        return None
 
     def is_available(self) -> bool:
         """Return True if the gICS SOAP endpoint is reachable."""

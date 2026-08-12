@@ -213,6 +213,41 @@ export async function getConsentStatus(): Promise<ConsentStatusNew> {
   return response.data;
 }
 
+// ─── Consent document (read-only, display only) ──────────────────────────────
+
+export interface ConsentTemplateModule {
+  label: string;
+  title: string;       // HTML
+  short_text: string;  // plain text
+  text: string;         // HTML
+  mandatory: boolean;
+}
+
+export interface ConsentTemplate {
+  label: string;
+  title: string;   // HTML
+  header: string;  // HTML
+  footer: string;  // HTML
+  modules: ConsentTemplateModule[];
+}
+
+export interface ConsentTemplateResponse {
+  domain: string;
+  template: ConsentTemplate;
+}
+
+/**
+ * Fetch the live, gICS-authored consent document for display (title,
+ * header, each module's text, footer) — sourced from whatever is
+ * currently configured in gICS's admin UI. Purely additive: does not
+ * replace or affect acceptConsent()/revokeConsent() above, which keep
+ * calling /api/consent/accept and /api/consent/revoke directly.
+ */
+export async function getConsentTemplate(): Promise<ConsentTemplateResponse> {
+  const response = await apiClient.get<ConsentTemplateResponse>('/api/consent/template');
+  return response.data;
+}
+
 // ─── Export helpers ───────────────────────────────────────────────────────────
 
 /**
@@ -244,6 +279,7 @@ export default {
   acceptConsent,
   revokeConsent,
   getConsentStatus,
+  getConsentTemplate,
   // Local storage
   savePseudonymLocally,
   getLocalPseudonymSuffix,

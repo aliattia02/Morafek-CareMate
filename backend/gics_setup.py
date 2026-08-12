@@ -1,6 +1,26 @@
 """
 gics_setup_nodomain.py
 ─────────────────────────────────────────────────────────────────────────────
+⚠️ STALE as of 2026-08-12 — targets an OLDER domain/template/module/policy
+naming scheme ("morafek-data-sharing" / "morafek-patient-id" / "data-sharing"
+/ "data-sharing-module") that no longer matches what's actually running.
+The live domain today is "Morafek" (signer-ID type "IMI"), with a
+"ENRICH Consent Policy" (enrich_consent_policy) / "wearable_health_data_recording"
+module / two templates (Consent + Withdrawal) — all created BY HAND through
+gICS's admin UI, not by this script. Running this script as-is will not
+reproduce the current setup and may create a second, disconnected policy
+tree under the old names.
+
+For the current, verified-working setup procedure — including the exact
+admin-UI steps, the two Label-vs-Key and HTML-double-escaping gotchas this
+script's own JAXB fix history hints at, and how to verify each value with a
+live SOAP call before trusting it — see
+docs/documentation/03-research-admin-consent.md §10 "First-Time gICS Setup".
+This script is left in place for its documented fix history (still accurate
+technical detail about gICS 2025.2.x's SOAP envelope quirks) and as a
+starting point if the SOAP-based setup approach is ever revived, not as a
+runnable up-to-date setup path.
+
 Like gics_setup.py but skips addDomain entirely.
 Use this when the domain was already created via the gICS web UI.
 

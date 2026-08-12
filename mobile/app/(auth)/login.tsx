@@ -305,6 +305,30 @@ export default function LoginScreen() {
                 </Text>
               </TouchableOpacity>
             )}
+            {userType === 'researcher' && (
+              <TouchableOpacity
+                style={testCredStyles.box}
+                onPress={() => {
+                  setUsername('test_r1');
+                  setPassword('12345678');
+                  setValidationErrors({});
+                }}
+                activeOpacity={0.75}
+                disabled={busy}
+              >
+                <View style={testCredStyles.row}>
+                  <Text style={testCredStyles.title}>🧪 Demo Researcher Account</Text>
+                  <View style={testCredStyles.fillBadge}>
+                    <Text style={testCredStyles.fillBadgeText}>Tap to fill</Text>
+                  </View>
+                </View>
+                <Text style={testCredStyles.cred}>
+                  Username: <Text style={testCredStyles.credVal}>test_r1</Text>
+                  {'   '}Password: <Text style={testCredStyles.credVal}>12345678</Text>
+                  {'   '}(temporary dev seed — not a real provisioning flow)
+                </Text>
+              </TouchableOpacity>
+            )}
             {userType === 'admin' && (
               <TouchableOpacity
                 style={testCredStyles.box}

@@ -40,7 +40,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
@@ -90,6 +90,8 @@ interface FhirBundle {
 // ─── screen ───────────────────────────────────────────────────────────────────
 
 export default function ConsentScreen() {
+  const router = useRouter();
+
   // ── store ──────────────────────────────────────────────────────────────────
   const { pseudonymSuffix, setPseudonymSuffix } = useAuthStore();
 
@@ -420,6 +422,20 @@ export default function ConsentScreen() {
                     : <Text style={styles.buttonText}>✕  Revoke consent</Text>}
                 </TouchableOpacity>
               )}
+
+              {/*
+                Additional, separate action — opens the live gICS-authored
+                consent document for reading. Does NOT call accept/revoke
+                itself; those stay exactly as above, calling
+                /api/consent/accept and /api/consent/revoke directly.
+              */}
+              <TouchableOpacity
+                style={styles.viewDocButton}
+                onPress={() => router.push('/(app)/ehr/consent-template')}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.viewDocButtonText}>📄  View full consent document</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
@@ -628,6 +644,21 @@ const styles = StyleSheet.create({
   },
   grantButton:  { backgroundColor: colors.success },
   revokeButton: { backgroundColor: colors.danger },
+  viewDocButton: {
+    borderRadius: borderRadius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  viewDocButtonText: {
+    ...typography.button,
+    color: colors.text.primary,
+  },
 
   // ── pseudonymised export card ──
   exportCard: {

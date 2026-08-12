@@ -123,6 +123,7 @@ def create_app():
     with app.app_context():
         _ensure_mongo_indexes(logger)
         _ensure_dev_admin_account(logger)
+        _ensure_dev_researcher_account(logger)
 
     return app
 
@@ -326,6 +327,53 @@ def _ensure_dev_admin_account(logger):
             )
     except Exception as exc:
         logger.warning(f"Could not ensure dev admin account: {exc}")
+
+
+def _ensure_dev_researcher_account(logger):
+    """
+    ⚠️ TEMPORARY / DEV-ONLY — same reasoning as _ensure_dev_admin_account()
+    above. Seeds a hardcoded researcher account (username "test_r1",
+    password "12345678") on every startup if one doesn't already exist, so
+    backend/routes/research_routes.py (POST /api/research/sync) and the
+    mobile "Demo Researcher Account" tap-to-fill box on the login screen
+    are reachable without a manual DB insert or self-registration step.
+
+    NOT SAFE for any shared, staging, or production environment — these
+    credentials are fixed and public in this source file. Same caveats as
+    the dev admin account: change/remove before deploying anywhere beyond
+    localhost, and note that /register still allows anyone to self-register
+    additional user_type="researcher" accounts of their own choosing.
+
+    Idempotent via upsert + $setOnInsert — safe to call on every restart.
+    Won't overwrite the password if it's since been changed through the app.
+    """
+    from werkzeug.security import generate_password_hash
+    from datetime import datetime, timezone
+
+    try:
+        result = mongo.db.users.update_one(
+            {"username": "test_r1", "user_type": "researcher"},
+            {"$setOnInsert": {
+                "username":      "test_r1",
+                "email":         "test_r1@local.dev",
+                "password":      generate_password_hash("12345678"),
+                "first_name":    "Test",
+                "last_name":     "Researcher",
+                "date_of_birth": "",
+                "user_type":     "researcher",
+                "created_at":    datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+        if result.upserted_id is not None:
+            logger.warning(
+                "Seeded default researcher account — username='test_r1', "
+                "password='12345678'. INSECURE, dev-only — see "
+                "_ensure_dev_researcher_account()'s docstring in main.py "
+                "before deploying this anywhere shared."
+            )
+    except Exception as exc:
+        logger.warning(f"Could not ensure dev researcher account: {exc}")
 
 
 # Expose app at module level for Gunicorn

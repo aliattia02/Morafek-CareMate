@@ -197,6 +197,13 @@ services:
   # from FIX 3's pre-creation. All missing columns are added explicitly below.
   # Affected tables: consent, signed_policy, consent_template, module, policy,
   # qc_problem, qc_problem_hist.
+  #
+  # FIX 6 (2026-08-12): gICS's Dashboard "Refresh" (statistics recalculation)
+  # failed with "Data truncation: Data too long for column 'stat_attr'"
+  # (VARCHAR(50) too narrow) — same class of issue as FIX 1-5, just in a
+  # table (stat_value) none of the prior fixes touched because nothing had
+  # exercised the Dashboard feature yet. Cosmetic only — this table is
+  # unrelated to the actual consent/pseudonym read-write path the app uses.
   gics-schema-fix:
     image: mariadb:10.11
     container_name: gics-schema-fix
@@ -294,6 +301,17 @@ services:
           ALTER TABLE policy      MODIFY COLUMN comment  MEDIUMTEXT;
           ALTER TABLE qc_problem  MODIFY COLUMN comment  MEDIUMTEXT;
           ALTER TABLE qc_problem  MODIFY COLUMN solution MEDIUMTEXT;
+        \" 2>/dev/null || true &&
+        echo 'Widening stat_value.stat_attr (FIX 6, 2026-08-12) — dashboard' &&
+        echo 'statistics-refresh hit Data truncation on VARCHAR(50) once a' &&
+        echo 'longer template/domain name combination existed. NOTE: unlike' &&
+        echo 'the tables above, stat_value is created lazily by gICS on first' &&
+        echo 'use of the Dashboard, not at domain-creation time — so on a' &&
+        echo 'genuinely fresh stack this ALTER may no-op (table not yet' &&
+        echo 'created) and the original error can still occur once; re-run' &&
+        echo 'this ALTER by hand after first touching the dashboard if so.' &&
+        mariadb -h mysql -uroot -pgpas_root gics -e \"
+          ALTER TABLE stat_value MODIFY COLUMN stat_attr VARCHAR(255);
         \" 2>/dev/null || true &&
         echo 'Adding CREATE_TIMESTAMP to all gICS 2025.2.2 tables (FIX 4)...' &&
         mariadb -h mysql -uroot -pgpas_root gics -e \"

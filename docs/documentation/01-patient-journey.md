@@ -286,6 +286,12 @@ Revokes in gICS and marks the local record `status: "revoked"`. The pseudonym it
 - `GET /api/consent/status` — live query against gICS: `ACCEPTED` \| `REJECTED` \| `UNKNOWN`.
 - `GET /api/consent/diagnose` — a structured health check of gICS, gPAS, the consent status, and the MongoDB record, useful for support/debugging.
 
+### Viewing the full consent document
+
+**Screen:** `ehr/consent-template.tsx`, opened via the **"📄 View full consent document"** button — always visible on the consent screen, alongside (not replacing) the Accept/Revoke buttons.
+
+`GET /api/consent/template` fetches the live title, header, footer, and module text directly from gICS's admin-configured template — the same content a clinic admin authors in gICS's own admin UI — and the app renders it with a small built-in HTML-to-text parser (headings + paragraphs; no WebView or external rendering library). This is read-only and purely additive: it never calls `addConsent`/`refuseConsent` itself, so a failure here has no effect on granting or revoking consent, which stay entirely on the main consent screen. See [Part 3 §2](03-research-admin-consent.md#2-the-two-ttp-services-gics--gpas) ("Viewing the actual consent document text") for the backend side.
+
 ### When the cloud backend can't reach gICS/gPAS
 
 gICS and gPAS only run in the local Docker development stack, not on the cloud (Render) deployment. When the app is talking to the cloud backend, `acceptConsent()` detects the resulting 502 and shows a calm "🏥 Please visit your hospital" card instead of a raw error.
@@ -389,7 +395,7 @@ All routes require `Authorization: Bearer <token>` unless noted.
 | GET/POST | `/api/patient/doctor-sharing` | Master doctor data-sharing toggle |
 | GET/POST | `/api/medications/my`, `/api/medications/today`, `/api/medications/intake/*`, `/api/medications/adherence` | Own medications, today's schedule, intake confirmation, adherence stats |
 | GET | `/api/medications/fhir/MedicationRequest/` | FHIR searchset Bundle of own prescriptions |
-| GET/POST/DELETE | `/api/consent/*`, `/api/patient/consent` | Strict + legacy consent grant/revoke/status/diagnose |
+| GET/POST/DELETE | `/api/consent/*`, `/api/patient/consent` | Strict + legacy consent grant/revoke/status/diagnose/template |
 | POST/GET/DELETE | `/api/healthconnect/*` | Sync, status, selective erasure |
 | POST | `/api/monitoring/alert`, GET `/api/monitoring/alerts/` | Record / list sensor alerts (own data only as a patient) |
 
