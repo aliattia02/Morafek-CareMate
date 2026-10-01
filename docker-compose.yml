@@ -38,7 +38,6 @@ services:
       args:
         EXPO_PUBLIC_API_URL: http://localhost:5000
         EXPO_PUBLIC_API_VERSION: v1
-        GEMINI_API_KEY: ${GEMINI_API_KEY}
     container_name: morafek-frontend
     restart: unless-stopped
     ports:

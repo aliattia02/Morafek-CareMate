@@ -14,8 +14,7 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://morafek-caremate.onrender.com",
-        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyCMN58bVnXRzhXUJJC2ycj"
+        "EXPO_PUBLIC_API_URL": "https://morafek-caremate.onrender.com"
       }
     },
     "production-apk": {
@@ -24,8 +23,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://morafek-caremate.onrender.com",
-        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyCMN58bVnXRzhXUJJC2ycjYQcwHBkxvHu0"
+        "EXPO_PUBLIC_API_URL": "https://morafek-caremate.onrender.com"
       }
     }
   },

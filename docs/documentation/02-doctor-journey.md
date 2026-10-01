@@ -75,7 +75,7 @@ The response includes `id` / `_id` / `encounter_id` (all the same Mongo ObjectId
 
 Available from the diagnosis field on the visit form: `POST /api/ehr/icd10-suggest`.
 
-Sends `chief_complaint` + an optional `diagnosis_hint` to **Gemini 2.5 Flash** and returns 3–5 ranked ICD-10-GM 2026 suggestions with a German rationale for each. Requires `GEMINI_API_KEY`; returns **503** if the key isn't configured (the form should fall back to manual entry), or **502** with the underlying error `detail` if the Gemini call itself fails. `GET /api/ehr/icd10-suggest/test` is an unauthenticated connectivity check for this integration.
+Sends `chief_complaint` + an optional `diagnosis_hint` to **Gemini 2.5 Flash** and returns 3–5 ranked ICD-10-GM 2026 suggestions with a German rationale for each. Requires `GEMINI_API_KEY`; returns **503** if the key isn't configured (the form should fall back to manual entry), or **502** with the underlying error `detail` if the Gemini call itself fails.
 
 ---
 
@@ -223,7 +223,6 @@ All routes require `Authorization: Bearer <token>`.
 | GET | `/api/doctor/patient/<id>/messages` | Doctor–patient thread |
 | GET | `/api/doctor/patient/<id>/consent` | Consent status (read-only) |
 | POST | `/api/ehr/icd10-suggest` | Gemini ICD-10-GM AI suggestions |
-| GET | `/api/ehr/icd10-suggest/test` | AI connectivity test *(no auth)* |
 | POST | `/api/medications/patient/` | Prescribe medication |
 | GET | `/api/medications/doctor/patient/<id>` | Patient medications |
 | PUT/DELETE/PATCH | `/api/medications/doctor/patient/<pid>/<mid>[/reactivate]` | Update / deactivate / reactivate |
