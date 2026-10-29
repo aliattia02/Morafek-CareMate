@@ -2,13 +2,14 @@
   "name": "native-mobile",
   "version": "1.0.0",
   "main": "expo-router/entry",
-  "scripts": {
-    "start": "expo start",
-    "android": "expo run:android",
-    "ios": "expo run:ios",
-    "web": "expo start --web",
-    "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc --noEmit"
+"scripts": {
+  "postinstall": "node patch-zustand.js",
+  "start": "expo start",
+  "android": "expo run:android",
+  "ios": "expo run:ios",
+  "web": "expo start --web",
+  "lint": "eslint . --ext .ts,.tsx",
+  "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
@@ -56,6 +57,7 @@
     "@babel/core": "^7.26.0",
     "@types/react": "~19.1.10",
     "@types/uuid": "^10.0.0",
+    "babel-plugin-transform-import-meta": "^2.3.3",
     "typescript": "~5.9.2"
   },
   "private": true

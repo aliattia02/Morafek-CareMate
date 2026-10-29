@@ -7,7 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "Morafek",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -19,7 +18,8 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.morafek.mobile",
-      "runtimeVersion": "1.0.3"
+      "runtimeVersion": "1.0.3",
+      "newArchEnabled": true
     },
     "android": {
       "adaptiveIcon": {
@@ -28,7 +28,8 @@
       },
       "package": "com.morafek.mobile",
       "runtimeVersion": "1.0.3",
-      "minSdkVersion": 26
+      "minSdkVersion": 26,
+      "newArchEnabled": true
     },
     "web": {
       "bundler": "metro",

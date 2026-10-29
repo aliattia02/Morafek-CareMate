@@ -200,7 +200,7 @@ def get_medications_collection():
 
 
 def get_med_schedules_collection():
-    return mongo.db.med_schedules
+    return mongo.db.med_schedules^
 
 
 def get_med_intakes_collection():
