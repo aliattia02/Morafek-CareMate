@@ -5,12 +5,19 @@ import re
 import random
 from datetime import datetime, timedelta, timezone
 from bson.objectid import ObjectId
-from utils.auth import token_required, generate_token
+from utils.auth import token_required, generate_token, VALID_USER_TYPES
 from services.gpas_service import gpas
 
 auth_routes = Blueprint('auth_routes', __name__)
 
-VALID_USER_TYPES = ['patient', 'doctor', 'admin']
+# Fixed 2026-08-11: this used to be a second, local copy — ['patient',
+# 'doctor', 'admin'] — that had drifted from utils/auth.py's list and was
+# missing 'researcher'. Since login() and register() both gate on this
+# list before ever touching the database, that meant no researcher account
+# could log in OR register, even one inserted by hand — the entire
+# research-sync feature (research_routes.py) was unreachable through the
+# real auth flow. Now imported from utils/auth.py so there's exactly one
+# list to keep in sync, not two.
 
 # GKV KVID-10 format: 1 uppercase letter + 9 digits (de.basisprofil.r4 spec)
 _GKV_RE   = re.compile(r'^[A-Z]\d{9}$')
@@ -38,7 +45,7 @@ def login():
             return jsonify({"error": "Missing required fields"}), 400
 
         if user_type not in VALID_USER_TYPES:
-            return jsonify({"error": f"Invalid user type. Must be one of: {', '.join(VALID_USER_TYPES)}"}), 400
+            return jsonify({"error": f"Invalid user type. Must be one of: {', '.join(sorted(VALID_USER_TYPES))}"}), 400
 
         user = users.find_one({"username": username, "user_type": user_type})
 
@@ -97,7 +104,7 @@ def register():
                 return jsonify({"error": f"Missing required field: {field}"}), 400
 
         if data['user_type'] not in VALID_USER_TYPES:
-            return jsonify({"error": f"Invalid user type. Must be one of: {', '.join(VALID_USER_TYPES)}"}), 400
+            return jsonify({"error": f"Invalid user type. Must be one of: {', '.join(sorted(VALID_USER_TYPES))}"}), 400
 
         if users.find_one({"username": data['username']}):
             return jsonify({"error": "Username already exists"}), 400
@@ -496,6 +503,10 @@ def delete_account(current_user):
       (`ehr_vitals`, `ehr_visits`, `ehr_conditions`, `ehr_documents`)
       rather than the generic names that did not match actual collection
       names (`vitals`, `visits`, `documents`, `exercises`).
+    • Added 2026-08-11: also wipes `patient_identifiers` and `sync_issues`
+      (added after this route was first written) — see the inline comment
+      at the deletion site for the full reasoning on what's deleted vs.
+      deliberately left alone (`consent_history`, `research_vitals`).
     """
     try:
         logger = current_app.logger
@@ -531,6 +542,37 @@ def delete_account(current_user):
                 'patient_fhir_identifiers',
             ]
             for col_name in ehr_collections:
+                res = db[col_name].delete_many({"patient_id": user_id_str})
+                if res.deleted_count:
+                    deleted[col_name] = res.deleted_count
+
+            # ── Research-sync / admin bookkeeping ──────────────────────────
+            # Added 2026-08-11. Also identified data, also patient_id-keyed,
+            # so also in scope for DSGVO Art. 17 — but neither existed when
+            # this route was first written, so neither was being cleaned up.
+            #
+            # patient_identifiers.research_pseudonym is just a locally-
+            # cached copy of the same gPAS pseudonym stored in
+            # patient_fhir_identifiers (deleted above) — same "delete the
+            # local cache, the authoritative link stays in gPAS" reasoning
+            # as the comment below this block already applies to that field.
+            # doctor_sharing/gics_consent_status/research_eligible have no
+            # such retention rationale at all; they're plain identified data.
+            #
+            # sync_issues is deleted too so a departed patient doesn't leave
+            # a permanently-open issue (e.g. a standing "missing_pseudonym"
+            # flag) that nothing will ever resolve — the sync job's
+            # resolve_sync_issue() only runs for patients still returned by
+            # db.users.find({"user_type": "patient"}), so a deleted patient
+            # would otherwise sit visible in GET /api/admin/sync-issues
+            # forever, referencing an account that no longer exists.
+            #
+            # consent_history and research_vitals are deliberately NOT
+            # touched here — both are keyed on the gPAS pseudonym, not
+            # patient_id, and deleting them would break the same
+            # Treuhandstelle audit trail the pseudonym-retention decision
+            # below already exists to preserve.
+            for col_name in ('patient_identifiers', 'sync_issues'):
                 res = db[col_name].delete_many({"patient_id": user_id_str})
                 if res.deleted_count:
                     deleted[col_name] = res.deleted_count

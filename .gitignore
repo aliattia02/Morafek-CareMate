@@ -53,3 +53,5 @@ security-reports/
 
 # Deployment / misc
 .vercel/
+
+.history/

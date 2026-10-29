@@ -19,7 +19,14 @@ const showAlert = (title: string, message: string) => {
 export default function ProfileScreen() {
   const router = useRouter();
   const { user, logout, updateProfilePicture } = useAuth();
-  const isDoctor = user?.user_type === 'doctor' || user?.user_type === 'admin';
+  // Explicit per-role checks — 'isDoctor' used to stand in for "not a
+  // patient," which broke once 'researcher' became a real 4th user_type
+  // (a researcher is neither a patient nor a doctor/admin).
+  const isPatient = !user?.user_type || user.user_type === 'patient';
+  const isDoctorOnly = user?.user_type === 'doctor';
+  const isAdmin = user?.user_type === 'admin';
+  const isDoctorOrAdmin = isDoctorOnly || isAdmin;
+  const isResearcher = user?.user_type === 'researcher';
   const [isUploading, setIsUploading] = useState(false);
 
   // ── DSGVO delete-account modal ────────────────────────────────────────────
@@ -122,7 +129,7 @@ export default function ProfileScreen() {
         {/* Hero section */}
         <View style={styles.hero}>
           <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8} style={styles.avatarWrapper}>
-            <View style={[styles.avatarRing, isDoctor && styles.avatarRingDoctor]}>
+            <View style={[styles.avatarRing, isDoctorOrAdmin && styles.avatarRingDoctor]}>
               <View style={styles.avatarContainer}>
                 {user?.profile_picture_url ? (
                   <Image source={{ uri: user.profile_picture_url }} style={styles.avatar} />
@@ -144,17 +151,19 @@ export default function ProfileScreen() {
             )}
           </TouchableOpacity>
           <Text style={styles.name}>
-            {isDoctor ? 'Dr. ' : ''}{user?.firstName} {user?.lastName}
+            {isDoctorOnly ? 'Dr. ' : ''}{user?.firstName} {user?.lastName}
           </Text>
           <View style={styles.roleChip}>
             <Text style={styles.roleChipText}>
-              {isDoctor ? '👨‍⚕️ Healthcare Provider' : '🧑 Patient'}
+              {isAdmin ? '🛡️ Administrator' :
+               isDoctorOnly ? '👨‍⚕️ Healthcare Provider' :
+               isResearcher ? '🔬 Researcher' : '🧑 Patient'}
             </Text>
           </View>
         </View>
 
         {/* Patient links */}
-        {!isDoctor && (
+        {isPatient && (
           <>
             <Text style={styles.groupLabel}>MY HEALTH</Text>
             <View style={styles.groupCard}>
@@ -246,7 +255,7 @@ export default function ProfileScreen() {
         )}
 
         {/* Doctor links */}
-        {isDoctor && (
+        {isDoctorOrAdmin && (
           <>
             <Text style={styles.groupLabel}>PRACTICE</Text>
             <View style={styles.groupCard}>
@@ -270,6 +279,58 @@ export default function ProfileScreen() {
                 <View style={styles.linkBody}>
                   <Text style={styles.linkTitle}>My Clinics</Text>
                   <Text style={styles.linkSub}>Create and manage your clinic listings</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        {/* Research links */}
+        {isResearcher && (
+          <>
+            <Text style={styles.groupLabel}>RESEARCH</Text>
+            <View style={styles.groupCard}>
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/research/sync')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>🔄</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>Sync Consent Status</Text>
+                  <Text style={styles.linkSub}>Refresh eligibility &amp; mirror vitals from gICS</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        {/* Admin links */}
+        {isAdmin && (
+          <>
+            <Text style={styles.groupLabel}>ADMINISTRATION</Text>
+            <View style={styles.groupCard}>
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/admin/sync-issues')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>⚠️</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>Sync Issues</Text>
+                  <Text style={styles.linkSub}>Standing consent-sync problems</Text>
+                </View>
+                <Text style={styles.arrow}>›</Text>
+              </TouchableOpacity>
+              <View style={styles.divider} />
+              <TouchableOpacity style={styles.link}
+                onPress={() => router.push('/(app)/admin/erasure-requests')}>
+                <View style={styles.linkIconWrap}>
+                  <Text style={styles.linkIcon}>🗑️</Text>
+                </View>
+                <View style={styles.linkBody}>
+                  <Text style={styles.linkTitle}>Erasure Requests</Text>
+                  <Text style={styles.linkSub}>Review and approve data-deletion requests</Text>
                 </View>
                 <Text style={styles.arrow}>›</Text>
               </TouchableOpacity>

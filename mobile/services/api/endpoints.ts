@@ -157,6 +157,27 @@ const API = {
     /** DELETE → { message, deleted_count }  GDPR/DSGVO selective erasure */
     DATA:   '/api/healthconnect/data',
   },
+
+  // ── Research sync (researcher-triggered gICS/gPAS consent + vitals mirror) ─
+  // Backend: backend/routes/research_routes.py
+  RESEARCH: {
+    /** POST → ResearchSyncResult. Synchronous, can take several seconds. */
+    SYNC: v('/api/research/sync'),
+    /** GET  → ResearchSyncStatus. Last-run stats, no new sync triggered. */
+    SYNC_STATUS: v('/api/research/sync/status'),
+  },
+
+  // ── Admin — sync-issue visibility + erasure-request approval ─────────────
+  // Backend: backend/routes/admin_routes.py
+  ADMIN: {
+    /** GET ?issue_type=&include_resolved= → SyncIssuesResponse */
+    SYNC_ISSUES: v('/api/admin/sync-issues'),
+    /** GET ?status=pending|approved|denied|all → ErasureRequestsResponse */
+    ERASURE_REQUESTS: v('/api/admin/erasure-requests'),
+    /** POST { action: 'approve'|'deny', reason? } → ErasureActionResult */
+    ERASURE_REQUEST_ACTION: (requestId: string) =>
+      v(`/api/admin/erasure-requests/${requestId}`),
+  },
 } as const;
 
 // Named export for direct usage

@@ -11,6 +11,10 @@ function TabIcon({ icon, color }: { icon: string; color: string }) {
 
 export default function TabLayout() {
   const { user } = useAuthStore();
+  // 'patient' or unset (legacy/default) sees the Home tab; doctor/admin get
+  // Doctor Dashboard instead; researcher gets neither — Profile is their
+  // only tab, and it links out to /(app)/research/sync (see profile.tsx).
+  const isPatient = !user?.user_type || user.user_type === 'patient';
   const isDoctor = user?.user_type === 'doctor' || user?.user_type === 'admin';
 
   return (
@@ -33,7 +37,7 @@ export default function TabLayout() {
           title: 'Home',
           tabBarLabel: 'Home',
           tabBarIcon: ({ color }) => <TabIcon icon="🏠" color={color} />,
-          href: isDoctor ? null : undefined,
+          href: isPatient ? undefined : null,
         }}
       />
 

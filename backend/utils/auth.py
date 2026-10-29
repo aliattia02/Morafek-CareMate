@@ -5,6 +5,9 @@ from functools import wraps
 from flask import request, jsonify, current_app
 from bson.objectid import ObjectId
 
+# ── Valid user types (includes Phase 2 researcher) ────────────────────────────
+VALID_USER_TYPES = {'patient', 'doctor', 'researcher', 'admin'}
+
 
 def generate_token(user_id: str, user_type: str = "") -> str:
     """
@@ -13,6 +16,8 @@ def generate_token(user_id: str, user_type: str = "") -> str:
     Mobile clients send  X-Client-Type: mobile  — they receive a 90-day
     token so users are never unexpectedly logged out on their phone.
     Web clients (or anything else) receive the standard 24-hour token.
+    
+    Supports user types: patient, doctor, researcher (Phase 2), admin
     """
     client_type = request.headers.get("X-Client-Type", "web").lower()
     is_mobile   = client_type == "mobile"

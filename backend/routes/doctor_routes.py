@@ -12,7 +12,32 @@ doctor_routes = Blueprint('doctor_routes', __name__)
 def check_doctor_patient_access(current_user, patient_id):
     """Check if the current user has access to the patient's data.
     Returns (has_access, error_response, status_code).
-    Unchanged from previous version.
+
+    Changes vs. previous version
+    ─────────────────────────────
+    Adds the patient-controlled doctor_sharing AND-gate from
+    data-store-separation-reference.md §7.1, ANDed on top of the existing
+    authorized_doctors check — it can only ever REMOVE access this check
+    would otherwise grant, never add access it would otherwise deny:
+
+        doctor_can_read(doctor, patient) =
+            <original authorized_doctors check>
+            AND patient_identifiers[patient].doctor_sharing == true
+
+    Scope note: the admin branch is intentionally left untouched — admin
+    access bypasses this gate exactly like it bypassed authorized_doctors
+    before. Only the doctor branch is gated.
+
+    This function is the single choke-point for doctor reads that already
+    call it (vitals in ehr_routes.py, the doctor consent view in
+    consent_routes.py, the patient list here). As of 2026-08-11,
+    patient_routes.py's fhir_patient_read()/fhir_patient_search() also
+    enforce this gate — they don't call this function directly (each has
+    its own batch-fetch shape suited to a single lookup vs. a search
+    result set), but both now check patient_identifiers.doctor_sharing
+    via get_doctor_sharing() before returning FHIR Patient data. A patient
+    turning doctor_sharing off now stops a doctor's vitals/consent reads
+    AND their FHIR Patient reads, closing the previously-flagged gap.
     """
     user_type = current_user.get('user_type')
 
@@ -30,6 +55,10 @@ def check_doctor_patient_access(current_user, patient_id):
 
     if doctor_id not in patient.get('authorized_doctors', []):
         return False, {'message': 'You are not authorized to view this patient\'s data'}, 403
+
+    from utils.consent_history import get_doctor_sharing
+    if not get_doctor_sharing(mongo.db, patient_id):
+        return False, {'message': 'This patient has turned off doctor data-sharing'}, 403
 
     return True, None, None
 

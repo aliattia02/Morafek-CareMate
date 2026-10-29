@@ -19,7 +19,7 @@ import { secureStorage, STORAGE_KEYS } from '../../utils/storage';
 export interface LoginCredentials {
   username: string;
   password: string;
-  user_type: 'patient' | 'doctor' | 'admin';
+  user_type: 'patient' | 'doctor' | 'researcher' | 'admin';
 }
 
 export interface RegisterData {
@@ -29,13 +29,13 @@ export interface RegisterData {
   firstName: string;
   lastName: string;
   dateOfBirth: string;
-  user_type: 'patient' | 'doctor' | 'admin';
+  user_type: 'patient' | 'doctor' | 'researcher' | 'admin';
 }
 
 export interface UserData {
   _id: string;                               // ← ADDED: MongoDB patient _id
   token: string;
-  userType: 'patient' | 'doctor' | 'admin';
+  userType: 'patient' | 'doctor' | 'researcher' | 'admin';
   firstName: string;
   lastName: string;
   profile_picture_url?: string;
@@ -146,7 +146,7 @@ export const login = async (credentials: LoginCredentials): Promise<UserData> =>
   const userData: UserData = {
     _id: resolvedId,                         // ← ADDED
     token: response.data.token,
-    userType: response.data.user_type as 'patient' | 'doctor' | 'admin',
+    userType: response.data.user_type as 'patient' | 'doctor' | 'researcher' | 'admin',
     firstName: response.data.firstName,
     lastName: response.data.lastName,
     profile_picture_url: response.data.profile_picture_url,

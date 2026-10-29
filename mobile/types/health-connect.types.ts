@@ -63,6 +63,97 @@ export interface HCDataTypeConfig {
   hcRecord: HCRecordType;
 }
 
+// ─── Data origin filtering (cross-source duplicate/overlap fix) ───────────────
+//
+// Health Connect's readRecords() returns records from EVERY app that has
+// ever written to it, tagged via record.metadata.dataOrigin. This is NOT
+// the same as Health Connect's own "Data sources and priority" Settings UI
+// — that priority only affects HC's internal aggregate queries (e.g. a step
+// widget total); it has no effect on raw readRecords() results.
+//
+// Confirmed via direct inspection: Samsung Health, Google Fit, and Health
+// Sync all write genuinely overlapping (not identical — the deterministic-ID
+// dedup in health-connect-mapper.ts does not catch this) heart-rate data for
+// the same time windows. The fix has to happen in Morafek's own code, by
+// filtering raw records on metadata.dataOrigin before they reach the mapper.
+
+/**
+ * Known Health Connect contributing app package names, for reference and
+ * debug display. Values other than GOOGLE_FIT are unverified against this
+ * device's actual metadata.dataOrigin strings — cross-check against the
+ * debug card / Health Connect's own data screen before relying on them.
+ */
+export const HC_KNOWN_ORIGINS = {
+  GOOGLE_FIT: 'com.google.android.apps.fitness',
+  SAMSUNG_HEALTH: 'com.sec.android.app.shealth',
+  HEALTH_SYNC: 'nl.appyhapps.healthsync',
+} as const;
+
+/**
+ * Preferred dataOrigin per Morafek data-type key (heart_rate, steps, ...).
+ * These are the DEFAULT values layered under a patient's stored overrides —
+ * see preferredOriginsByUser / getPreferredOriginsForUser in
+ * health-connect.store.ts, and preferredOrigins/setPreferredOrigin on
+ * UseHealthConnectReturn. readAllRecords() in useHealthConnect.ts uses the
+ * resolved (defaults + per-user overrides) map to discard records from
+ * non-preferred sources before they reach the mapper.
+ *
+ * Decision: Google Fit is the default for all current types — its
+ * per-sample granularity/values closely match the underlying watch data,
+ * while Health Sync's writes are coarser bridge summaries less suitable for
+ * a medical record.
+ */
+export const DEFAULT_PREFERRED_ORIGINS: Record<string, string> = {
+  heart_rate: HC_KNOWN_ORIGINS.GOOGLE_FIT,
+  steps: HC_KNOWN_ORIGINS.GOOGLE_FIT,
+};
+
+/** Per-data-type origin preference map, as used by readAllRecords(). */
+export type HCOriginPreferences = Record<string, string>;
+
+// ─── Source-app identification (FIX 9) ────────────────────────────────────────
+//
+// Distinct from the filtering constants above: HC_KNOWN_ORIGINS /
+// DEFAULT_PREFERRED_ORIGINS decide WHICH source's records survive the FIX 8
+// filter in useHealthConnect.ts. The constants below decide how the
+// surviving record's origin gets STAMPED onto the FHIR Observation that
+// health-connect-mapper.ts builds from it, so the app it came from isn't
+// discarded once the reading passes the filter.
+//
+// SOURCE_APP_IDENTIFIER_SYSTEM / SOURCE_APP_EXTENSION_URL must match
+// backend/utils/fhir_health_connect.py's constants of the same name exactly
+// — that file's _extract_source_app() checks device.identifier[] first,
+// then falls back to extension[], in that order. Confirmed against the
+// actual backend file: identical strings, identical check order.
+
+export const SOURCE_APP_IDENTIFIER_SYSTEM = 'https://morafek.app/fhir/source-app-package';
+export const SOURCE_APP_EXTENSION_URL     = 'https://morafek.app/fhir/StructureDefinition/source-app';
+
+/**
+ * Best-effort friendly names for common Health Connect data sources, shown
+ * in device.display instead of the raw package id when recognized.
+ * NOT exhaustive — verify these package ids against what your devices
+ * actually report (log `record.metadata?.dataOrigin` once to confirm) before
+ * relying on the label in anything user-facing. Unrecognized packages are
+ * never collapsed into "Other" — resolveSourceAppDisplay() falls back to the
+ * raw id as-is, so new sources remain identifiable and can be added here
+ * later.
+ *
+ * Deliberately keyed by explicit string literals rather than derived from
+ * HC_KNOWN_ORIGINS' keys — avoids any casing/formatting mismatch between an
+ * enum-style key (e.g. GOOGLE_FIT) and its intended display label.
+ */
+export const KNOWN_SOURCE_APPS: Record<string, string> = {
+  'com.google.android.apps.fitness': 'Google Fit',
+  'com.sec.android.app.shealth':     'Samsung Health',
+  'nl.appyhapps.healthsync':         'Health Sync',
+};
+
+/** Resolve a raw dataOrigin package id to a friendly display name, or the raw id if unrecognized. */
+export function resolveSourceAppDisplay(dataOrigin: string): string {
+  return KNOWN_SOURCE_APPS[dataOrigin] ?? dataOrigin;
+}
+
 // ─── Raw HC SDK record shapes (minimal — only fields we consume) ──────────────
 
 /** Heart rate sample within a HeartRate record */
@@ -139,13 +230,24 @@ export interface HCFHIRObservation {
   };
   /** Fixed: marks this Observation as originating from Health Connect */
   source: 'health_connect';
+  /**
+   * FIX 9: display widened from the literal 'health_connect' to a general
+   * string — it now shows a friendly source-app name (KNOWN_SOURCE_APPS) or
+   * the raw package id when the record's dataOrigin is known, falling back
+   * to the original 'health_connect' literal when it isn't. identifier is
+   * optional and only populated when dataOrigin is present on the source
+   * record (see buildBaseObservation() in health-connect-mapper.ts).
+   */
   device: {
-    display: 'health_connect';
+    display: string;
+    identifier?: Array<{ system: string; value: string }>;
   };
-  extension: Array<{
-    url: 'https://morafek.app/fhir/StructureDefinition/device-type';
-    valueString: 'android_watch';
-  }>;
+  /**
+   * FIX 9: widened from a single fixed-shape entry to a general array so it
+   * can carry both the original device-type entry and, when available, a
+   * second source-app entry (SOURCE_APP_EXTENSION_URL) alongside it.
+   */
+  extension: Array<{ url: string; valueString: string }>;
 }
 
 // ─── API request / response shapes ───────────────────────────────────────────
@@ -210,6 +312,15 @@ export interface UseHealthConnectReturn {
   isSyncing: boolean;
   /** True while the initial status is loading */
   isLoading: boolean;
+  /**
+   * TEMP DEBUG — inline diagnostic text from the most recent sync() call
+   * (raw record counts, sample record shapes, patient ID resolution, etc).
+   * Null until the first sync attempt. Remove this field once the
+   * empty-sync root cause is confirmed and fixed.
+   */
+  debugInfo: string | null;
+  /** TEMP DEBUG — clears debugInfo. Remove alongside debugInfo. */
+  clearDebugInfo: () => void;
   /** Request Android Health Connect permissions */
   requestPermission: () => Promise<void>;
   /**
@@ -222,6 +333,18 @@ export interface UseHealthConnectReturn {
   sync: (hoursBack?: number) => Promise<HCSyncResponse | null>;
   /** Reload status from backend without syncing */
   refreshStatus: () => Promise<void>;
+  /**
+   * Active per-data-type preferred dataOrigin map (see FIX 8 /
+   * DEFAULT_PREFERRED_ORIGINS). Starts as a copy of DEFAULT_PREFERRED_ORIGINS
+   * and can be overridden at runtime via setPreferredOrigin — e.g. from a
+   * settings screen, if the user switches primary tracking app/watch.
+   * Tied to the current patient and persisted via health-connect.store.ts
+   * (keyed by user._id), so it survives app restarts and stays isolated
+   * per patient on a shared device.
+   */
+  preferredOrigins: HCOriginPreferences;
+  /** Override the preferred dataOrigin for one data-type key (e.g. 'heart_rate'). */
+  setPreferredOrigin: (dataType: string, origin: string) => void;
 }
 
 // ─── Display helpers ──────────────────────────────────────────────────────────

@@ -1,0 +1,30 @@
+What was fixed
+Health Connect's readRecords() returns data from every app that's ever written to it (Samsung Health, Google Fit, Health Sync), and they were writing genuinely overlapping heart-rate/steps data for the same time windows — not exact duplicates, so the existing ID-based dedup never caught it. Health Connect's own "priority" setting doesn't help either; it only affects HC's internal aggregates, not raw readRecords(). Fix: filter raw records by metadata.dataOrigin before they ever reach the FHIR mapper.
+Files changed
+health-connect.types.ts
+
+HC_KNOWN_ORIGINS — reference package names for Google Fit / Samsung Health / Health Sync
+DEFAULT_PREFERRED_ORIGINS — default preferred source per data type (Google Fit for both heart_rate and steps)
+HCOriginPreferences type, and preferredOrigins / setPreferredOrigin added to UseHealthConnectReturn
+
+useHealthConnect.ts
+
+readAllRecords() filters each record against the active preferred-origin map; anything from a non-preferred source is silently dropped, records with no origin tag are kept (fail open)
+preferredOrigins is now derived per the logged-in patient, pulled from the store and re-derived via useMemo
+setPreferredOrigin(dataType, origin) writes through to the store, no-ops with a warning if no user is authenticated
+
+health-connect.store.ts
+
+preferredOriginsByUser: Record<userId, HCOriginPreferences> — persisted via the existing AsyncStorage persist()
+setPreferredOrigin, clearPreferredOrigins, and standalone getPreferredOriginsForUser(userId) helper
+Deliberately excluded from reset()'s target state, so logging out doesn't erase a patient's preference — it's still there on next login
+
+health-connect.tsx (settings screen)
+
+New "BEVORZUGTE QUELLE" section: one three-way picker (Google Fit / Samsung Health / Health Sync) per data type, using the same visual style as the existing sync-window picker
+Wired to preferredOrigins/setPreferredOrigin from the hook — selection applies on the next sync and persists per patient
+
+health-connect-mapper.ts — untouched; filtering happens upstream so the mapper never sees non-preferred records.
+Not touched: index.tsx, profile.tsx, vitals.tsx — none of them use useHealthConnect.
+Known limitation to flag
+The picker only offers the three known sources — if a patient's device ever writes from a fourth, unlisted app, it'll still get filtered out (correctly, per the "only preferred source passes" rule) but they won't be able to select it as preferred without adding it to ORIGIN_OPTIONS/HC_KNOWN_ORIGINS first.

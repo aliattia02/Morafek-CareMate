@@ -250,7 +250,8 @@ def revoke_consent(current_user):
     ----
     1. Update patient_consents: status "revoked", revoked_at = now.
        Pseudonym is intentionally NOT cleared — re-grant reuses same pseudonym.
-    2. Call gICS revokeConsent — fire-and-forget.
+    2. Call gics.revoke_consent() (refuseConsent under the hood as of
+       2026-08-12 — see gics_service.py) — fire-and-forget.
     3. Return { status: "revoked" }.
 
     gPAS is NOT touched on revoke.  The pseudonym remains in gPAS and MongoDB
@@ -463,6 +464,12 @@ def accept_consent(current_user):
             "Pseudonym stored in users for patient %s (suffix: …%s)",
             patient_id, pseudonym_suffix,
         )
+
+        # Open (or confirm already-open) a consent_history interval under
+        # this pseudonym. No-ops if one is already open — covers the
+        # idempotency-guard retry path (already ACCEPTED in gICS).
+        from utils.consent_history import open_consent_interval
+        open_consent_interval(db, pseudonym)
     else:
         logger.info(
             "accept_consent: no pseudonym for patient %s (gPAS skipped or unavailable)",
@@ -501,11 +508,27 @@ def revoke_consent_strict(current_user):
 
     Flow
     ----
-    1. Call gics.revoke_consent(patient_id, template_id).
-       "not found" faults are treated as success (already revoked / never granted).
+    1. Call gics.revoke_consent(patient_id, template_id) → hard failure.
     2. Update patient_consents: status="revoked", revoked_at=now.
        Pseudonym is intentionally NOT touched in patient_consents or users.
     3. Return { "success": true }.
+
+    Fixed 2026-08-12 — step 1 used to log a warning on gICS failure and
+    proceed to mark MongoDB revoked regardless. Root-caused to two real
+    bugs found the same day: revoke_consent() was calling a SOAP operation
+    that didn't exist at all (see gics_service.py's _envelope_revoke_consent()
+    docstring), and this gICS instance is also intermittently flaky under
+    rapid consecutive calls — verified live, a failed call often succeeds
+    on a bare retry. Tolerating that failure here meant a patient could be
+    told their withdrawal succeeded while gICS's actual record — the real
+    system of record for consent — never changed, reproduced concretely:
+    revoke returned {"success": true}, and a status check immediately
+    after still showed ACCEPTED in gICS. Now hard-fails (502) instead,
+    matching accept_consent()'s existing strict behavior — MongoDB is only
+    marked revoked after gICS confirms it. The mobile app's existing
+    TTP_UNAVAILABLE / "please visit your hospital" handling already covers
+    a 5xx from this endpoint, so this degrades the same way accept already
+    does, not a new failure mode for the client to handle.
 
     Why pseudonym is kept
     ─────────────────────
@@ -533,13 +556,32 @@ def revoke_consent_strict(current_user):
 
     template_id = current_app.config.get('CONSENT_TEMPLATE_ID', 'morafek-data-sharing')
 
-    # ── Step 1: Revoke in gICS ─────────────────────────────────────────────────
+    # ── Step 0: Read the current pseudonym BEFORE any writes ───────────────────
+    # consent_history intervals are keyed by pseudonym, not patient_id, so we
+    # need this value to know which interval to close. Read-only — nothing
+    # here is touched or cleared, matching the existing "pseudonym stays"
+    # design.
+    existing = db.patient_consents.find_one(
+        {'patient_id': patient_id}, {'pseudonym': 1}
+    )
+    pseudonym = (existing or {}).get('pseudonym')
+
+    # ── Step 1: Revoke in gICS — hard failure ──────────────────────────────────
+    # Fixed 2026-08-12: a False return here used to be logged and ignored,
+    # letting MongoDB be marked "revoked" while gICS's own record stayed
+    # ACCEPTED — see the docstring above for how this was found and why
+    # tolerating it was actively wrong. gICS is the source of truth for
+    # consent status; MongoDB must not disagree with it.
     ok = gics.revoke_consent(patient_id, template_id)
     if not ok:
-        logger.warning(
-            "gICS revoke_consent returned False for patient %s — continuing with MongoDB update",
+        logger.error(
+            "gICS revoke_consent failed for patient %s — NOT marking MongoDB "
+            "revoked (gICS remains the source of truth)",
             patient_id,
         )
+        return jsonify({
+            'error': 'Consent withdrawal failed — gICS error. Please try again.',
+        }), 502
 
     # ── Step 2: Mark revoked in MongoDB — pseudonym fields left intact ─────────
     # NOTE: We do NOT call gpas.delete_pseudonym() here.
@@ -559,6 +601,13 @@ def revoke_consent_strict(current_user):
         "Consent revoked for patient %s — pseudonym retained in gPAS and MongoDB",
         patient_id,
     )
+
+    # ── Step 3: Close the open consent_history interval for this pseudonym ────
+    # No-op if there was no pseudonym yet, or no open interval (e.g. revoke
+    # called when nothing had ever been granted) — mirrors gICS's own
+    # tolerance of "nothing to revoke" as a success case.
+    from utils.consent_history import close_consent_interval
+    close_consent_interval(db, pseudonym)
 
     return jsonify({'success': True}), 200
 
@@ -587,6 +636,45 @@ def get_consent_status_strict(current_user):
 
     status = gics.get_consent_status(patient_id, template_id)
     return jsonify({'status': status}), 200
+
+
+@consent_routes.route('/api/consent/template', methods=['GET'])
+@token_required
+@api_error_handler
+def get_consent_template(current_user):
+    """
+    GET /api/consent/template — fetch the live, gICS-authored consent
+    document (title/header/footer + each module's title/text) for the
+    "View full consent document" screen.
+
+    Added 2026-08-12. Purely additive and read-only — does NOT affect
+    accept/revoke, which keep calling /api/consent/accept and
+    /api/consent/revoke directly exactly as before. This lets a patient
+    read the authoritative text sourced live from gICS's admin UI,
+    alongside (not instead of) the existing direct accept/revoke actions.
+
+    Returns
+    -------
+    { "domain": str, "template": {...} }  — see gics.get_current_template()
+
+    502 — gICS unreachable, errored, or no template configured for the
+          domain matches what this app submits consent against. This is a
+          display-only feature, so a failure here is never treated as a
+          data-integrity problem — just "document unavailable right now."
+    Only patients may call this endpoint.
+    """
+    if current_user.get('user_type') != 'patient':
+        return jsonify({'error': 'Patients only'}), 403
+
+    domain = current_app.config.get('CONSENT_TEMPLATE_ID', 'morafek-data-sharing')
+
+    from services.gics_service import gics
+
+    template = gics.get_current_template(domain)
+    if template is None:
+        return jsonify({'error': 'Consent document is temporarily unavailable'}), 502
+
+    return jsonify({'domain': domain, 'template': template}), 200
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -637,6 +725,15 @@ def admin_reactivate_consent(current_user, patient_id):
     template_id = current_app.config.get('CONSENT_TEMPLATE_ID', 'morafek-data-sharing')
     gpas_domain = current_app.config.get('GPAS_DOMAIN',          'morafek-patients')
     gpas_enabled = current_app.config.get('GPAS_ENABLED',        True)
+
+    # ── Step 0: Read the OLD pseudonym before it's deleted ─────────────────────
+    # Needed to close its consent_history interval below. Read-only — this
+    # route already deletes the pseudonym from gPAS itself in step 1; we're
+    # only reading MongoDB's record of it first.
+    existing = db.patient_consents.find_one(
+        {'patient_id': patient_id}, {'pseudonym': 1}
+    )
+    old_pseudonym = (existing or {}).get('pseudonym')
 
     # ── Step 1: Delete old pseudonym from gPAS ────────────────────────────────
     if gpas_enabled:
@@ -723,6 +820,26 @@ def admin_reactivate_consent(current_user, patient_id):
         {'patient_id': patient_id},
         {'$set': consent_doc},
     )
+
+    # ── Step 5: consent_history — close old pseudonym's interval, ─────────────
+    #            open a fresh one under the new pseudonym.
+    # This is the ONE path where the pseudonym genuinely changes (see
+    # data-store-separation-reference.md §3, "Exception"). Existing
+    # research_vitals rows stay attributed to old_pseudonym — they are not
+    # migrated to new_pseudonym anywhere in this flow, by design.
+    #
+    # Gated on gpas_enabled, not just "old_pseudonym truthy": if
+    # GPAS_ENABLED=false this call, the gPAS delete/create branch above never
+    # ran, so old_pseudonym (a leftover from some earlier gPAS-enabled
+    # session) was NOT actually touched in gPAS — closing its interval here
+    # would be recording an event that didn't happen.
+    if gpas_enabled:
+        from utils.consent_history import close_consent_interval, open_consent_interval
+        if old_pseudonym and old_pseudonym != new_pseudonym:
+            close_consent_interval(db, old_pseudonym)
+        if new_pseudonym:
+            open_consent_interval(db, new_pseudonym)
+
     logger.info(
         "admin_reactivate: patient %s reactivated by %s (%s) — new suffix …%s",
         patient_id, str(current_user.get('_id')), caller_type, new_suffix,

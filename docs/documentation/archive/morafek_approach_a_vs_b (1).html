@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Morafek — Approach A vs B</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  /* ── Design tokens ─────────────────────────────── */
+  :root {
+    /* Neutral */
+    --color-text-primary:        #0f172a;
+    --color-text-secondary:      #475569;
+    --color-text-tertiary:       #94a3b8;
+    --color-border-primary:      #cbd5e1;
+    --color-border-secondary:    #94a3b8;
+    --color-border-tertiary:     #e2e8f0;
+    --color-background-page:     #f8fafc;
+    --color-background-secondary:#f1f5f9;
+
+    /* Semantic */
+    --color-background-danger:   #fff1f2;
+    --color-border-danger:       #fda4af;
+    --color-text-danger:         #be123c;
+
+    --color-background-success:  #f0fdf4;
+    --color-border-success:      #86efac;
+    --color-text-success:        #15803d;
+
+    --color-background-info:     #eff6ff;
+    --color-border-info:         #93c5fd;
+    --color-text-info:           #1d4ed8;
+
+    /* Component accent palettes */
+    --c-purple-bg:    #f5f3ff;
+    --c-purple-border:#a78bfa;
+    --c-purple-text:  #4c1d95;
+
+    --c-teal-bg:      #f0fdfa;
+    --c-teal-border:  #2dd4bf;
+    --c-teal-text:    #0f766e;
+
+    --c-blue-bg:      #eff6ff;
+    --c-blue-border:  #60a5fa;
+    --c-blue-text:    #1e40af;
+
+    --c-amber-bg:     #fffbeb;
+    --c-amber-border: #fbbf24;
+    --c-amber-text:   #78350f;
+
+    --c-green-bg:     #f0fdf4;
+    --c-green-border: #4ade80;
+    --c-green-text:   #14532d;
+
+    --c-coral-bg:     #fff1f2;
+    --c-coral-border: #fb7185;
+    --c-coral-text:   #881337;
+  }
+
+  /* ── Page shell ─────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--color-background-page);
+    font-family: 'IBM Plex Sans', sans-serif;
+    padding: 2rem;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  h1 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-text-tertiary);
+    margin-bottom: 1.5rem;
+  }
+
+  .diagram-wrap {
+    width: 100%;
+    max-width: 720px;
+    background: #ffffff;
+    border: 1px solid var(--color-border-tertiary);
+    border-radius: 16px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04);
+  }
+
+  svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    font-family: 'IBM Plex Sans', sans-serif;
+  }
+
+  /* ── SVG typography ─────────────────────────────── */
+  .section-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    fill: var(--color-text-tertiary);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .path-label {
+    font-size: 10.5px;
+    fill: var(--color-text-tertiary);
+    font-family: 'IBM Plex Mono', monospace;
+  }
+  .badge {
+    font-size: 10px;
+    font-weight: 500;
+  }
+  /* Box header / subtitle text */
+  .th {
+    font-size: 11.5px;
+    font-weight: 600;
+    fill: inherit;
+  }
+  .ts {
+    font-size: 10px;
+    fill: inherit;
+    opacity: 0.85;
+  }
+
+  /* ── Colored box groups ─────────────────────────── */
+  /* Each .c-* group wraps a <rect> + <text> elements;
+     we set fill/stroke on rect and fill on text via CSS */
+
+  .c-purple rect  { fill: var(--c-purple-bg);  stroke: var(--c-purple-border); }
+  .c-purple .th,
+  .c-purple .ts   { fill: var(--c-purple-text); }
+
+  .c-teal rect    { fill: var(--c-teal-bg);    stroke: var(--c-teal-border); }
+  .c-teal .th,
+  .c-teal .ts     { fill: var(--c-teal-text); }
+
+  .c-blue rect    { fill: var(--c-blue-bg);    stroke: var(--c-blue-border); }
+  .c-blue .th,
+  .c-blue .ts     { fill: var(--c-blue-text); }
+
+  .c-amber rect   { fill: var(--c-amber-bg);   stroke: var(--c-amber-border); }
+  .c-amber .th,
+  .c-amber .ts    { fill: var(--c-amber-text); }
+
+  .c-green rect   { fill: var(--c-green-bg);   stroke: var(--c-green-border); }
+  .c-green .th,
+  .c-green .ts    { fill: var(--c-green-text); }
+
+  .c-coral rect   { fill: var(--c-coral-bg);   stroke: var(--c-coral-border); }
+  .c-coral .th,
+  .c-coral .ts    { fill: var(--c-coral-text); }
+</style>
+</head>
+<body>
+
+<h1>Morafek CareMate — Backend Architecture Comparison</h1>
+
+<div class="diagram-wrap">
+<svg viewBox="0 0 680 850" role="img" xmlns="http://www.w3.org/2000/svg">
+<title>Morafek Architecture Comparison: Approach A (Cloud-Hybrid) vs Approach B (On-Premise)</title>
+<desc>Side-by-side comparison of two backend architectures. Left: cloud-hybrid with MongoDB Atlas. Right: full on-premise with Orbis FHIR API.</desc>
+
+<defs>
+  <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+  <!-- Dashed-line connector arrows -->
+  <marker id="arrow-dim" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+    <path d="M2 1L8 5L2 9" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker>
+</defs>
+
+<!-- ══════════════════════════════════════════
+     COLUMN HEADERS
+     ══════════════════════════════════════════ -->
+<text class="section-label" x="166" y="22" text-anchor="middle">Approach A — cloud-hybrid</text>
+<text class="section-label" x="514" y="22" text-anchor="middle">Approach B — full on-premise</text>
+
+<!-- Centre divider -->
+<line x1="340" y1="10" x2="340" y2="840"
+      stroke="#e2e8f0" stroke-width="1" stroke-dasharray="4 4"/>
+
+
+<!-- ══════════════════════════════════════════
+     APPROACH A — LEFT COLUMN
+     ══════════════════════════════════════════ -->
+
+<!-- Mobile app -->
+<g class="c-purple">
+  <rect x="90" y="38" width="152" height="52" rx="8" stroke-width="1"/>
+  <text class="th" x="166" y="60" text-anchor="middle">Mobile app</text>
+  <text class="ts" x="166" y="78" text-anchor="middle">SQLite · local-first</text>
+</g>
+
+<!-- Path labels -->
+<text class="path-label" x="60"  y="116" text-anchor="middle">P2P</text>
+<text class="path-label" x="166" y="116" text-anchor="middle">Intranet</text>
+<text class="path-label" x="272" y="116" text-anchor="middle">Internet</text>
+
+<!-- P2P arrow left -->
+<path d="M110 90 Q60 108 60 128"
+      fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 3"
+      marker-end="url(#arrow-dim)"/>
+<!-- Intranet arrow centre -->
+<line x1="166" y1="90" x2="166" y2="128"
+      stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 3"
+      marker-end="url(#arrow-dim)"/>
+<!-- Internet arrow right -->
+<path d="M222 90 Q272 108 272 128"
+      fill="none" stroke="#94a3b8" stroke-width="1"
+      marker-end="url(#arrow-dim)"/>
+
+<!-- Doctor app (P2P) -->
+<g class="c-teal">
+  <rect x="30" y="128" width="106" height="44" rx="8" stroke-width="1"/>
+  <text class="th" x="83" y="146" text-anchor="middle">Doctor app</text>
+  <text class="ts" x="83" y="162" text-anchor="middle">P2P · no internet</text>
+</g>
+
+<!-- Orbis HIS (intranet) -->
+<g class="c-teal">
+  <rect x="113" y="128" width="106" height="44" rx="8" stroke-width="1"/>
+  <text class="th" x="166" y="146" text-anchor="middle">Orbis HIS</text>
+  <text class="ts" x="166" y="162" text-anchor="middle">hospital intranet</text>
+</g>
+
+<!-- Orbis HIS → Flask: manual export note -->
+<path d="M219 150 Q252 150 268 150"
+      fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 3"
+      marker-end="url(#arrow-dim)"/>
+<text font-size="8" fill="#94a3b8" x="254" y="144" text-anchor="middle">manual</text>
+<text font-size="8" fill="#94a3b8" x="254" y="154" text-anchor="middle">export</text>
+
+<!-- Flask backend (cloud) -->
+<g class="c-blue">
+  <rect x="220" y="128" width="106" height="44" rx="8" stroke-width="1"/>
+  <text class="th" x="273" y="146" text-anchor="middle">Flask backend</text>
+  <text class="ts" x="273" y="162" text-anchor="middle">cloud · auth · sync</text>
+</g>
+
+<!-- Flask → gICS / gPAS -->
+<line x1="273" y1="172" x2="273" y2="208"
+      stroke="#94a3b8" stroke-width="1" marker-end="url(#arrow-dim)"/>
+
+<!-- gICS -->
+<g class="c-amber">
+  <rect x="220" y="208" width="50" height="42" rx="6" stroke-width="1"/>
+  <text class="th" x="245" y="226" text-anchor="middle">gICS</text>
+  <text class="ts" x="245" y="241" text-anchor="middle">consent</text>
+</g>
+<!-- gPAS -->
+<g class="c-amber">
+  <rect x="278" y="208" width="50" height="42" rx="6" stroke-width="1"/>
+  <text class="th" x="303" y="226" text-anchor="middle">gPAS</text>
+  <text class="ts" x="303" y="241" text-anchor="middle">pseudonym</text>
+</g>
+
+<!-- Cloud-hosted TTP label -->
+<text font-size="9.5" fill="#94a3b8" x="273" y="264" text-anchor="middle">cloud-hosted TTP tools</text>
+
+<!-- gICS/gPAS → MongoDB -->
+<line x1="273" y1="272" x2="273" y2="305"
+      stroke="#94a3b8" stroke-width="1" marker-end="url(#arrow-dim)"/>
+
+<!-- MongoDB Atlas -->
+<g class="c-green">
+  <rect x="200" y="305" width="146" height="52" rx="8" stroke-width="1"/>
+  <text class="th" x="273" y="326" text-anchor="middle">MongoDB Atlas</text>
+  <text class="ts" x="273" y="343" text-anchor="middle">cloud sync target</text>
+</g>
+
+<!-- ── Compliance warning ── -->
+<rect x="40" y="384" width="252" height="72" rx="8"
+      fill="#fff1f2" stroke="#fda4af" stroke-width="1"/>
+<text font-size="11" font-weight="600" x="54" y="403" fill="#be123c">⚠  PHI leaves hospital network</text>
+<text font-size="10" x="54" y="420" fill="#be123c">Art. 28 DSGVO processor agreement</text>
+<text font-size="10" x="54" y="435" fill="#be123c">required with cloud provider</text>
+<text font-size="10" x="54" y="449" fill="#be123c">Schrems II exposure (US company)</text>
+
+<!-- ── Strengths / Weaknesses A ── -->
+<rect x="40" y="472" width="252" height="156" rx="8"
+      fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text font-size="11" font-weight="600" x="54" y="491" fill="#0f172a">Strengths</text>
+<text font-size="10" x="54" y="508" fill="#475569">+ One backend serves all hospitals</text>
+<text font-size="10" x="54" y="524" fill="#475569">+ Cross-hospital patient access</text>
+<text font-size="10" x="54" y="540" fill="#475569">+ Fast dev iteration (no IT tickets)</text>
+<text font-size="10" x="54" y="556" fill="#475569">+ MongoDB schema flexibility</text>
+<text font-size="11" font-weight="600" x="54" y="576" fill="#0f172a">Weaknesses</text>
+<text font-size="10" x="54" y="593" fill="#475569">– DSB approval 12–18 months</text>
+<text font-size="10" x="54" y="609" fill="#475569">– PHI duplicated: Orbis + MongoDB</text>
+<text font-size="10" x="54" y="625" fill="#475569">– Schrems II legal exposure</text>
+
+
+<!-- ══════════════════════════════════════════
+     APPROACH B — RIGHT COLUMN
+     ══════════════════════════════════════════ -->
+
+<!-- Mobile app -->
+<g class="c-purple">
+  <rect x="438" y="38" width="152" height="52" rx="8" stroke-width="1"/>
+  <text class="th" x="514" y="60" text-anchor="middle">Mobile app</text>
+  <text class="ts" x="514" y="78" text-anchor="middle">SQLite · local-first</text>
+</g>
+
+<!-- Path labels -->
+<text class="path-label" x="408" y="116" text-anchor="middle">P2P</text>
+<text class="path-label" x="514" y="116" text-anchor="middle">VPN / WiFi</text>
+<text class="path-label" x="618" y="116" text-anchor="middle">—</text>
+
+<!-- P2P arrow -->
+<path d="M458 90 Q408 108 408 128"
+      fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="3 3"
+      marker-end="url(#arrow-dim)"/>
+<!-- VPN arrow -->
+<line x1="514" y1="90" x2="514" y2="128"
+      stroke="#94a3b8" stroke-width="1" marker-end="url(#arrow-dim)"/>
+<!-- No cloud path indicator -->
+<text x="608" y="110" text-anchor="middle" font-size="20" fill="#cbd5e1" opacity="0.7">✕</text>
+<text font-size="9" fill="#94a3b8" x="618" y="124" text-anchor="middle">no cloud path</text>
+
+<!-- Hospital network boundary -->
+<rect x="360" y="118" width="280" height="322" rx="12"
+      fill="none" stroke="#94a3b8" stroke-width="1" stroke-dasharray="6 4"/>
+
+<!-- Doctor app (P2P) -->
+<g class="c-teal">
+  <rect x="378" y="128" width="106" height="44" rx="8" stroke-width="1"/>
+  <text class="th" x="431" y="146" text-anchor="middle">Doctor app</text>
+  <text class="ts" x="431" y="162" text-anchor="middle">P2P · no internet</text>
+</g>
+
+<!-- Flask on-premise -->
+<g class="c-blue">
+  <rect x="461" y="128" width="106" height="44" rx="8" stroke-width="1"/>
+  <text class="th" x="514" y="146" text-anchor="middle">Flask backend</text>
+  <text class="ts" x="514" y="162" text-anchor="middle">on-premise · hospital VM</text>
+</g>
+
+<!-- Flask → gICS / gPAS -->
+<line x1="514" y1="172" x2="514" y2="208"
+      stroke="#94a3b8" stroke-width="1" marker-end="url(#arrow-dim)"/>
+
+<!-- gICS -->
+<g class="c-amber">
+  <rect x="461" y="208" width="50" height="42" rx="6" stroke-width="1"/>
+  <text class="th" x="486" y="226" text-anchor="middle">gICS</text>
+  <text class="ts" x="486" y="241" text-anchor="middle">hospital</text>
+</g>
+<!-- gPAS -->
+<g class="c-amber">
+  <rect x="519" y="208" width="50" height="42" rx="6" stroke-width="1"/>
+  <text class="th" x="544" y="226" text-anchor="middle">gPAS</text>
+  <text class="ts" x="544" y="241" text-anchor="middle">hospital</text>
+</g>
+
+<!-- Hospital-hosted TTP label -->
+<text font-size="9.5" fill="#94a3b8" x="514" y="264" text-anchor="middle">hospital-hosted TTP (MIRACUM)</text>
+
+<!-- TTP → Orbis FHIR API -->
+<line x1="514" y1="272" x2="514" y2="305"
+      stroke="#94a3b8" stroke-width="1" marker-end="url(#arrow-dim)"/>
+
+<!-- Orbis FHIR API -->
+<g class="c-coral">
+  <rect x="441" y="305" width="146" height="44" rx="8" stroke-width="1"/>
+  <text class="th" x="514" y="323" text-anchor="middle">Orbis FHIR API</text>
+  <text class="ts" x="514" y="339" text-anchor="middle">OFI · R4 endpoint</text>
+</g>
+
+<!-- Orbis FHIR API → Orbis DB -->
+<line x1="514" y1="349" x2="514" y2="370"
+      stroke="#94a3b8" stroke-width="1" marker-end="url(#arrow-dim)"/>
+
+<!-- Orbis DB -->
+<g class="c-green">
+  <rect x="441" y="370" width="146" height="52" rx="8" stroke-width="1"/>
+  <text class="th" x="514" y="391" text-anchor="middle">Orbis DB</text>
+  <text class="ts" x="514" y="408" text-anchor="middle">Oracle / MSSQL · replaces Atlas</text>
+</g>
+
+<!-- Hospital network boundary label -->
+<text font-size="9.5" fill="#475569" x="500" y="452" text-anchor="middle">all within hospital network boundary</text>
+
+<!-- ── Compliance OK ── -->
+<rect x="388" y="466" width="252" height="48" rx="8"
+      fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+<text font-size="11" font-weight="600" x="402" y="485" fill="#15803d">✓  PHI stays inside hospital network</text>
+<text font-size="10" x="402" y="502" fill="#15803d">DSGVO · KHZG compliant natively</text>
+
+<!-- ── Strengths / Weaknesses B ── -->
+<rect x="388" y="530" width="252" height="156" rx="8"
+      fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+<text font-size="11" font-weight="600" x="402" y="549" fill="#0f172a">Strengths</text>
+<text font-size="10" x="402" y="566" fill="#475569">+ Data sovereignty — no cloud exposure</text>
+<text font-size="10" x="402" y="582" fill="#475569">+ Writes appear in Orbis immediately</text>
+<text font-size="10" x="402" y="598" fill="#475569">+ TI gateway reachable (same LAN)</text>
+<text font-size="10" x="402" y="614" fill="#475569">+ Reuses hospital gICS/gPAS (MIRACUM)</text>
+<text font-size="11" font-weight="600" x="402" y="634" fill="#0f172a">Weaknesses</text>
+<text font-size="10" x="402" y="651" fill="#475569">– Per-site deployment per hospital</text>
+<text font-size="10" x="402" y="667" fill="#475569">– OFI write support varies by version</text>
+<text font-size="10" x="402" y="683" fill="#475569">– No cross-hospital patient lookup</text>
+
+
+<!-- ══════════════════════════════════════════
+     BOTTOM — RECOMMENDED PATH (3 stages)
+     ══════════════════════════════════════════ -->
+<rect x="40" y="708" width="600" height="128" rx="10"
+      fill="#eff6ff" stroke="#93c5fd" stroke-width="1"/>
+
+<!-- Stage pills -->
+<!-- Stage 1 -->
+<rect x="54" y="718" width="56" height="18" rx="9" fill="#1d4ed8"/>
+<text font-size="9" font-weight="600" fill="#ffffff" x="82" y="731" text-anchor="middle">Stage 1</text>
+<text font-size="10" font-weight="600" x="118" y="731" fill="#1e40af">Pilot</text>
+<text font-size="10" x="54" y="748" fill="#334155">Approach B — clean compliance, no MongoDB needed, native HIS integration.</text>
+
+<!-- Stage 2 -->
+<rect x="54" y="758" width="56" height="18" rx="9" fill="#0369a1"/>
+<text font-size="9" font-weight="600" fill="#ffffff" x="82" y="771" text-anchor="middle">Stage 2</text>
+<text font-size="10" font-weight="600" x="118" y="771" fill="#0369a1">Network</text>
+<text font-size="10" x="54" y="788" fill="#334155">Add pseudonym federation proxy between hospital instances (no cross-site PHI).</text>
+
+<!-- Stage 3 -->
+<rect x="54" y="798" width="56" height="18" rx="9" fill="#075985"/>
+<text font-size="9" font-weight="600" fill="#ffffff" x="82" y="811" text-anchor="middle">Stage 3</text>
+<text font-size="10" font-weight="600" x="118" y="811" fill="#075985">Research</text>
+<text font-size="10" x="54" y="828" fill="#334155">MongoDB or HAPI FHIR as research-only store, fed from Orbis via MIRACUM pipeline.</text>
+
+</svg>
+</div>
+
+</body>
+</html>

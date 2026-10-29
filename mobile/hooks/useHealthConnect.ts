@@ -38,9 +38,39 @@
  *   FIX 3 — Diagnostic logging after mapAllRecordsToObservations
  *   FIX 4 — Auto-sync after permission grant (shouldAutoSync ref + useEffect)
  *   FIX 5 — StepsCadence fallback for Samsung/Wear OS devices
+ *
+ * FIX 8 — Cross-source dataOrigin filtering (Samsung Health / Google Fit /
+ *         Health Sync all writing overlapping heart-rate data)
+ *
+ *   Root cause: Samsung Health, Google Fit, and Health Sync all independently
+ *   write heart-rate data into Health Connect for the same time windows.
+ *   These are NOT exact duplicates (different granularity/values), so the
+ *   deterministic-ID dedup in health-connect-mapper.ts never catches them —
+ *   each source's readings hash to a different id and all get synced.
+ *
+ *   Health Connect's own "Data sources and priority" Settings UI does NOT
+ *   help here — that priority only affects HC's internal aggregate queries,
+ *   not the raw readRecords() results this hook actually consumes.
+ *
+ *   Fix: readAllRecords() filters each record by metadata.dataOrigin against
+ *   `preferredOrigins`, keeping only records from the preferred source per
+ *   data type (default: Google Fit for all types, from
+ *   DEFAULT_PREFERRED_ORIGINS) plus any record with no origin tag (fail open
+ *   rather than silently dropping real data we can't classify). Records from
+ *   non-preferred sources are dropped silently — no debug/log surfacing.
+ *
+ *   preferredOrigins is a runtime-configurable override (see
+ *   preferredOrigins/setPreferredOrigin below), so a future settings screen
+ *   can let the user change the preferred source per data type if they
+ *   switch primary tracking app/watch.
+ *
+ * FIX 3 (health-connect.store.ts) — preferredOrigins is tied to the current
+ *   patient (useAuthStore's user._id) and persisted via AsyncStorage, not
+ *   component-local state. It survives app restarts and — because it's
+ *   keyed per user — stays isolated between patients on a shared device.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Platform } from 'react-native';
 
 import {
@@ -56,8 +86,9 @@ import type {
   HCRecordCounts,
   HCSyncResponse,
   UseHealthConnectReturn,
+  HCOriginPreferences,
 } from '@/types/health-connect.types';
-import { useHCStatusStore } from '@/store/health-connect.store';
+import { useHCStatusStore, getPreferredOriginsForUser } from '@/store/health-connect.store';
 import { useAuthStore } from '@/store/auth.store';
 import { getStoredUserData, getStoredToken } from '@/services/api/auth';
 
@@ -170,6 +201,11 @@ export function useHealthConnect(): UseHealthConnectReturn {
   const [error,    setError]    = useState<string | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
 
+  // TEMP DEBUG — surfaced inline on the screen (not a popup, which was
+  // getting clobbered by the screen's own success Alert). Remove once the
+  // empty-sync root cause is confirmed and fixed.
+  const [debugInfo, setDebugInfo] = useState<string | null>(null);
+
   // FIX 6: Skip the loading spinner entirely if we already know the device is
   // supported and permissions are granted. initSDK() still runs in the
   // background to verify — but it should not block the UI.
@@ -180,6 +216,36 @@ export function useHealthConnect(): UseHealthConnectReturn {
   const permissionAttemptCount = useRef(0);
   const silentRejectionCount   = useRef(0);
   const shouldAutoSync         = useRef(false);
+
+  // TEMP DEBUG — captures per-type read failures + a raw sample record so
+  // the on-screen debug alert in sync() can show them without needing adb.
+  // Remove once the empty-sync root cause is confirmed and fixed.
+  const lastReadErrors  = useRef<Record<string, string>>({});
+  const lastRawSamples  = useRef<Record<string, string>>({});
+
+  // FIX 8 / FIX 3 — preferred dataOrigin per data type, tied to the current
+  // patient (not device-wide). Sourced from health-connect.store.ts's
+  // preferredOriginsByUser, keyed by useAuthStore's user._id, and persisted
+  // via AsyncStorage there — so it survives app restarts AND stays isolated
+  // per patient on a shared device.
+  const userId = useAuthStore(s => s.user?._id ?? '');
+  const preferredOriginsByUser = useHCStatusStore(s => s.preferredOriginsByUser);
+  const setPreferredOriginInStore = useHCStatusStore(s => s.setPreferredOrigin);
+
+  const preferredOrigins: HCOriginPreferences = useMemo(
+    () => getPreferredOriginsForUser(userId),
+    // getPreferredOriginsForUser reads straight from the store's current
+    // snapshot; re-derive whenever the map or the active user changes.
+    [preferredOriginsByUser, userId],
+  );
+
+  const setPreferredOrigin = useCallback((dataType: string, origin: string) => {
+    if (!userId) {
+      console.warn('[HC] setPreferredOrigin called with no authenticated user — ignored.');
+      return;
+    }
+    setPreferredOriginInStore(userId, dataType, origin);
+  }, [userId, setPreferredOriginInStore]);
 
   // ── Init ─────────────────────────────────────────────────────────────────
 
@@ -386,6 +452,10 @@ export function useHealthConnect(): UseHealthConnectReturn {
     const timeRangeFilter = { operator: 'between', startTime, endTime };
     const results: Partial<Record<keyof typeof HC_DATA_TYPES, unknown[]>> = {};
 
+    // TEMP DEBUG — reset capture state at the start of every read pass
+    lastReadErrors.current = {};
+    lastRawSamples.current = {};
+
     console.log('[HC] readAllRecords window:', { startTime, endTime });
 
     for (const [dataTypeKey, config] of Object.entries(HC_DATA_TYPES) as [
@@ -396,6 +466,21 @@ export function useHealthConnect(): UseHealthConnectReturn {
         const { records } = await sdkReadRecords(config.hcRecord, { timeRangeFilter });
         console.log(`[HC] records read: { type: "${dataTypeKey}", hcRecord: "${config.hcRecord}", count: ${records.length} }`);
 
+        // TEMP DEBUG — stash the raw shape of the first record returned by
+        // the SDK for this type. This is what reveals field-name mismatches
+        // between what the native SDK actually returns and what the mapper
+        // (health-connect-mapper.ts) expects, e.g. record.count vs some
+        // other field name — the #1 cause of "records read but 0 mapped".
+        if (records.length > 0) {
+          try {
+            lastRawSamples.current[dataTypeKey] = JSON.stringify(records[0]).slice(0, 500);
+          } catch {
+            lastRawSamples.current[dataTypeKey] = '(unserializable record)';
+          }
+        } else {
+          lastRawSamples.current[dataTypeKey] = '(no records in window)';
+        }
+
         // FIX 5: StepsCadence fallback for Samsung/Wear OS
         let finalRecords = records;
         if (records.length === 0 && config.hcRecord === 'Steps') {
@@ -404,15 +489,45 @@ export function useHealthConnect(): UseHealthConnectReturn {
             if (cadenceRecords.length > 0) {
               console.log(`[HC] StepsCadence fallback: found ${cadenceRecords.length} records`);
               finalRecords = cadenceRecords;
+              // TEMP DEBUG — overwrite the sample with the fallback shape so
+              // it's visible that this branch was taken, and what shape the
+              // cadence record actually has (note: it will NOT have `.count`,
+              // which is a separate known bug in buildStepsObservation()).
+              try {
+                lastRawSamples.current[dataTypeKey] =
+                  '[StepsCadence fallback] ' + JSON.stringify(cadenceRecords[0]).slice(0, 460);
+              } catch {
+                lastRawSamples.current[dataTypeKey] = '[StepsCadence fallback] (unserializable record)';
+              }
             }
-          } catch {
+          } catch (fallbackErr) {
             // StepsCadence not available on this device — not an error
+            console.log('[HC] StepsCadence fallback unavailable:', fallbackErr);
           }
         }
 
-        results[dataTypeKey] = finalRecords;
+        // FIX 8: dataOrigin filtering — discard records from non-preferred
+        // sources so genuinely overlapping cross-app data (Samsung Health /
+        // Google Fit / Health Sync all writing the same time window) never
+        // reaches the mapper. Applied AFTER the StepsCadence fallback above,
+        // so it filters whichever record set ended up in finalRecords.
+        // Discarded records are dropped silently (no logging/debug capture).
+        const preferredOrigin = preferredOrigins[dataTypeKey as string];
+        const filteredRecords = preferredOrigin
+          ? finalRecords.filter(record => {
+              const origin = (record as { metadata?: { dataOrigin?: string } })
+                ?.metadata?.dataOrigin;
+              // Fail open: keep records with no origin tag rather than
+              // silently dropping real data we can't classify.
+              return !origin || origin === preferredOrigin;
+            })
+          : finalRecords;
+
+        results[dataTypeKey] = filteredRecords;
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         console.warn(`[HC] Failed to read ${config.hcRecord} records:`, e);
+        lastReadErrors.current[dataTypeKey] = msg; // TEMP DEBUG
         results[dataTypeKey] = [];
       }
     }
@@ -421,9 +536,10 @@ export function useHealthConnect(): UseHealthConnectReturn {
       Object.entries(results).map(([k, v]) => [k, (v as unknown[]).length]),
     );
     console.log('[HC] readAllRecords summary:', JSON.stringify(summary));
+    console.log('[HC] readAllRecords raw samples:', JSON.stringify(lastRawSamples.current));
 
     return results;
-  }, []);
+  }, [preferredOrigins]);
 
   // ── Sync ──────────────────────────────────────────────────────────────────
 
@@ -507,12 +623,57 @@ export function useHealthConnect(): UseHealthConnectReturn {
 
       const observations = mapAllRecordsToObservations(allRecords, patientId);
 
+      const rawCounts = Object.fromEntries(
+        Object.entries(allRecords).map(([k, v]) => [k, (v as unknown[]).length]),
+      );
       const totalRawRecords = Object.values(allRecords).reduce(
         (sum, arr) => sum + (arr as unknown[]).length, 0,
       );
       console.log(
         `[HC] mapper produced ${observations.length} observations from ${totalRawRecords} raw records`,
       );
+
+      // ── TEMP DEBUG — rendered inline on the screen, not a popup ─────────
+      // Remove this whole block once the empty-sync root cause is confirmed.
+      // (Alert.alert() was unreliable here because health-connect.tsx's
+      // handleSync() fires its own Alert.alert() immediately after sync()
+      // resolves, and two Alert.alert() calls back to back on Android
+      // silently replace one another.)
+      try {
+        const mapperBug = totalRawRecords > 0 && observations.length === 0;
+        const readErrorsStr = Object.keys(lastReadErrors.current).length > 0
+          ? JSON.stringify(lastReadErrors.current)
+          : '(none)';
+
+        const debugLines = [
+          `Window: last ${hoursBack}h`,
+          `  ${startTime}`,
+          `  → ${endTime}`,
+          ``,
+          `isSupported: ${isSupported}  isPermissionGranted: ${isPermissionGranted}`,
+          `Patient ID: ${patientId || '(EMPTY — see [HC:ID] logs)'}`,
+          ``,
+          `Raw record counts (post-origin-filter): ${JSON.stringify(rawCounts)}`,
+          `Per-type read errors: ${readErrorsStr}`,
+          ``,
+          `Sample heart_rate record:`,
+          `  ${lastRawSamples.current.heart_rate ?? '(no attempt logged)'}`,
+          `Sample steps record:`,
+          `  ${lastRawSamples.current.steps ?? '(no attempt logged)'}`,
+          ``,
+          `Mapped observations: ${observations.length}`,
+          mapperBug
+            ? `\n⚠️ MAPPER BUG: raw records existed but mapper produced 0 — compare the sample record shape above against health-connect-mapper.ts field names (record.count, sample.beatsPerMinute, sample.time, record.startTime).`
+            : '',
+        ].filter(Boolean).join('\n');
+
+        console.log('[HC:DEBUG]', debugLines);
+        setDebugInfo(debugLines);
+      } catch (debugErr) {
+        console.warn('[HC:DEBUG] failed to build debug info:', debugErr);
+        setDebugInfo(`Failed to build debug info: ${String(debugErr)}`);
+      }
+      // ── END TEMP DEBUG ───────────────────────────────────────────────────
 
       if (observations.length === 0) {
         if (totalRawRecords > 0) {
@@ -559,6 +720,8 @@ export function useHealthConnect(): UseHealthConnectReturn {
     }
   }, [isPermissionGranted, sync]);
 
+  const clearDebugInfo = useCallback(() => setDebugInfo(null), []);
+
   return {
     isSupported,
     isPermissionGranted,
@@ -569,9 +732,13 @@ export function useHealthConnect(): UseHealthConnectReturn {
     error,
     isSyncing,
     isLoading,
+    debugInfo,
+    clearDebugInfo,
     requestPermission,
     openSettings,
     sync,
     refreshStatus,
+    preferredOrigins,
+    setPreferredOrigin,
   };
 }

@@ -18,17 +18,77 @@
  *   • subject.reference: Patient/<patient_id>
  *   • effectiveDateTime: ISO-8601
  *   • valueQuantity: UCUM unit (http://unitsofmeasure.org)
- *   • extension: device-type (android_watch)
+ *   • extension: device-type (android_watch), source-app (see FIX 9 below)
  *   • source: "health_connect" (non-FHIR field, added for backend filtering)
+ *
+ * ── FIX 7 — Deterministic observation IDs (fixes duplicate re-sync bug) ─────
+ *
+ *   Previously `id` was `uuidv4()` — a fresh random value every time this
+ *   file built an Observation, even for the exact same underlying HC/Google
+ *   Fit reading across repeated syncs.
+ *
+ *   The backend (health_connect_routes.py) relies on the `id` field to make
+ *   sync idempotent:
+ *       UpdateOne(filter={"id": enriched["id"]},
+ *                 update={"$setOnInsert": enriched}, upsert=True)
+ *   This only skips a duplicate if the SAME reading produces the SAME id on
+ *   a later sync. A random id defeats that entirely — every tap of "Jetzt
+ *   synchronisieren" re-inserted the same readings as brand-new documents,
+ *   so counts doubled/tripled on every sync.
+ *
+ *   Fix: `id` is now derived deterministically from the fields that
+ *   uniquely identify one measurement — patient + LOINC code + effective
+ *   timestamp + value — via buildDeterministicObservationId(). The same
+ *   reading always hashes to the same id, so the backend upsert correctly
+ *   no-ops it as a duplicate. Two distinct readings would need to collide on
+ *   patient + code + timestamp + value simultaneously to produce the same
+ *   id, which does not happen in practice.
+ *
+ *   uuidv4()/react-native-get-random-values are no longer used by this file.
+ *
+ * ── FIX 9 — Source-app tracking (Google Fit / Samsung Health / Health Sync) ──
+ *
+ *   Health Connect aggregates readings from whichever apps are installed and
+ *   granted write access — useHealthConnect.ts's readAllRecords() already
+ *   reads each raw record's `metadata.dataOrigin` (a package id string, e.g.
+ *   "com.google.android.apps.fitness") to filter by the user's preferred
+ *   source (FIX 8). That same field was previously discarded once a record
+ *   passed the filter — the FHIR Observation this file built never recorded
+ *   *which* app the surviving reading actually came from.
+ *
+ *   Fix: buildBaseObservation() now accepts the record's dataOrigin and, when
+ *   present, stamps it onto the Observation in two places (matching what the
+ *   backend's utils/fhir_health_connect.py._extract_source_app() looks for,
+ *   checked in this order — confirmed directly against that file):
+ *     1. device.identifier[] — { system: SOURCE_APP_IDENTIFIER_SYSTEM, value }
+ *     2. extension[]         — { url: SOURCE_APP_EXTENSION_URL, valueString }
+ *   device.display is also switched from the generic "health_connect" string
+ *   to a human-friendly app name when the package is recognized (see
+ *   KNOWN_SOURCE_APPS in health-connect.types.ts), falling back to the raw
+ *   package id verbatim when it isn't — per product decision, unrecognized
+ *   sources are NOT collapsed into a generic "Other" label; the raw id is
+ *   preserved so it can be identified and added to KNOWN_SOURCE_APPS later.
+ *
+ *   Records with no dataOrigin (older HC SDK versions, or apps that don't tag
+ *   it) fall back to the original device.display: "health_connect" behavior —
+ *   this field is additive and optional, never required.
+ *
+ *   SOURCE_APP_IDENTIFIER_SYSTEM, SOURCE_APP_EXTENSION_URL, KNOWN_SOURCE_APPS,
+ *   and resolveSourceAppDisplay() now live in health-connect.types.ts next to
+ *   HC_KNOWN_ORIGINS (single source of truth) and are imported below, rather
+ *   than duplicated in this file.
  */
 
-import 'react-native-get-random-values'; // required before uuid on RN
-import { v4 as uuidv4 } from 'uuid';
 import type {
   HCDataTypeConfig,
   HCFHIRObservation,
   HCHeartRateRecord,
   HCStepsRecord,
+} from '@/types/health-connect.types';
+import {
+  SOURCE_APP_IDENTIFIER_SYSTEM,
+  SOURCE_APP_EXTENSION_URL,
+  resolveSourceAppDisplay,
 } from '@/types/health-connect.types';
 
 // ─── Type registry ────────────────────────────────────────────────────────────
@@ -78,21 +138,98 @@ export const HC_DATA_TYPES = {
 
 export type HCDataTypeKey = keyof typeof HC_DATA_TYPES;
 
+/** Extracts the raw dataOrigin package id off a Health Connect SDK record, if present. */
+function extractDataOrigin(record: unknown): string | undefined {
+  return (record as { metadata?: { dataOrigin?: string } })?.metadata?.dataOrigin;
+}
+
+// ─── Deterministic ID generation ──────────────────────────────────────────────
+//
+// See FIX 7 above. This replaces uuidv4() so the same underlying reading
+// always produces the same Observation.id across repeated syncs, which is
+// what makes the backend's upsert-based duplicate detection actually work.
+
+/**
+ * FNV-1a 32-bit hash, run twice with different seeds (once over the input,
+ * once over the reversed input) and concatenated into a 64-bit-ish hex
+ * digest. This is NOT cryptographic — it doesn't need to be. It only needs
+ * to be a) fully deterministic for the same input, and b) collision-resistant
+ * enough for a handful of observations per patient per sync, which a 64-bit
+ * digest comfortably provides.
+ */
+function hashToHex(input: string): string {
+  function fnv1a(str: string, seed: number): number {
+    let hash = seed;
+    for (let i = 0; i < str.length; i++) {
+      hash ^= str.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+    return hash >>> 0;
+  }
+
+  const forward = fnv1a(input, 0x811c9dc5);
+  const reversed = fnv1a(input.split('').reverse().join(''), 0x1000193);
+  return forward.toString(16).padStart(8, '0') + reversed.toString(16).padStart(8, '0');
+}
+
+/**
+ * Build a stable Observation id from the fields that uniquely identify one
+ * measurement. Re-mapping the exact same HC/Google Fit reading — even from
+ * a completely fresh readRecords() call in a later sync — yields the exact
+ * same id, so the backend's upsert-by-id treats it as an already-synced
+ * duplicate instead of inserting a new document.
+ */
+function buildDeterministicObservationId(
+  patientId: string,
+  loincCode: string,
+  effectiveDateTime: string,
+  value: number,
+): string {
+  const key = `hc|${patientId}|${loincCode}|${effectiveDateTime}|${value}`;
+  return `hc-${hashToHex(key)}`;
+}
+
 // ─── FHIR builder helpers ─────────────────────────────────────────────────────
 
 /**
  * Shared structure for all HC-sourced FHIR Observations.
  * Called by each per-type builder.
+ *
+ * @param sourceApp - Raw dataOrigin package id from the originating HC
+ *   record's metadata (see extractDataOrigin()), if available. Optional —
+ *   omit or pass undefined for records with no origin tag.
  */
 function buildBaseObservation(
   patientId: string,
   config: HCDataTypeConfig,
   effectiveDateTime: string,
   value: number,
+  sourceApp?: string,
 ): HCFHIRObservation {
+  const extensions: HCFHIRObservation['extension'] = [
+    {
+      url: 'https://morafek.app/fhir/StructureDefinition/device-type',
+      valueString: 'android_watch',
+    },
+  ];
+
+  const device: HCFHIRObservation['device'] = {
+    display: sourceApp ? resolveSourceAppDisplay(sourceApp) : 'health_connect',
+  };
+
+  if (sourceApp) {
+    device.identifier = [
+      { system: SOURCE_APP_IDENTIFIER_SYSTEM, value: sourceApp },
+    ];
+    extensions.push({
+      url: SOURCE_APP_EXTENSION_URL,
+      valueString: sourceApp,
+    });
+  }
+
   return {
     resourceType: 'Observation',
-    id: uuidv4(),
+    id: buildDeterministicObservationId(patientId, config.loincCode, effectiveDateTime, value),
     status: 'final',
     category: [
       {
@@ -126,15 +263,8 @@ function buildBaseObservation(
       code: config.unitCode,
     },
     source: 'health_connect',
-    device: {
-      display: 'health_connect',
-    },
-    extension: [
-      {
-        url: 'https://morafek.app/fhir/StructureDefinition/device-type',
-        valueString: 'android_watch',
-      },
-    ],
+    device,
+    extension: extensions,
   };
 }
 
@@ -147,6 +277,10 @@ function buildBaseObservation(
  * Each sample has its own timestamp, so we produce one Observation per
  * sample rather than one per record — this gives finer temporal resolution
  * and matches how Morafek's existing HR observations are stored.
+ *
+ * dataOrigin is a property of the parent record (Health Connect tags the
+ * whole record with the app that wrote it, not individual samples), so every
+ * sample built from this record carries the same sourceApp.
  */
 function buildHeartRateObservations(
   record: HCHeartRateRecord,
@@ -154,6 +288,7 @@ function buildHeartRateObservations(
 ): HCFHIRObservation[] {
   const config = HC_DATA_TYPES.heart_rate;
   const observations: HCFHIRObservation[] = [];
+  const sourceApp = extractDataOrigin(record);
 
   for (const sample of record.samples) {
     const bpm = sample.beatsPerMinute;
@@ -161,7 +296,7 @@ function buildHeartRateObservations(
     if (bpm < 20 || bpm > 300) continue;
 
     observations.push(
-      buildBaseObservation(patientId, config, sample.time, bpm),
+      buildBaseObservation(patientId, config, sample.time, bpm, sourceApp),
     );
   }
 
@@ -181,11 +316,14 @@ function buildStepsObservation(
   const config = HC_DATA_TYPES.steps;
   if (record.count <= 0) return null;
 
+  const sourceApp = extractDataOrigin(record);
+
   return buildBaseObservation(
     patientId,
     config,
     record.startTime,
     record.count,
+    sourceApp,
   );
 }
 

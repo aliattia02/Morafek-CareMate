@@ -19,6 +19,27 @@
  *   an error message. The error banner now shows this clearly so users can
  *   report it rather than assuming "no data".
  *
+ * FIX 4 — Preferred-source picker (cross-source duplicate/overlap fix)
+ *   Samsung Health, Google Fit, and Health Sync can all write overlapping
+ *   heart-rate/steps data into Health Connect for the same time windows.
+ *   useHealthConnect.ts now filters by metadata.dataOrigin before syncing —
+ *   this adds the UI for choosing/reviewing that preference per data type.
+ *   Tied to the logged-in patient (persisted in health-connect.store.ts), so
+ *   it's safe on a shared device.
+ *
+ * FIX 5 — Debug card collapsed by default + guaranteed-readable colors
+ *   Previously the debug card rendered fully expanded the instant debugInfo
+ *   was set (i.e. right after every sync), dumping a wall of monospace text
+ *   into the middle of the screen. It's now collapsed behind a tap-to-expand
+ *   header, closed by default, and stays closed across re-syncs unless the
+ *   tester opens it.
+ *   The debug text/background also no longer reads off the shared `colors`
+ *   theme object — `colors.text?.primary` was resolving to a dark color
+ *   against the dark card background, making it unreadable. The debug card
+ *   now uses explicit, hardcoded high-contrast colors (light text on a
+ *   near-black background) so it's readable regardless of what the active
+ *   theme's `colors.text.primary` happens to resolve to.
+ *
  * UNCHANGED: hooks-before-returns rule, isPermanentlyDenied settings button,
  *   delete confirmation flow, GDPR section.
  */
@@ -38,7 +59,7 @@ import {
 import { colors, spacing } from '@/constants/theme';
 import { useHealthConnect, DEFAULT_SYNC_HOURS_BACK } from '@/hooks/useHealthConnect';
 import { deleteHealthConnectData } from '@/services/api/health-connect';
-import { timeAgo, formatDate } from '@/types/health-connect.types';
+import { timeAgo, formatDate, HC_KNOWN_ORIGINS } from '@/types/health-connect.types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -46,12 +67,39 @@ const HC_GREEN = '#3ddc84';
 const HC_BLUE  = '#1a73e8';
 const DANGER   = '#ef4444';
 
+// FIX 5: hardcoded (not theme-derived) colors for the debug card only, so
+// it's guaranteed readable regardless of what colors.text.primary resolves
+// to under the active theme. This card is TEMP DEBUG scaffolding anyway —
+// it's meant to be removed once the empty-sync root cause work is done, so
+// it deliberately doesn't participate in theming.
+const DEBUG_BG     = '#11141c';
+const DEBUG_BORDER = '#2a2d3a';
+const DEBUG_TEXT   = '#e5e9f0';
+const DEBUG_HEADER = '#f8fafc';
+
 // ─── Time range options ───────────────────────────────────────────────────────
 
 const SYNC_WINDOWS = [
   { label: '24 Std.',  hours: 24  },
   { label: '7 Tage',  hours: 168 },
   { label: '30 Tage', hours: 720 },
+] as const;
+
+// ─── Origin (source-app) options ───────────────────────────────────────────────
+//
+// FIX 4: the three apps confirmed writing overlapping heart-rate/steps data
+// into Health Connect on this project. useHealthConnect.ts filters raw
+// records against whichever origin the user picks here per data type.
+
+const ORIGIN_OPTIONS = [
+  { label: 'Google Fit',     origin: HC_KNOWN_ORIGINS.GOOGLE_FIT },
+  { label: 'Samsung Health', origin: HC_KNOWN_ORIGINS.SAMSUNG_HEALTH },
+  { label: 'Health Sync',    origin: HC_KNOWN_ORIGINS.HEALTH_SYNC },
+] as const;
+
+const ORIGIN_DATA_TYPES = [
+  { key: 'heart_rate', icon: '❤️', label: 'Herzfrequenz' },
+  { key: 'steps',      icon: '👣', label: 'Schritte' },
 ] as const;
 
 // ─── Small shared components ──────────────────────────────────────────────────
@@ -126,9 +174,56 @@ function SyncWindowPicker({
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Main Screen
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Origin (source-app) picker ────────────────────────────────────────────────
+//
+// FIX 4: one row per data type, each with its own three-way picker, since
+// preferredOrigins/setPreferredOrigin from the hook are keyed per data type
+// (a future data type could reasonably prefer a different source).
+
+function OriginPicker({
+  dataTypeKey,
+  icon,
+  label,
+  selectedOrigin,
+  onSelect,
+  disabled,
+}: {
+  dataTypeKey: string;
+  icon: string;
+  label: string;
+  selectedOrigin: string | undefined;
+  onSelect: (dataTypeKey: string, origin: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <View style={styles.originRow}>
+      <View style={styles.originRowHeader}>
+        <Text style={styles.dataTypeIcon}>{icon}</Text>
+        <Text style={styles.dataTypeLabel}>{label}</Text>
+      </View>
+      <View style={styles.windowPicker}>
+        {ORIGIN_OPTIONS.map(opt => {
+          const active = selectedOrigin === opt.origin;
+          return (
+            <TouchableOpacity
+              key={opt.origin}
+              style={[styles.windowBtn, active && styles.windowBtnActive]}
+              onPress={() => onSelect(dataTypeKey, opt.origin)}
+              disabled={disabled}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.windowBtnText, active && styles.windowBtnTextActive]}>
+                {opt.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+
 
 export default function HealthConnectScreen() {
   const [isRefreshing,   setIsRefreshing]   = useState(false);
@@ -136,6 +231,13 @@ export default function HealthConnectScreen() {
 
   // FIX 1: Default to 7 days. User can change it via the picker.
   const [syncHours, setSyncHours] = useState<number>(DEFAULT_SYNC_HOURS_BACK);
+
+  // FIX 5: debug card is collapsed by default and stays collapsed across
+  // re-syncs unless the tester explicitly taps it open. This is independent
+  // of debugInfo itself (which still refreshes on every sync) — expanding it
+  // once doesn't force it open again after the next sync, and collapsing it
+  // doesn't clear the underlying debugInfo (use "Löschen" for that).
+  const [debugExpanded, setDebugExpanded] = useState(false);
 
   const {
     isSupported,
@@ -147,10 +249,14 @@ export default function HealthConnectScreen() {
     error,
     isSyncing,
     isLoading,
+    debugInfo,
+    clearDebugInfo,
     requestPermission,
     openSettings,
     sync,
     refreshStatus,
+    preferredOrigins,
+    setPreferredOrigin,
   } = useHealthConnect();
 
   // ── All hooks MUST be declared before any conditional return ─────────────
@@ -190,6 +296,13 @@ export default function HealthConnectScreen() {
       }
     }
   }, [sync, syncHours]);
+
+  // FIX 4: user picks a preferred source per data type; the hook re-derives
+  // preferredOrigins reactively (it's backed by the persisted, per-user
+  // health-connect.store.ts), so the next sync uses it immediately.
+  const handleSelectOrigin = useCallback((dataTypeKey: string, origin: string) => {
+    setPreferredOrigin(dataTypeKey, origin);
+  }, [setPreferredOrigin]);
 
   const handleDeleteData = useCallback(() => {
     Alert.alert(
@@ -428,6 +541,43 @@ export default function HealthConnectScreen() {
         </View>
       ) : null}
 
+      {/* TEMP DEBUG — inline sync diagnostics. Remove this card once the
+          empty-sync root cause is confirmed and fixed.
+          FIX 5: collapsed by default — tap the header to expand/collapse.
+          Uses hardcoded high-contrast colors (not the theme's colors.*)
+          so it's always readable regardless of active theme. */}
+      {debugInfo ? (
+        <>
+          <SectionLabel>DEBUG (TEMP)</SectionLabel>
+          <View style={styles.debugCard}>
+            <TouchableOpacity
+              style={styles.debugHeader}
+              onPress={() => setDebugExpanded(v => !v)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.debugHeaderText}>
+                {debugExpanded ? '▾' : '▸'}  Sync-Diagnose {debugExpanded ? 'ausblenden' : 'anzeigen'}
+              </Text>
+            </TouchableOpacity>
+
+            {debugExpanded ? (
+              <>
+                <Text selectable style={styles.debugText}>
+                  {debugInfo}
+                </Text>
+                <TouchableOpacity
+                  style={styles.debugClearBtn}
+                  onPress={clearDebugInfo}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.debugClearBtnText}>Löschen</Text>
+                </TouchableOpacity>
+              </>
+            ) : null}
+          </View>
+        </>
+      ) : null}
+
       <SectionLabel>ÜBERTRAGENE DATENTYPEN</SectionLabel>
       <View style={styles.card}>
         {[
@@ -448,6 +598,32 @@ export default function HealthConnectScreen() {
                 </Text>
               </View>
             </View>
+          </React.Fragment>
+        ))}
+      </View>
+
+      {/* FIX 4: preferred-source picker — cross-source duplicate/overlap fix.
+          Samsung Health, Google Fit, and Health Sync can all write
+          overlapping data for the same time window; this is the per-type
+          choice of which one Morafek should treat as canonical. */}
+      <SectionLabel>BEVORZUGTE QUELLE</SectionLabel>
+      <View style={styles.card}>
+        <Text style={styles.originExplainer}>
+          Mehrere Apps können dieselbe Messung an Health Connect senden. Wählen
+          Sie pro Datentyp, welche Quelle in Ihrer Akte verwendet werden soll —
+          Messungen anderer Quellen werden beim Synchronisieren ignoriert.
+        </Text>
+        {ORIGIN_DATA_TYPES.map((dt, i) => (
+          <React.Fragment key={dt.key}>
+            {i > 0 && <Divider />}
+            <OriginPicker
+              dataTypeKey={dt.key}
+              icon={dt.icon}
+              label={dt.label}
+              selectedOrigin={preferredOrigins[dt.key]}
+              onSelect={handleSelectOrigin}
+              disabled={isSyncing}
+            />
           </React.Fragment>
         ))}
       </View>
@@ -624,6 +800,23 @@ const styles = StyleSheet.create({
     color: DANGER,
   },
 
+  // FIX 4: Preferred-source picker styles
+  originExplainer: {
+    fontSize: 12,
+    color: colors.text?.secondary ?? '#94a3b8',
+    lineHeight: 17,
+    marginBottom: 14,
+  },
+  originRow: {
+    paddingVertical: 4,
+  },
+  originRowHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+
   // FIX 1: Time range picker styles
   windowPicker: {
     flexDirection: 'row',
@@ -650,6 +843,48 @@ const styles = StyleSheet.create({
   },
   windowBtnTextActive: {
     color: HC_GREEN,
+  },
+
+  // FIX 5: debug card — deliberately hardcoded colors, not theme-derived.
+  // colors.text?.primary was resolving to a dark color against the dark
+  // card background here, making the previous debugText unreadable.
+  debugCard: {
+    backgroundColor: DEBUG_BG,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: DEBUG_BORDER,
+    padding: spacing.md ?? 16,
+    marginBottom: 12,
+  },
+  debugHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  debugHeaderText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: DEBUG_HEADER,
+  },
+  debugText: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: Platform.OS === 'android' ? 'monospace' : 'Menlo',
+    color: DEBUG_TEXT,
+    marginTop: 10,
+  },
+  debugClearBtn: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: DEBUG_BORDER,
+  },
+  debugClearBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: DEBUG_TEXT,
   },
 
   syncBtn: {

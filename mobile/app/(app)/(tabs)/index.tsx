@@ -2,7 +2,18 @@
  * Patient Home Screen
  * Location: mobile/app/(app)/(tabs)/index.tsx
  *
- * Patients only — doctors are redirected to doctor-dashboard.
+ * Patients only — doctors/admins are redirected to doctor-dashboard (a
+ * tabs-group screen, so the tab bar stays visible). Researchers redirect
+ * to the Profile tab, NOT directly to research/sync — research/sync lives
+ * outside the tabs navigator (same as ehr/consent, settings/doctors), so
+ * router.replace()'ing straight into it would strand the researcher with
+ * no tab bar and no back history to escape it. Profile is the one screen
+ * every role always has, and its Research section links into sync from
+ * there as a real push (with a working back button).
+ *
+ * (This tab is also declared first in (tabs)/_layout.tsx, so it can still
+ * mount as the initial route even though href:null hides it from the tab
+ * bar for non-patients.)
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -52,10 +63,12 @@ export default function PatientHomeScreen() {
   const [usingCache, setUsingCache] = useState(false);
   const [pendingMedicationCount, setPendingMedicationCount] = useState(0);
 
-  // Redirect doctors immediately
+  // Redirect non-patients immediately
   useEffect(() => {
     if (user?.user_type === 'doctor' || user?.user_type === 'admin') {
       router.replace('/(app)/(tabs)/doctor-dashboard');
+    } else if (user?.user_type === 'researcher') {
+      router.replace('/(app)/(tabs)/profile');
     }
   }, [user?.user_type]);
 
@@ -64,7 +77,7 @@ export default function PatientHomeScreen() {
     initDB();
   }, []);
 
-  if (user?.user_type === 'doctor' || user?.user_type === 'admin') {
+  if (user?.user_type === 'doctor' || user?.user_type === 'admin' || user?.user_type === 'researcher') {
     return <View style={{ flex: 1, backgroundColor: E.colors.bg }} />;
   }
 

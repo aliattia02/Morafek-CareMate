@@ -25,7 +25,8 @@ import {
   ScrollView,
   TouchableOpacity,
   KeyboardAvoidingView,
-  Platform
+  Platform,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -49,11 +50,14 @@ import {
 import { colors, spacing, typography, borderRadius } from '@/constants/theme';
 
 // Types
-type UserType = 'patient' | 'doctor';
+type UserType = 'patient' | 'doctor' | 'researcher' | 'admin';
+
+// Placeholder — swap for the real Terms & Conditions URL once published.
+const TERMS_URL = 'https://example.com/morafek-terms-and-conditions';
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { register, isLoading } = useAuth();
+  const { register, login, isLoading } = useAuth();
 
   const [formData, setFormData] = useState({
     username: '',
@@ -68,6 +72,7 @@ export default function RegisterScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [showPassword, setShowPassword] = useState(false);
   const [registerError, setRegisterError] = useState('');
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const updateField = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -106,6 +111,11 @@ export default function RegisterScreen() {
     const dobResult = validateDateOfBirth(formData.dateOfBirth);
     if (!dobResult.isValid) newErrors.dateOfBirth = dobResult.errors[0] || '';
 
+    // Terms & conditions
+    if (!acceptedTerms) {
+      newErrors.terms = 'You must accept the Terms & Conditions to continue';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -124,6 +134,25 @@ export default function RegisterScreen() {
         dateOfBirth: formData.dateOfBirth,
         user_type: userType,
       });
+
+      if (userType === 'patient') {
+        // Sign the new patient straight in and send them to the research
+        // consent screen so they can review mobile-data / research consent
+        // right after registering, instead of a separate later visit.
+        try {
+          await login({
+            username: formData.username.trim(),
+            password: formData.password,
+            user_type: userType,
+          });
+          router.replace('/(app)/ehr/consent');
+          return;
+        } catch {
+          // Auto-login failed (e.g. cold-start hiccup) — fall through to
+          // the normal "go log in" path below rather than stranding the
+          // user on a broken screen.
+        }
+      }
 
       // Alert.alert doesn't work on Expo web — navigate directly
       router.replace('/(auth)/login');
@@ -151,38 +180,30 @@ export default function RegisterScreen() {
             <View style={styles.userTypeSection}>
               <Text style={styles.label}>I am a</Text>
               <View style={styles.userTypeButtons}>
-                <TouchableOpacity
-                  style={[
-                    styles.userTypeButton,
-                    userType === 'patient' && styles.userTypeButtonActive,
-                  ]}
-                  onPress={() => setUserType('patient')}
-                >
-                  <Text
+                {([
+                  { type: 'patient' as UserType, label: 'Patient' },
+                  { type: 'doctor' as UserType, label: 'Doctor' },
+                  { type: 'researcher' as UserType, label: 'Researcher' },
+                  { type: 'admin' as UserType, label: 'Admin' },
+                ]).map(({ type, label }) => (
+                  <TouchableOpacity
+                    key={type}
                     style={[
-                      styles.userTypeText,
-                      userType === 'patient' && styles.userTypeTextActive,
+                      styles.userTypeButton,
+                      userType === type && styles.userTypeButtonActive,
                     ]}
+                    onPress={() => setUserType(type)}
                   >
-                    Patient
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.userTypeButton,
-                    userType === 'doctor' && styles.userTypeButtonActive,
-                  ]}
-                  onPress={() => setUserType('doctor')}
-                >
-                  <Text
-                    style={[
-                      styles.userTypeText,
-                      userType === 'doctor' && styles.userTypeTextActive,
-                    ]}
-                  >
-                    Doctor
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.userTypeText,
+                        userType === type && styles.userTypeTextActive,
+                      ]}
+                    >
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
               </View>
             </View>
 
@@ -272,6 +293,32 @@ export default function RegisterScreen() {
               error={errors.confirmPassword}
               required
             />
+
+            {/* Terms & Conditions */}
+            <TouchableOpacity
+              style={styles.termsRow}
+              onPress={() => {
+                setAcceptedTerms((prev) => !prev);
+                setErrors((prev) => ({ ...prev, terms: '' }));
+              }}
+              activeOpacity={0.75}
+            >
+              <View style={[styles.checkbox, acceptedTerms && styles.checkboxChecked]}>
+                {acceptedTerms ? <Text style={styles.checkboxTick}>✓</Text> : null}
+              </View>
+              <Text style={styles.termsText}>
+                I agree to the{' '}
+                <Text
+                  style={styles.termsLink}
+                  onPress={() => Linking.openURL(TERMS_URL)}
+                >
+                  Terms &amp; Conditions
+                </Text>
+              </Text>
+            </TouchableOpacity>
+            {errors.terms ? (
+              <Text style={styles.termsError}>{errors.terms}</Text>
+            ) : null}
 
             {registerError ? (
               <View style={styles.errorBanner}>
@@ -365,6 +412,47 @@ const styles = StyleSheet.create({
   },
   registerButton: {
     marginTop: spacing.md,
+  },
+  termsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  checkboxChecked: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  checkboxTick: {
+    color: colors.text.inverse,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  termsText: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    flex: 1,
+  },
+  termsLink: {
+    color: colors.primary,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
+  },
+  termsError: {
+    ...typography.caption,
+    color: colors.danger,
+    marginTop: spacing.xs,
   },
   errorBanner: {
     backgroundColor: colors.danger + '15',

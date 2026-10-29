@@ -1,0 +1,592 @@
+Local first DB
+
+Morafek CareMate — Plan B Summary
+The Aim
+Move all patient health data (vitals, visits, documents, exercises, messages) off the Render backend and onto the patient's device. The backend becomes an auth-only service — it never sees health data. Patients share their records with doctors via AES-256-GCM encrypted FHIR bundles, where the decryption key exists only as a QR code shown in person. This satisfies DSGVO Art. 25 and Art. 32 with no server-side PHI exposure.
+
+Steps Discussed
+Architecture decision — chose Plan B (encrypted offline bundle) over Plan A (local WiFi P2P) and Plan C (cloud relay) because it builds directly on existing infrastructure (fhir_de.py, /api/patient/fhir-export) and requires no server involvement for the data transfer itself.
+10 Copilot implementation prompts covering:
+
+Extend db.ts with full EHR SQLite schema (visits, conditions, exercises, documents, messages, FHIR identifiers)
+Create fhirCrypto.ts — AES-256-GCM encrypt/decrypt using Web Crypto API
+Create fhirBundleExport.ts — read all SQLite tables, build offline FHIR R4 Bundle
+Create fhirBundleImport.ts — parse doctor's delta bundle, merge into SQLite
+Redirect ehr.ts service calls to SQLite-first with background network sync
+Create share-bundle.tsx — patient-facing QR + encrypted file share screen
+Create import-bundle.tsx — patient-facing QR scan + file pick + merge screen
+Wire navigation entries in layout and profile screen
+Strip EHR routes from backend/main.py, leaving only auth + avatar + FHIR metadata
+Install missing dependencies (react-native-qrcode-svg, expo-camera)
+
+Bug fixes found during testing on Expo Web — three specific issues in the existing code:
+
+db.ts web in-memory fallback silently dropped vitals writes and returned empty on reads
+vitals.tsx called apiClient.post directly, bypassing the new local-first submitVital()
+index.tsx only loaded cached data in the catch block, so the dashboard never showed locally-saved vitals
+
+
+
+can you help me design implmentation process for plan B 
+
+Here's the architecture I'd recommend: a local-first, patient-sovereign model where the FHIR data lives on the patient's device, and the doctor gets a time-limited connection during the visit. Three viable approaches, ordered by implementation ease.
+Patient deviceLocal FHIR R4 storeexpo-sqliteEncrypted at restPatient-owned keysFHIR R4 bundlesOffline-capableDoctor deviceTemporary accessSession-scopedRead + write EHRPatient-revocableFHIR REST APILANR verifiedA — QR code + local WiFiP2P · same network · no internetB — Encrypted FHIR bundleFully offline · file / QR / NFCC — Cloud relay (E2EE)Patient-consented · time-limitedMorafek backendEncrypted blobs · session-scopedAll paths · FHIR R4 · DSGVO Art. 17 · data never leaves patient control without consent
+
+HOW IT WORKS
+1Patient taps "Share with doctor" — app reads all local FHIR resources and serialises a Bundle JSON
+2App generates a random 32-byte AES-256-GCM key, encrypts the bundle, embeds the key in a QR code (or sends via NFC/AirDrop)
+3Doctor scans QR → their app decrypts the bundle in-memory → fills in visits, diagnoses, exercises locally
+4Doctor exports a signed "delta bundle" (only new/changed resources) → patient imports and merges into their local SQLite
+NEW FILES NEEDED
+mobile/utils/fhirCrypto.ts       ← AES-256-GCM encrypt/decrypt (expo-crypto) mobile/utils/fhirBundleExport.ts ← read SQLite → build FHIR Bundle mobile/utils/fhirBundleImport.ts ← parse delta bundle → write SQLite mobile/screens/ShareBundleScreen.tsx ← QR display + NFC mobile/screens/ImportBundleScreen.tsx ← QR scan + file picker
+KEY DEPENDENCY
+npx expo install expo-crypto expo-sharing # expo-crypto: AES-GCM is available via CryptoKey Web API on RN 0.73+ # Already have expo-sharing for FHIR export — reuse it
+DSGVO NOTE
+Server never sees plaintext. Key lives only in QR → patient controls who decrypts. Meets Art. 25 (privacy by design) and Art. 32 (encryption).
+start with Option B (encrypted bundle), then add A. Here's why this order makes sense for Morafek specifically.
+Option B builds directly on infrastructure you already have. Your fhir_de.py already generates FHIR R4 Bundles, and GET /api/patient/fhir-export already serialises patient data. The missing piece is just client-side AES-256-GCM encryption before export, and the symmetric import flow. The expo-crypto API on RN 0.81 / Expo SDK 54 gives you crypto.subtle Web Crypto, so no native module needed. The workflow on the patient side is: collect all FHIR resources from SQLite → build Bundle JSON (reuse your existing fhir-export logic, but offline from SQLite instead of from the server) → crypto.subtle.encrypt(AES-GCM, key, bundle) → share file + QR-encoded key.
+For the doctor's side, since they already use the Morafek app, you'd add an "import bundle from doctor" screen that: scans QR for the key → picks the encrypted file → decrypts → iterates the Bundle entries → for each new Observation/Encounter/Condition, inserts into the patient's SQLite via the existing db.ts helpers.
+The critical Datenschutz-relevant design decision is that the decryption key lives only in the QR code — not on the server, not in the bundle file. The patient can hand a doctor the encrypted file publicly (via email, WhatsApp, USB stick) and it's worthless without the QR. This cleanly satisfies Art. 25 (privacy by design), Art. 32 (technical measures), and gives you a strong data-minimisation story for a future DiGA application.
+
+but also i have issue that the backend is python and it is published on render for global acess , any way to make the implmentation on mobile to be fully local
+
+Show more
+Apr 14
+
+Architected offline-first FHIR implementation with encrypted bundle exchange
+Architected offline-first FHIR implementation with encrypted bundle exchange
+Here's the full picture of how to make the mobile app genuinely local-first — the Render backend stays alive only for auth and media, while all health data never leaves the device without patient consent.
+
+
+
+The key insight: your backend becomes an auth-only service. MongoDB keeps only the users collection. All health data lives in SQLite on the patient's device.
+
+Phase 1 — Extend db.ts with full EHR schema
+
+Your current db.ts only stores vitals and pending_vitals. You need to add tables for visits, conditions, exercises, documents metadata, messages, and FHIR identifiers — all the collections currently in MongoDB. The schema maps 1:1 to your existing Mongo documents, so the TypeScript types in ehr.ts don't change.
+
+ts
+// db.ts — add to initDB()
+CREATE TABLE IF NOT EXISTS visits (
+  id TEXT PRIMARY KEY,
+  visit_date TEXT, chief_complaint TEXT,
+  diagnosis_icd10 TEXT, diagnosis_text TEXT,
+  notes TEXT, doctor_id TEXT, encounter_fhir_id TEXT
+);
+CREATE TABLE IF NOT EXISTS conditions (
+  id TEXT PRIMARY KEY, patient_id TEXT,
+  icd10_code TEXT, icd10_text TEXT,
+  clinical_status TEXT, encounter_id TEXT, onset_date TEXT
+);
+CREATE TABLE IF NOT EXISTS exercises (
+  id TEXT PRIMARY KEY, doctor_id TEXT, title TEXT,
+  description TEXT, category TEXT, frequency TEXT,
+  duration_minutes INTEGER, repetitions INTEGER, sets INTEGER,
+  video_url TEXT, image_url TEXT, notes TEXT, done INTEGER DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS documents (
+  id TEXT PRIMARY KEY, category TEXT,
+  description TEXT, url TEXT, created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY, sender_id TEXT, receiver_id TEXT,
+  body TEXT, read INTEGER DEFAULT 0, created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS patient_fhir_identifiers (
+  patient_id TEXT PRIMARY KEY, gkv_kvid TEXT,
+  phone TEXT, street TEXT, postal_code TEXT, city TEXT
+);
+Phase 2 — Redirect ehr.ts service calls to SQLite first
+
+Instead of calling apiClient.get(API.EHR.VITALS), the service functions read from SQLite and only fall back to the network when online and data is stale. You add a thin sync layer that replicates local writes to the backend in the background — but the UI never blocks on it.
+
+ts
+// ehr.ts — getMyVitals rewritten
+export async function getMyVitals(limit = 50): Promise<VitalResponse[]> {
+  const local = getCachedVitals();          // always instant
+  syncVitalsInBackground();                 // fire-and-forget
+  return local;
+}
+Phase 3 — New utility files for Plan B
+
+fhirBundleExport.ts reads all SQLite tables and builds a FHIR R4 Bundle JSON — this is the offline equivalent of your existing GET /api/patient/fhir-export endpoint, but it never touches the network.
+
+fhirCrypto.ts uses crypto.subtle (available on RN 0.81 via the Hermes engine's Web Crypto implementation):
+
+ts
+export async function encryptBundle(bundleJson: string) {
+  const key = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']
+  );
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv }, key,
+    new TextEncoder().encode(bundleJson)
+  );
+  const exported = await crypto.subtle.exportKey('raw', key);
+  // QR contains: base64(key) + "." + base64(iv)  — ~70 chars, fits any QR
+  const qrPayload = btoa(String.fromCharCode(...new Uint8Array(exported)))
+    + '.' + btoa(String.fromCharCode(...iv));
+  return { cipherBytes: new Uint8Array(cipher), qrPayload };
+}
+fhirBundleImport.ts takes the decrypted delta bundle from the doctor and merges new Encounter, Condition, and CarePlan entries into SQLite, deduplicating by id.
+
+Phase 4 — What to strip from the backend
+
+All EHR route handlers in ehr_routes.py, patient_routes.py (except /api/patient/profile), and monitoring_routes.py become no-ops or can be deleted. The backend retains:
+
+auth_routes.py — login, register, forgot/reset password, delete account
+upload_routes.py — Cloudinary avatar upload (the only binary data worth a server)
+metadata_route.py — the FHIR CapabilityStatement (no auth, no DB)
+patient_routes.py → only /api/patient/profile (name, DOB, role — non-PHI)
+MongoDB keeps only the users collection. The ehr_*, messages, clinics, patient_fhir_identifiers, and monitoring_alerts collections can be dropped entirely.
+
+Phase 5 — DSGVO posture
+
+The QR code contains only the symmetric key — nothing else. The encrypted file is ciphertext with no metadata. A network observer, a compromised Cloudinary account, or a subpoena to Render yields nothing about any patient's health. The decryption key physically exists only on the patient's screen for the duration of the handoff. This satisfies Art. 25 (data minimisation, privacy by design) and Art. 32 (AES-256-GCM is explicitly recognised as an adequate technical measure).
+
+The migration order I'd suggest: extend db.ts first (no UI change), then redirect one service at a time starting with vitals (already partially cached), then implement the export/crypto utilities, and add the share screen last once the data layer is solid.
+
+
+Morafek-CareMate/ ├── .vercel/ │ ├── project.json │ └── README.txt ├── backend/ │ ├── models/ │ │ └── __init__.py │ ├── routes/ │ │ ├── __init__.py │ │ ├── auth_routes.py │ │ ├── clinic_routes.py │ │ ├── doctor_routes.py │ │ ├── ehr_routes.py │ │ ├──
+
+pasted
+
+give me step wise prompts to use with github copilot  to apply this update
+
+Apr 14
+
+Orchestrated sequential Copilot prompts for local-first architecture implementation
+Orchestrated sequential Copilot prompts for local-first architecture implementation
+Here are the prompts in order — each one builds on the last. Paste them one at a time into Copilot Chat with the relevant file open.
+
+Step 1 — Extend the SQLite schema
+
+Open mobile/services/offline/db.ts, then send:
+
+I'm adding full offline-first EHR storage to this file. 
+Keep all existing code (vitals, pending_vitals tables and their 
+helper functions). Add the following to initDB():
+
+- visits table: id TEXT PK, visit_date TEXT, chief_complaint TEXT, 
+  diagnosis_icd10 TEXT, diagnosis_text TEXT, notes TEXT, 
+  doctor_id TEXT, encounter_fhir_id TEXT
+- conditions table: id TEXT PK, icd10_code TEXT, icd10_text TEXT, 
+  clinical_status TEXT, encounter_id TEXT, onset_date TEXT
+- exercises table: id TEXT PK, doctor_id TEXT, title TEXT, 
+  description TEXT, category TEXT, frequency TEXT, 
+  duration_minutes INTEGER, repetitions INTEGER, sets INTEGER, 
+  video_url TEXT, image_url TEXT, notes TEXT, done INTEGER DEFAULT 0
+- documents table: id TEXT PK, category TEXT, description TEXT, 
+  url TEXT, created_at TEXT
+- messages table: id TEXT PK, sender_id TEXT, receiver_id TEXT, 
+  body TEXT, read INTEGER DEFAULT 0, created_at TEXT
+- patient_fhir_identifiers table: patient_id TEXT PK, gkv_kvid TEXT, 
+  phone TEXT, street TEXT, postal_code TEXT, city TEXT
+
+Then add typed CRUD helpers for each table following the exact same 
+pattern as the existing cacheVitals / getCachedVitals functions. 
+Use the types already defined in services/api/ehr.ts 
+(VisitResponse, ExerciseResponse, DocumentResponse, MessageResponse). 
+Web platform guard (Platform.OS !== 'web') on all write functions, 
+same as existing code.
+Step 2 — Create the FHIR crypto utility
+
+Create the file mobile/utils/fhirCrypto.ts, then send:
+
+Create a TypeScript module at mobile/utils/fhirCrypto.ts.
+
+It must use only the Web Crypto API (crypto.subtle) — no native 
+modules, no third-party libraries. Expo SDK 54 / RN 0.81 with 
+Hermes has crypto.subtle available globally.
+
+Export these four functions:
+
+1. encryptBundle(bundleJson: string): Promise<{ cipherBytes: Uint8Array, qrPayload: string }>
+   - Generate a random AES-256-GCM key
+   - Generate a random 12-byte IV
+   - Encrypt the UTF-8 encoded bundle
+   - Return cipherBytes (the raw ciphertext) and qrPayload which is 
+     base64(rawKey) + "." + base64(iv) — this is all that goes in the QR
+
+2. decryptBundle(cipherBytes: Uint8Array, qrPayload: string): Promise<string>
+   - Parse qrPayload by splitting on "."
+   - Import the raw key back with crypto.subtle.importKey
+   - Decrypt and return the UTF-8 decoded bundle JSON string
+
+3. bundleToFile(cipherBytes: Uint8Array, filename: string): Promise<string>
+   - Write cipherBytes to a temp file using expo-file-system 
+     (FileSystem.cacheDirectory + filename)
+   - Return the local file URI
+
+4. fileToBytes(fileUri: string): Promise<Uint8Array>
+   - Read the file as a base64 string via FileSystem.readAsStringAsync
+   - Decode base64 to Uint8Array and return it
+
+Add JSDoc on each function explaining its DSGVO relevance 
+(key never leaves QR, ciphertext is worthless without it).
+Step 3 — Create the FHIR bundle export utility
+
+Create mobile/utils/fhirBundleExport.ts, then send:
+
+Create mobile/utils/fhirBundleExport.ts.
+
+This module reads all local SQLite tables (using the helper 
+functions from mobile/services/offline/db.ts) and builds a 
+FHIR R4 Bundle JSON object entirely offline — no network calls.
+
+The output structure must mirror what the existing backend 
+GET /api/patient/fhir-export returns (look at fhir_de.py for 
+the resource shapes). Specifically:
+
+- resourceType: "Bundle", type: "collection"
+- One Patient entry built from the patient_fhir_identifiers table 
+  plus the user object passed as a parameter
+- One Observation entry per vital (LOINC codes: blood pressure 
+  55284-4, heart rate 8867-4, body weight 29463-7)
+- One Encounter entry per visit (use encounter_fhir_id if present, 
+  otherwise generate a UUID with crypto.randomUUID())
+- One Condition entry per condition row
+- One DocumentReference entry per document row
+- One CarePlan entry per exercise row
+
+Export one function:
+  buildLocalFhirBundle(user: { id: string, first_name: string, 
+    last_name: string, date_of_birth: string, user_type: string }
+  ): Promise<string>  — returns the JSON string of the Bundle
+
+Import the DB helpers from services/offline/db.ts.
+Use the same FHIR resource shapes as fhir_de.py (already in context).
+Step 4 — Create the FHIR bundle import utility
+
+Create mobile/utils/fhirBundleImport.ts, then send:
+
+Create mobile/utils/fhirBundleImport.ts.
+
+This module takes a FHIR R4 Bundle JSON string (received from a 
+doctor's delta export) and merges new resources into the local 
+SQLite database using the helpers from services/offline/db.ts.
+
+Export one function:
+  importDeltaBundle(bundleJson: string): Promise<ImportSummary>
+
+where ImportSummary is:
+  { encounters: number, conditions: number, exercises: number, 
+    messages: number, skipped: number }
+
+Rules:
+- Iterate bundle.entry[]
+- For each entry, check resourceType
+- Encounter → upsert into visits table (INSERT OR REPLACE)
+- Condition → upsert into conditions table
+- CarePlan → upsert into exercises table  
+- MessageThread entries (custom resourceType "MessageThread") 
+  → upsert into messages table
+- Any resourceType not in the above list → increment skipped
+- Return the ImportSummary counts
+
+Add a validateBundle(bundleJson: string): boolean helper that 
+checks the JSON has resourceType === "Bundle" and an entry array, 
+and export it too. Throw descriptive errors on malformed input.
+Step 5 — Redirect vitals and visits to SQLite
+
+Open mobile/services/api/ehr.ts, then send:
+
+Refactor this file to be local-first. The goal: service functions 
+read from SQLite immediately and sync to the backend in the background.
+
+Rules:
+- Keep all existing TypeScript interfaces (VitalResponse, 
+  VisitResponse, etc.) unchanged
+- Keep all existing function signatures unchanged so no screen 
+  component needs editing
+- For getMyVitals: return getCachedVitals() from db.ts immediately, 
+  then call the existing apiClient GET in the background and call 
+  cacheVitals() on success (fire and forget, swallow network errors)
+- For submitVital: write to SQLite first via the new cacheVitals 
+  insert, then attempt apiClient POST. If the POST fails, call 
+  queueVital() so it syncs later. Return the local record immediately
+- For getMyVisits: return getCachedVisits() immediately, background 
+  sync with GET /api/patient/visits and call cacheVisits() on success
+- For getMyDocuments, getDoctorPatientExercises, getMessages: 
+  same pattern — local first, background sync
+- Do NOT change submitVital's function signature
+- Add a syncPendingVitals() export that iterates getPendingVitals(), 
+  posts each to the API, and calls deletePendingVital() on success 
+  (this already exists partially — keep it compatible)
+
+Import the new db.ts helpers. Keep the doctor-proxied functions 
+(getPatientVitals, getPatientVisits, etc.) hitting the network 
+directly — doctors always read live data during a visit session.
+Step 6 — Create the Share Bundle screen
+
+Create mobile/app/(app)/ehr/share-bundle.tsx, then send:
+
+Create a new Expo Router screen at 
+mobile/app/(app)/ehr/share-bundle.tsx.
+
+This is the patient-facing "Share with doctor" screen. It must:
+
+1. On mount, call buildLocalFhirBundle() from 
+   mobile/utils/fhirBundleExport.ts passing the current user 
+   from the Zustand auth store (store/auth.store.ts)
+
+2. Call encryptBundle() from mobile/utils/fhirCrypto.ts on the 
+   result, then bundleToFile() to write the ciphertext to 
+   FileSystem.cacheDirectory + "morafek_share.bin"
+
+3. Show two action buttons:
+   a. "Share encrypted file" — calls expo-sharing shareAsync() 
+      on the .bin file
+   b. "Show QR key" — renders the qrPayload string as a QR code 
+      using the react-native-qrcode-svg library 
+      (import QRCode from 'react-native-qrcode-svg')
+
+4. Show a prominent info banner: "The file is encrypted. The QR 
+   code is the only key. Share the file freely — only show the QR 
+   to your doctor in person."
+
+5. Add a loading state while building/encrypting (show a spinner 
+   from components/ui/Loading.tsx)
+
+6. Use the existing theme from constants/theme.ts for all styles. 
+   Follow the UI patterns from mobile/app/(app)/ehr/visits.tsx 
+   for layout conventions (stack header, safe area, etc.)
+Step 7 — Create the Import Bundle screen
+
+Create mobile/app/(app)/ehr/import-bundle.tsx, then send:
+
+Create mobile/app/(app)/ehr/import-bundle.tsx.
+
+This is the patient-facing "Import from doctor" screen for 
+receiving the signed delta bundle after a visit.
+
+Flow:
+1. Two entry points shown as cards:
+   a. "Scan QR key" — opens expo-camera in QR scan mode, 
+      reads the qrPayload string
+   b. "Pick encrypted file" — opens expo-document-picker, 
+      accepts any file type (the .bin file)
+
+2. After both QR payload and file are collected 
+   (either order is fine — hold state for whichever arrives first):
+   - Call fileToBytes() then decryptBundle() from fhirCrypto.ts
+   - Call importDeltaBundle() from fhirBundleImport.ts
+   - Show an ImportSummary card: 
+     "Imported: X visits, Y exercises, Z conditions"
+
+3. Error states:
+   - Decryption failure → "Wrong QR code for this file"
+   - Invalid bundle → "File does not appear to be a Morafek bundle"
+
+4. A "Done" button navigates back to the patient home tab 
+   (router.replace('/(app)/(tabs)/'))
+
+Follow the same style conventions as share-bundle.tsx. 
+Use components/ui/Card.tsx and components/ui/Button.tsx.
+Step 8 — Add navigation entries
+
+Open mobile/app/(app)/ehr/_layout.tsx, then send:
+
+Add share-bundle and import-bundle to the existing Expo Router 
+stack in this layout file. Follow the exact same pattern used 
+for the existing screens in this stack (visits, documents, etc.). 
+Give them headerTitles of "Share with doctor" and 
+"Import from doctor" respectively.
+
+Then open mobile/app/(app)/(tabs)/profile.tsx and add two new 
+tappable rows in the existing list (after the FHIR export button 
+and before the authorized doctors row):
+- "Share with doctor" → router.push('/(app)/ehr/share-bundle')
+- "Import from doctor" → router.push('/(app)/ehr/import-bundle')
+
+Use the same ListItem / row style already used in that file.
+Step 9 — Strip backend EHR routes
+
+Open backend/main.py, then send:
+
+Remove the EHR, monitoring, clinic, and doctor route blueprints 
+from this file. Keep only:
+  - auth_routes
+  - patient_routes  (keep only /api/patient/profile — 
+    we will gut the rest next)
+  - upload_routes
+  - metadata_bp
+
+Also remove _ensure_mongo_indexes() calls for ehr_vitals, 
+ehr_visits, ehr_conditions — keep only the patient_fhir_identifiers 
+indexes since the FHIR metadata endpoint still references them.
+
+Add a comment block at the top of the blueprints section explaining: 
+"EHR data is now local-first on the patient device (Plan B). 
+This server handles auth, avatar upload, and FHIR metadata only. 
+MongoDB stores users collection only."
+
+Do not delete the import statements — comment them out so they 
+can be restored easily.
+Step 10 — Install missing dependencies
+
+Open any terminal in the mobile/ folder, then send this to Copilot (or run directly):
+
+What exact commands do I need to run in the mobile/ directory to 
+install these packages for Plan B:
+- react-native-qrcode-svg (for displaying QR codes)
+- expo-camera (for QR scanning — check if already in package.json first)
+- expo-barcode-scanner (fallback if expo-camera lacks QR in SDK 54)
+
+Check the existing package.json dependencies before suggesting 
+installs to avoid duplicates. Use npx expo install for all 
+Expo-managed packages, not npm install directly. Also check 
+if expo-file-system and expo-sharing are already installed 
+(they should be per the README).
+Sequence tip: Run Step 10 before Step 6 — the QR screen won't compile without react-native-qrcode-svg. Steps 1–5 are pure logic with no new dependencies and can be done in any order among themselves.
+
+
+profile.tsx
+tsx
+
+
+vitals.tsx
+376 lines
+
+tsx
+
+
+index.tsx
+485 lines
+
+tsx
+
+after doing this updates i am trying to save vitals , but i cannot access it and i donot know where it is saved as it isnot retrived on the patient dashboard 
+
+and how to check that the updates are done correctly 
+
+p.s iam currently using expo web for testing
+
+Apr 14
+
+Diagnosed web storage bugs and pinpointed caching implementation gaps
+Diagnosed web storage bugs and pinpointed caching implementation gaps
+Looking at the code, I can see three specific bugs causing this. Let me break them down before giving you the Copilot prompts to fix them.
+
+Root cause 1 — db.ts web fallback doesn't handle vitals
+
+The vitals array exists in the web fallback but runSync only routes pending_vitals inserts — vitals inserts are silently dropped. getCachedVitals() also returns [] unconditionally on web.
+
+Root cause 2 — vitals.tsx bypasses submitVital
+
+handleSubmit calls apiClient.post(API.EHR.VITALS, ...) directly instead of submitVital() from ehr.ts. After your Plan B refactor, submitVital is the one that writes to SQLite first — this screen skips it entirely.
+
+Root cause 3 — index.tsx only caches after a successful API call
+
+loadData only calls cacheVitals(vitals) if the network call succeeds. On web with the broken in-memory store, even if a vital was saved, it would never appear on the dashboard.
+
+Here are the three Copilot prompts to fix each one:
+
+Fix 1 — Repair the web in-memory fallback in db.ts
+
+Open mobile/services/offline/db.ts, then send:
+
+The web in-memory fallback object is broken — it only handles 
+pending_vitals inserts in runSync, and getCachedVitals returns [] 
+on web unconditionally.
+
+Fix the web fallback so it actually works as an in-memory store:
+
+1. In the web fallback db object, update runSync to handle vitals 
+   inserts too. A query containing "INTO vitals" should push an 
+   object with fields: id, systolic, diastolic, pulse, urgent, 
+   timestamp — mapped from params in that order.
+
+2. Update getAllSync so that when query contains "FROM vitals" 
+   (but not "pending") it returns the vitals array sorted by 
+   timestamp DESC, sliced to 50.
+
+3. In getCachedVitals(), remove the early return for web 
+   (Platform.OS === 'web'). Instead let it fall through to the 
+   db.getAllSync call — the web fallback now handles it correctly.
+
+4. In cacheVitals(), remove the early return for web. The runSync 
+   call will now route correctly through the web fallback.
+
+5. Add a runSync branch for "INSERT OR REPLACE INTO vitals" in 
+   the web fallback that uses INSERT OR REPLACE semantics — 
+   find existing entry by id (params[0]) and replace it, 
+   otherwise push new entry.
+
+Do not touch any mobile (Platform.OS !== 'web') code paths.
+Fix 2 — Make vitals.tsx use submitVital instead of apiClient directly
+
+Open mobile/app/(app)/log/vitals.tsx, then send:
+
+The handleSubmit function calls apiClient.post(API.EHR.VITALS, ...) 
+directly. After the Plan B refactor, this bypasses the local-first 
+logic in submitVital() from services/api/ehr.ts.
+
+Replace the direct apiClient.post call inside the try block of 
+handleSubmit with a call to submitVital() passing the same payload 
+object.
+
+submitVital is already imported at the top of this file — just use 
+it instead of apiClient.post. The response object shape is the same 
+(it returns a VitalResponse with an urgent field).
+
+Remove the now-unused apiClient import and API.EHR.VITALS 
+reference from this file if they are no longer needed after 
+this change. Keep all other logic (syncPendingVitals, 
+error handling, queueVital fallback) exactly as-is.
+Fix 3 — Make index.tsx load vitals from the local store on mount
+
+Open mobile/app/(app)/(tabs)/index.tsx, then send:
+
+The loadData function only shows data if the network call succeeds, 
+then caches it. On Expo web or when offline, getCachedVitals() 
+is called in the catch block — but by then the loading spinner 
+has shown an error state.
+
+Refactor loadData so it follows a local-first pattern:
+
+1. At the very start of loadData (before any network call), 
+   call getCachedVitals() and getCachedVisits() from db.ts. 
+   If they return data, immediately set vital and visit state 
+   and set loading to false — the user sees data instantly.
+
+2. Then attempt the network calls in the background 
+   (do not block the UI on them). If the network calls succeed, 
+   update vital and visit state with fresh data and call 
+   cacheVitals() to persist. If they fail, do nothing — 
+   cached data is already showing.
+
+3. Remove the separate catch block that sets usingCache — 
+   instead set usingCache to true whenever the initial data 
+   came from the local store and the subsequent network call 
+   either failed or hasn't returned yet.
+
+4. getCachedVisits does not exist yet in db.ts — add a 
+   placeholder call wrapped in a try/catch that returns [] 
+   if the function doesn't exist, so the screen doesn't crash. 
+   We'll implement getCachedVisits in a follow-up step.
+
+Keep the pull-to-refresh (onRefresh) behaviour unchanged — 
+it should still attempt a fresh network fetch.
+How to verify the fixes are working
+
+After applying all three, add this temporary debug button to index.tsx just above the action tiles grid. Paste this into Copilot:
+
+Add a temporary debug row below the Last Visit card and above 
+the tiles grid. It should show:
+
+- A "Debug: Save test vital" button that calls submitVital with 
+  hardcoded values { systolic: 120, diastolic: 80, pulse: 72 } 
+  and then calls loadData() to refresh the dashboard
+
+- A "Debug: Show cache" button that calls getCachedVitals() and 
+  shows the count in an Alert: 
+  Alert.alert('Cache', `${results.length} vitals in local store`)
+
+Style them as small gray secondary buttons. Add a comment 
+// REMOVE BEFORE PRODUCTION above the whole block.
+This will tell you immediately whether the write path and read path are both working independently — if "Save test vital" succeeds and "Show cache" returns count > 0 but the dashboard still doesn't show it, the issue is in loadData. If "Show cache" returns 0 after saving, the issue is in the db.ts write path.
+
+
+

@@ -12,3 +12,5 @@ export * from './ehr';
 export * from './medications';
 export * from './profile';
 export * from './health-connect';
+export * from './research';
+export * from './admin';

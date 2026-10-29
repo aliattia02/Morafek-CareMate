@@ -6,7 +6,7 @@
 /**
  * User role types in the system
  */
-export type UserType = 'patient' | 'doctor' | 'admin';
+export type UserType = 'patient' | 'doctor' | 'researcher' | 'admin';
 
 /**
  * Base user interface with common fields
